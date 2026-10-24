@@ -1,0 +1,8 @@
+# Rojo program
+rojo.exe
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+sourcemap.json
