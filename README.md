@@ -1,6 +1,6 @@
 # Steal a Game
 
-A Roblox game in the style of "Steal a ..." games, set in a long arcade hallway with multiple areas. Your goal is to steal arcade games without getting caught and earn money.
+A Roblox game in the style of "Steal a ..." games, set in a long arcade hallway with multiple areas. Steal arcade games without getting caught by the shopkeepers, get them home to your base, and earn money while they install. Use your treadmill to build speed and outrun the guards, and watch out, because other players can steal from you too.
 
 ## How it works
 
