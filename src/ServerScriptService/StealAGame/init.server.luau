@@ -58,6 +58,10 @@ local skipFunction = Kit.func("RequestSkip")
 local areaFunction = Kit.func("ClaimArea")
 local installedEvent = Kit.event("Installed")
 local rewardEvent = Kit.event("RewardPopup")
+local alertEvent = Kit.event("Alert")
+local slowEvent = Kit.event("SlowDown")
+local tutorialEvent = Kit.event("TutorialDone")
+local treadGainEvent = Kit.event("TreadGain")
 
 ------------------------------------------------------------------
 -- DATA FOR THE CLIENT (Index, trails, speed numbers)
@@ -84,7 +88,7 @@ do
 		for _, c in ipairs(t.Colors) do
 			table.insert(colors, c:ToHex())
 		end
-		table.insert(trails, {Name = t.Name, Price = t.Price, Colors = colors, Animated = t.Animated == true})
+		table.insert(trails, {Name = t.Name, Price = t.Price, Colors = colors, Animated = t.Animated == true, Speed = t.Speed or 1, Rarity = t.Rarity or "Common", Fx = t.Fx})
 	end
 	local tv = ReplicatedStorage:FindFirstChild("TrailData") or Instance.new("StringValue")
 	tv.Name = "TrailData"
@@ -140,6 +144,7 @@ local held = {}         -- player -> list of {Item, Data, Kind = "own"/"vault"/"
 local guards = {}       -- level -> shopkeeper
 local nextRotation = os.clock() + C.ROTATE_TIME -- when every level gets new games
 local playerData = {}   -- player -> {Upgrades, Trails, TrailEquipped}
+local friendCache = {}  -- "id1-id2" -> are they friends
 local loadedData = {}   -- player -> true when their save loaded OK
 local fullWarned = {}   -- player -> last "base full" warning time
 
@@ -179,6 +184,10 @@ local function updateSpeed(player)
 		stats.Speed.Value = math.floor(effective)
 	end
 	local speed = C.realSpeed(effective)
+	-- "Slow Down" switch: walk at the normal starting speed
+	if player:GetAttribute("SlowDown") then
+		speed = C.REAL_BASE_SPEED
+	end
 	if stolenCount(player) > 0 then
 		speed *= C.CARRY_MULTIPLIER
 	end
@@ -187,6 +196,17 @@ end
 
 local function rateText(rate)
 	return rate < 10 and string.format("%.1f", rate) or fmt(rate)
+end
+
+-- Games from deeper than you've reached yourself only earn part of their money.
+-- You "reach" a level by stealing from it in the vault (plus a couple of levels of grace).
+local function levelFactor(owner, rec)
+	local data = owner and playerData[owner]
+	local reach = math.min(C.NUM_LEVELS, (data and data.BestLevel or 1) + C.STEAL_LEVEL_GRACE)
+	if rec.L <= reach then
+		return 1
+	end
+	return math.clamp(C.LEVELS[reach].IncomeBase / C.LEVELS[rec.L].IncomeBase, 0.01, 1)
 end
 
 local function freeSlot(plot)
@@ -265,6 +285,9 @@ local function labelText(rec, mode)
 		return rec.Name
 	end
 	local head = string.format('<font color="#%s">%s</font>\n%s', rec.Color:ToHex(), rec.Rarity, rec.Name)
+	if mode == "case" and rec.Installed and (rec.Factor or 1) < 1 then
+		return head .. string.format('\n<font color="#5aff78">+$%s/s</font> <font color="#ffb43c">\u{1F512} %d%%</font>', fmt(rec.Income * rec.Factor), math.max(1, math.floor(rec.Factor * 100)))
+	end
 	if rec.Installed then
 		return head .. '\n<font color="#5aff78">+$' .. fmt(rec.Income) .. '/s</font>'
 	end
@@ -729,6 +752,12 @@ end
 local function finalizeStolen(player, entry)
 	if entry.Kind == "vault" then
 		entry.Spot.Carried = false
+		-- The deepest vault level you've stolen from decides how much stolen games can earn you
+		local data = playerData[player]
+		if data and entry.Spot.Level > (data.BestLevel or 1) then
+			data.BestLevel = entry.Spot.Level
+			player:SetAttribute("BestLevel", data.BestLevel)
+		end
 		notify(player, "You got " .. entry.Data.Name .. "! It's installing now.", GREEN)
 	elseif entry.Kind == "base" then
 		entry.FromSlot.Reserved = false
@@ -737,8 +766,15 @@ local function finalizeStolen(player, entry)
 		end
 		if entry.FromOwner and entry.FromOwner.Parent then
 			notify(entry.FromOwner, player.DisplayName .. " stole your " .. entry.Data.Name .. "!", RED)
+			alertEvent:FireClient(entry.FromOwner, "stolen", player.DisplayName, entry.Data.Name)
 		end
-		notify(player, "You stole " .. entry.Data.Name .. "!", GREEN)
+		local data = playerData[player]
+		local reach = (data and data.BestLevel or 1) + C.STEAL_LEVEL_GRACE
+		if entry.Data.L > reach then
+			notify(player, "You stole " .. entry.Data.Name .. "! It's from level " .. entry.Data.L .. ", so it only earns part of its money until you steal from level " .. (entry.Data.L - C.STEAL_LEVEL_GRACE) .. " yourself.", GOLD)
+		else
+			notify(player, "You stole " .. entry.Data.Name .. "!", GREEN)
+		end
 	end
 	entry.Kind = "own"
 end
@@ -806,13 +842,14 @@ local function onCase(player, plot, slot)
 	notify(player, "You grabbed " .. rec.Name .. "! Run back to your base!", GOLD)
 	if plot.Owner then
 		notify(plot.Owner, player.DisplayName .. " is stealing your " .. rec.Name .. "! Slap them!", RED)
+		alertEvent:FireClient(plot.Owner, "stealing", player.DisplayName, rec.Name)
 	end
 end
 
 local function onSell(player, plot, slot)
 	if plot.Owner ~= player or not slot.Data or plot.Slots[slot.Index] ~= slot then return end
 	local rec = slot.Data
-	local value = rec.Installed and rec.Income * C.SELL_MULTIPLIER or C.LEVELS[rec.L].IncomeBase * C.UNINSTALLED_SELL
+	local value = rec.Installed and rec.Income * (rec.Factor or 1) * C.SELL_MULTIPLIER or C.LEVELS[rec.L].IncomeBase * C.UNINSTALLED_SELL * math.min(1, (rec.Factor or 1) * 4)
 	local item = takeFromSlot(plot, slot)
 	item:Destroy()
 	player.leaderstats.Cash.Value += math.floor(value)
@@ -898,7 +935,7 @@ local function rebuildTreadmill(plot)
 	local owner = plot.Owner
 	local level = owner and (owner:GetAttribute("TreadLevel") or 0) or 0
 	local tier = treadTier(level)
-	Base.rebuildTreadmill(plot, level, tier, string.format("%s TREADMILL  Lv %d\n+%s speed/s", string.upper(tier.Name), level, rateText(C.treadRate(level))))
+	Base.rebuildTreadmill(plot, level, tier, string.format("%s TREADMILL  Lv %d\n+%s \u{1F45F}/s", string.upper(tier.Name), level, rateText(C.treadGain(level))))
 	if not owner then
 		plot.TreadUpgradePrompt.ActionText = "Upgrade Treadmill"
 	elseif level >= C.TREAD_MAX_LEVEL then
@@ -930,6 +967,7 @@ local function startTreadmill(plot, player)
 	if not root or not hum then return end
 	local height = hum.RigType == Enum.HumanoidRigType.R6 and 3 or (hum.HipHeight + root.Size.Y / 2)
 	plot.Runner = player
+	plot.TreadTime = 0
 	plot.RunPrompt.ActionText = "Stop Running"
 	root.Anchored = true
 	root.CFrame = plot.TreadCF * CFrame.new(0, Base.BELT_TOP + height, -10)
@@ -991,7 +1029,7 @@ for i, cf in ipairs(world.PlotCFrames) do
 		cash.Value -= cost
 		player:SetAttribute("TreadLevel", level + 1)
 		rebuildTreadmill(plot)
-		notify(player, "Treadmill upgraded! Now +" .. rateText(C.treadRate(level + 1)) .. " speed/s", BLUE)
+		notify(player, "Treadmill upgraded! Now +" .. rateText(C.treadGain(level + 1)) .. " speed every second", BLUE)
 	end)
 
 	plot.LockLeft = 0
@@ -1023,16 +1061,19 @@ end
 
 for level = 1, C.NUM_LEVELS do
 	task.spawn(function()
-		local post = Vector3.new(-42, 4, world.segStart(level) + C.SEG_LEN * 0.36)
-		local model, hum, root, head, look = Guards.create(C, Kit, level, world.GuardsFolder, post)
+		local post = Vector3.new(-42, 0, world.segStart(level) + C.SEG_LEN * 0.36)
+		local model, hum, root, head, look, actions = Guards.create(C, Kit, level, world.GuardsFolder, post)
+		local scale = model:GetAttribute("Scale") or 1
+		post = Vector3.new(post.X, model:GetAttribute("StandY") or 4, post.Z)
 		local g = {
-			Level = level, Model = model, Humanoid = hum, Root = root, Post = post, Title = look.Title,
+			Level = level, Model = model, Humanoid = hum, Root = root, Post = post, Title = look.Title, Actions = actions,
+			Scale = scale, StandY = post.Y, StepDist = 0, LastPos = root.Position,
 			Points = C.guardPoints(level), Target = nil, ChaseAt = 0, ChaseStart = 0, PauseUntil = 0,
 			CheckPos = root.Position, CheckTime = os.clock(),
 		}
 		g.RealSpeed = C.realSpeed(g.Points)
 		g.IdleText = guardLabelText(g)
-		g.Label = Kit.billboard(head or root, 300, 72, 3.2, g.IdleText, 120)
+		g.Label = Kit.billboard(head or root, 420, 96, head and head.Size.Y * 1.3 + 2 or 4, g.IdleText, 160)
 		guards[level] = g
 	end)
 end
@@ -1056,6 +1097,13 @@ local function setGuardTarget(g, player, now)
 		g.ChaseAt = now + C.GUARD_REACTION
 		g.ChaseStart = now
 		chaseEvent:FireClient(player, true, g.Title)
+		-- the giant points right at you before charging
+		local tr = getRoot(player)
+		if tr then
+			local p = g.Root.Position
+			g.Model:PivotTo(CFrame.lookAt(p, Vector3.new(tr.Position.X, p.Y, tr.Position.Z)))
+		end
+		g.Actions.Taunt()
 	end
 end
 
@@ -1071,11 +1119,12 @@ local function catchPlayer(g, player)
 		if away.Magnitude < 0.1 then
 			away = Vector3.new(0, 0, -1)
 		end
-		-- The shopkeeper lunges right up to you so the grab is obvious
-		local grabPos = Vector3.new(tr.Position.X, g.Root.Position.Y, tr.Position.Z) - away.Unit * 2.2
+		-- The shopkeeper lunges right up to you so the grab is obvious (then laughs)
+		local grabPos = Vector3.new(tr.Position.X, g.Root.Position.Y, tr.Position.Z) - away.Unit * (1.5 + g.Scale * 1.2)
 		g.Model:PivotTo(CFrame.lookAt(grabPos, Vector3.new(tr.Position.X, grabPos.Y, tr.Position.Z)))
 		knockEvent:FireClient(player, away.Unit * 50 + Vector3.new(0, 30, 0))
 	end
+	g.Actions.Laugh()
 	g.PauseUntil = os.clock() + 1.5
 end
 
@@ -1086,6 +1135,14 @@ end
 local function updateGuard(g, now)
 	local root, hum = g.Root, g.Humanoid
 	if not root.Parent then return end
+	-- a puff of dust with every giant stride
+	local pos = root.Position
+	g.StepDist += Vector3.new(pos.X - g.LastPos.X, 0, pos.Z - g.LastPos.Z).Magnitude
+	g.LastPos = pos
+	if g.StepDist >= 2.2 * g.Scale then
+		g.StepDist = 0
+		g.Actions.Stomp()
+	end
 	if now < g.PauseUntil then
 		hum:MoveTo(root.Position)
 		return
@@ -1139,9 +1196,10 @@ local function updateGuard(g, now)
 		-- Aim a little ahead of a moving player, and only catch when actually touching
 		local ahead = tp + tRoot.AssemblyLinearVelocity * 0.1
 		hum:MoveTo(insideHall(ahead))
-		local reach = 3.6 + g.RealSpeed * 0.008
+		local reach = 2.6 + g.Scale * 1.1 + g.RealSpeed * 0.008
 		local flat = Vector3.new(tp.X - root.Position.X, 0, tp.Z - root.Position.Z)
-		if flat.Magnitude <= reach and math.abs(tp.Y - root.Position.Y) < 6 then
+		-- compare feet, since a giant's middle is far above yours
+		if flat.Magnitude <= reach and math.abs((tp.Y - 3) - (root.Position.Y - g.StandY)) < 6 then
 			catchPlayer(g, t)
 		end
 	else
@@ -1179,7 +1237,12 @@ local function ownsTrail(player, idx)
 	return false
 end
 
-local animatedTrails = {}
+-- How each trail looks. Everything is built here so everyone sees it; the rainbow
+-- colour flow and the lightning bolts are animated on each player's own screen
+-- (StealAGameClient), which keeps the server from sending updates every frame.
+local TEX_SPARKLE = "rbxasset://textures/particles/sparkles_main.dds"
+local TEX_FIRE = "rbxasset://textures/particles/fire_main.dds"
+local TEX_SMOKE = "rbxasset://textures/particles/smoke_main.dds"
 
 local function applyTrail(player)
 	local char = player.Character
@@ -1190,52 +1253,134 @@ local function applyTrail(player)
 			child:Destroy()
 		end
 	end
-	animatedTrails[player] = nil
+	root:SetAttribute("TrailFx", nil)
+	root:SetAttribute("TrailColor", nil)
+	root:SetAttribute("TrailRainbow", nil)
 	local idx = player:GetAttribute("TrailEquipped") or 0
 	local t = C.TRAILS[idx]
 	if not t then return end
+	local rgb = Kit.rgb
+	local power = idx / #C.TRAILS -- 0 to 1: better trails get more of everything
+	local function kp(time, value)
+		return NumberSequenceKeypoint.new(time, value)
+	end
 
-	local a0 = Instance.new("Attachment")
-	a0.Name = "StealTrail"
-	a0.Position = Vector3.new(0, 0.9, 0)
-	a0.Parent = root
-	local a1 = Instance.new("Attachment")
-	a1.Name = "StealTrail"
-	a1.Position = Vector3.new(0, -0.9, 0)
-	a1.Parent = root
-	local trail = Instance.new("Trail")
-	trail.Name = "StealTrail"
-	trail.Attachment0 = a0
-	trail.Attachment1 = a1
+	local function attach(y)
+		local a = Instance.new("Attachment")
+		a.Name = "StealTrail"
+		a.Position = Vector3.new(0, y, 0)
+		a.Parent = root
+		return a
+	end
+	local top, bottom = attach(1.1), attach(-1.1)
 	local keys = {}
 	for i, c in ipairs(t.Colors) do
-		table.insert(keys, ColorSequenceKeypoint.new((i - 1) / math.max(1, #t.Colors - 1), c))
+		keys[i] = ColorSequenceKeypoint.new((i - 1) / math.max(1, #t.Colors - 1), c)
 	end
 	if #keys == 1 then
-		table.insert(keys, ColorSequenceKeypoint.new(1, t.Colors[1]))
+		keys[2] = ColorSequenceKeypoint.new(1, t.Colors[1])
 	end
-	trail.Color = ColorSequence.new(keys)
-	trail.Lifetime = t.Life
-	trail.WidthScale = NumberSequence.new(t.Width, 0.2)
-	trail.Transparency = NumberSequence.new(0.1, 1)
-	trail.LightEmission = t.Light or 0
-	trail.FaceCamera = true
-	trail.MinLength = 0.05
-	trail.Parent = root
-	if t.Particles then
+	local colors = ColorSequence.new(keys)
+	local function tagRainbow(obj)
+		if t.Animated then
+			CollectionService:AddTag(obj, "RainbowTrail")
+		end
+	end
+	local function trail(props)
+		local tr = Instance.new("Trail")
+		tr.Name = "StealTrail"
+		tr.Attachment0, tr.Attachment1 = top, bottom
+		tr.FaceCamera = true
+		tr.MinLength = 0.05
+		tr.Color = colors
+		for k, v in pairs(props) do
+			tr[k] = v
+		end
+		tr.Parent = root
+		tagRainbow(tr)
+		return tr
+	end
+	local function emitter(props)
 		local pe = Instance.new("ParticleEmitter")
 		pe.Name = "StealTrail"
-		pe.Color = ColorSequence.new(t.Particles)
 		pe.LightEmission = 1
-		pe.Size = NumberSequence.new(0.5, 0)
-		pe.Lifetime = NumberRange.new(0.5, 1)
-		pe.Rate = 18 + idx * 3
-		pe.Speed = NumberRange.new(1, 3)
 		pe.SpreadAngle = Vector2.new(180, 180)
+		for k, v in pairs(props) do
+			pe[k] = v
+		end
 		pe.Parent = root
+		return pe
+	end
+	local function light(color, range)
+		local l = Instance.new("PointLight")
+		l.Name = "StealTrail"
+		l.Color = color
+		l.Range = range or 12
+		l.Brightness = 1.5
+		l.Shadows = false
+		l.Parent = root
+	end
+
+	-- The ribbon, a soft wide glow around it, and a bright core on the better trails
+	trail({
+		Lifetime = t.Life, WidthScale = NumberSequence.new(t.Width, 0.15),
+		Transparency = NumberSequence.new({kp(0, 0.05), kp(0.6, 0.35), kp(1, 1)}),
+		LightEmission = t.Animated and 0.35 or (t.Light or 0),
+	})
+	trail({Lifetime = t.Life * 0.8, WidthScale = NumberSequence.new(t.Width * 1.9, 0.3), Transparency = NumberSequence.new(0.8, 1), LightEmission = 1})
+	if idx >= 4 then
+		trail({
+			Lifetime = t.Life * 0.55, WidthScale = NumberSequence.new(t.Width * 0.28, 0), Transparency = NumberSequence.new(0, 1), LightEmission = 1,
+			Color = t.Animated and colors or ColorSequence.new(Color3.new(1, 1, 1), t.Colors[1]),
+		})
+	end
+	-- Sparkles around you on every trail, more of them the better the trail
+	tagRainbow(emitter({
+		Texture = TEX_SPARKLE, Color = ColorSequence.new(t.Colors[1], t.Colors[#t.Colors]),
+		Size = NumberSequence.new({kp(0, 0), kp(0.3, 0.4 + power * 0.7), kp(1, 0)}), Transparency = NumberSequence.new(0.1, 1),
+		Lifetime = NumberRange.new(0.5, 1.1), Rate = 6 + power * 30, Speed = NumberRange.new(0.5, 2),
+		Acceleration = Vector3.new(0, 2, 0), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-120, 120),
+	}))
+	if t.Particles then
+		tagRainbow(emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(t.Particles), Size = NumberSequence.new(0.8, 0), Lifetime = NumberRange.new(0.5, 1), Rate = 12 + idx * 2, Speed = NumberRange.new(1, 3)}))
+	end
+
+	if t.Fx == "fire" then
+		-- real flames licking up off you, with smoke
+		emitter({
+			Texture = TEX_FIRE, Color = ColorSequence.new(rgb(255, 230, 120), rgb(255, 60, 10)), Size = NumberSequence.new(1.8, 0.2),
+			Transparency = NumberSequence.new(0.1, 1), Lifetime = NumberRange.new(0.35, 0.7), Rate = 45, Speed = NumberRange.new(2, 5),
+			Acceleration = Vector3.new(0, 9, 0), SpreadAngle = Vector2.new(25, 25), RotSpeed = NumberRange.new(-90, 90), EmissionDirection = Enum.NormalId.Top,
+		})
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(60, 30, 20)), Size = NumberSequence.new(1, 3), Transparency = NumberSequence.new(0.65, 1), Lifetime = NumberRange.new(0.8, 1.4), Rate = 8, Speed = NumberRange.new(1, 2), Acceleration = Vector3.new(0, 4, 0), LightEmission = 0})
+		light(t.Colors[2] or t.Colors[1])
+	elseif t.Fx == "stars" then
+		-- big twinkling stars plus little shooting stars streaking off you
+		tagRainbow(emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(Color3.new(1, 1, 1), t.Colors[1]), Size = NumberSequence.new({kp(0, 0), kp(0.5, 1.3), kp(1, 0)}), Lifetime = NumberRange.new(0.8, 1.4), Rate = 14, Speed = NumberRange.new(0.3, 1.5), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-60, 60)}))
+		emitter({Color = ColorSequence.new(Color3.new(1, 1, 1)), Size = NumberSequence.new(0.25, 0), Orientation = Enum.ParticleOrientation.VelocityParallel, Squash = NumberSequence.new(3), Lifetime = NumberRange.new(0.3, 0.5), Rate = 10, Speed = NumberRange.new(10, 16)})
+		light(t.Colors[1], 10)
+	elseif t.Fx == "lightning" then
+		-- crackling sparks here; the actual bolts are drawn by each player's game
+		root:SetAttribute("TrailFx", "lightning")
+		root:SetAttribute("TrailColor", (t.Colors[2] or t.Colors[1]):ToHex())
+		emitter({Color = ColorSequence.new(Color3.new(1, 1, 1), t.Colors[#t.Colors]), Size = NumberSequence.new(0.18, 0.05), Orientation = Enum.ParticleOrientation.VelocityParallel, Squash = NumberSequence.new(3), Lifetime = NumberRange.new(0.08, 0.18), Rate = 40, Speed = NumberRange.new(12, 22)})
+		light(t.Colors[2] or t.Colors[1], 14)
+	elseif t.Fx == "snow" then
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(Color3.new(1, 1, 1), rgb(170, 230, 255)), Size = NumberSequence.new(0.6, 0.2), Lifetime = NumberRange.new(1, 2), Rate = 24, Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, -3, 0), RotSpeed = NumberRange.new(-90, 90), LightEmission = 0.6})
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(200, 240, 255)), Size = NumberSequence.new(1.5, 3.5), Transparency = NumberSequence.new(0.75, 1), Lifetime = NumberRange.new(1, 1.6), Rate = 6, Speed = NumberRange.new(0.3, 1), LightEmission = 0.3})
+		light(rgb(170, 230, 255), 12)
+	elseif t.Fx == "void" then
+		-- dark swirling smoke with purple sparks pulled into it
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(120, 40, 220), rgb(10, 0, 20)), Size = NumberSequence.new(1.6, 3.5), Transparency = NumberSequence.new(0.45, 1), Lifetime = NumberRange.new(0.8, 1.3), Rate = 18, Speed = NumberRange.new(0.5, 1), LightEmission = 0, RotSpeed = NumberRange.new(-120, 120)})
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(220, 140, 255)), Size = NumberSequence.new(0.6, 0), Lifetime = NumberRange.new(0.5, 0.9), Rate = 16, Speed = NumberRange.new(-6, -3), Shape = Enum.ParticleEmitterShape.Sphere})
+		light(rgb(150, 60, 255), 12)
+	elseif t.Fx == "glow" then
+		-- aurora: soft drifting ribbons of light
+		emitter({Texture = TEX_SMOKE, Color = colors, Size = NumberSequence.new(2, 4), Transparency = NumberSequence.new(0.7, 1), Lifetime = NumberRange.new(1, 1.6), Rate = 10, Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, 3, 0), LightEmission = 1})
+		light(t.Colors[1], 14)
 	end
 	if t.Animated then
-		animatedTrails[player] = trail
+		root:SetAttribute("TrailRainbow", true)
 	end
 end
 
@@ -1311,10 +1456,6 @@ claimIndexFunction.OnServerInvoke = function(player, name)
 	player:SetAttribute("SpeedPoints", (player:GetAttribute("SpeedPoints") or C.START_SPEED) + speed)
 	updateSpeed(player)
 	pushIndex(player)
-	if not data.TutorialDone then
-		data.TutorialDone = true
-		player:SetAttribute("TutorialDone", true)
-	end
 	return true, string.format("Claimed %d game%s: +$%s and +%s speed!", n, n == 1 and "" or "s", fmt(cash), fmt(speed))
 end
 
@@ -1334,6 +1475,36 @@ local function giveGame(player, minLevel, maxLevel, r)
 		syncHeld(player)
 	end
 	return rec
+end
+
+------------------------------------------------------------------
+-- ADMIN TOOLS (server-only: lives in ServerStorage, players can't reach it)
+-- Use from the Studio command bar (Server side), e.g.:
+--   game.ServerStorage.AdminCommand:Invoke("completeIndex", game.Players.YourName)
+------------------------------------------------------------------
+do
+	local ServerStorage = game:GetService("ServerStorage")
+	local admin = ServerStorage:FindFirstChild("AdminCommand") or Instance.new("BindableFunction")
+	admin.Name = "AdminCommand"
+	admin.Parent = ServerStorage
+	admin.OnInvoke = function(command, player)
+		local data = player and playerData[player]
+		if not data then
+			return "player not found"
+		end
+		if command == "completeIndex" then
+			local n = 0
+			for name in pairs(C.GAME_LEVEL) do
+				if not data.Found[name] then
+					data.Found[name] = 1
+					n += 1
+				end
+			end
+			pushIndex(player)
+			return "added " .. n .. " games to the index"
+		end
+		return "unknown command"
+	end
 end
 
 ------------------------------------------------------------------
@@ -1406,11 +1577,13 @@ local function boostMult(player, stat)
 end
 
 local function moneyMult(player)
-	return (hasPass(player, "DoubleMoney") and 2 or 1) * boostMult(player, "Money")
+	local friends = 1 + C.FRIEND_CASH_BOOST * (player:GetAttribute("FriendsHere") or 0)
+	return (hasPass(player, "DoubleMoney") and 2 or 1) * boostMult(player, "Money") * friends
 end
 
 local function refreshMultipliers(player)
-	local mult = (hasPass(player, "DoubleSpeed") and 2 or 1) * boostMult(player, "Speed")
+	local trail = C.TRAILS[player:GetAttribute("TrailEquipped") or 0]
+	local mult = (hasPass(player, "DoubleSpeed") and 2 or 1) * boostMult(player, "Speed") * (trail and trail.Speed or 1)
 	if player:GetAttribute("SpeedMultiplier") ~= mult then
 		player:SetAttribute("SpeedMultiplier", mult)
 	end
@@ -1469,14 +1642,20 @@ local function grantProduct(player, key)
 			end
 		end
 		notify(player, "Treadmill upgraded!", GOLD)
-	elseif key == "CashS" then
-		local amount = math.max(5000, income * 600)
-		player.leaderstats.Cash.Value += amount
-		notify(player, "+$" .. fmt(amount) .. "!", GOLD)
-	elseif key == "CashL" then
-		local amount = math.max(50000, income * 3600)
-		player.leaderstats.Cash.Value += amount
-		notify(player, "+$" .. fmt(amount) .. "!", GOLD)
+	else
+		for _, p in ipairs(C.PRODUCTS) do
+			if p.Key == key and p.Minutes then
+				local amount = math.floor(math.max(p.Min or 0, income * 60 * p.Minutes))
+				player.leaderstats.Cash.Value += amount
+				notify(player, "+$" .. fmt(amount) .. "!", GOLD)
+			elseif p.Key == key and p.Percent then
+				local points = player:GetAttribute("SpeedPoints") or C.START_SPEED
+				local amount = math.floor(math.max(p.Min or 0, points * p.Percent / 100))
+				player:SetAttribute("SpeedPoints", points + amount)
+				updateSpeed(player)
+				notify(player, "+" .. fmt(amount) .. " speed!", GOLD)
+			end
+		end
 	end
 end
 
@@ -1522,12 +1701,111 @@ end
 -- REWARDS (shared by the Lucky Spin and playtime gifts)
 ------------------------------------------------------------------
 local function bestLevel(player)
-	local best = 1
-	for name in pairs(playerData[player].Found) do
-		best = math.max(best, C.GAME_LEVEL[name] or 1)
-	end
-	return best
+	return playerData[player].BestLevel or 1
 end
+
+-- "Slow Down" switch
+slowEvent.OnServerEvent:Connect(function(player, on)
+	player:SetAttribute("SlowDown", on == true)
+	updateSpeed(player)
+end)
+
+-- Friends in the same server boost each other's cash
+local function refreshFriends()
+	local list = Players:GetPlayers()
+	for _, p in ipairs(list) do
+		local n = 0
+		for _, q in ipairs(list) do
+			if q ~= p then
+				local key = math.min(p.UserId, q.UserId) .. "-" .. math.max(p.UserId, q.UserId)
+				if friendCache[key] == nil then
+					local ok, yes = pcall(function()
+						return p:IsFriendsWith(q.UserId)
+					end)
+					friendCache[key] = ok and yes or false
+				end
+				if friendCache[key] then
+					n += 1
+				end
+			end
+		end
+		p:SetAttribute("FriendsHere", n)
+	end
+end
+Players.PlayerAdded:Connect(function()
+	task.delay(2, refreshFriends)
+end)
+Players.PlayerRemoving:Connect(function(leaving)
+	-- forget cached friendships with the player who left
+	local id = tostring(leaving.UserId)
+	for key in pairs(friendCache) do
+		local a, b = string.match(key, "^(%d+)%-(%d+)$")
+		if a == id or b == id then
+			friendCache[key] = nil
+		end
+	end
+	task.defer(refreshFriends)
+end)
+
+-- INVITE PAD: every player sees one of their own friends standing on the pad.
+-- Roblox doesn't share "best friend" rankings, so this picks a friend who's in
+-- this server first, then one who's online, then the first on their friends list.
+local inviteAvatars = ReplicatedStorage:FindFirstChild("InviteAvatars") or Instance.new("Folder")
+inviteAvatars.Name = "InviteAvatars"
+inviteAvatars:ClearAllChildren()
+inviteAvatars.Parent = ReplicatedStorage
+local function buildInviteAvatar(player)
+	local ok, pages = pcall(Players.GetFriendsAsync, Players, player.UserId)
+	if not ok or not pages then return end
+	local best, bestScore
+	for _, f in ipairs(pages:GetCurrentPage()) do
+		local score = (Players:GetPlayerByUserId(f.Id) and 2 or 0) + (f.IsOnline and 1 or 0)
+		if not best or score > bestScore then
+			best, bestScore = f, score
+		end
+	end
+	if not best or not player.Parent then return end
+	local made, model = pcall(Players.CreateHumanoidModelFromUserId, Players, best.Id)
+	if not made or not model or not player.Parent then return end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+			d.CanQuery = false
+		elseif d:IsA("LuaSourceContainer") then
+			d:Destroy()
+		end
+	end
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
+	model:ScaleTo(C.INVITE_SCALE)
+	model.Name = tostring(player.UserId)
+	model:SetAttribute("FriendName", best.DisplayName)
+	model.Parent = inviteAvatars
+end
+Players.PlayerAdded:Connect(function(player)
+	task.spawn(buildInviteAvatar, player)
+end)
+for _, p in ipairs(Players:GetPlayers()) do
+	task.spawn(buildInviteAvatar, p)
+end
+Players.PlayerRemoving:Connect(function(player)
+	local m = inviteAvatars:FindFirstChild(tostring(player.UserId))
+	if m then
+		m:Destroy()
+	end
+end)
+
+-- The first-time tutorial tells us when the player has finished (or skipped) it
+tutorialEvent.OnServerEvent:Connect(function(player)
+	local data = playerData[player]
+	if data and not data.TutorialDone then
+		data.TutorialDone = true
+		player:SetAttribute("TutorialDone", true)
+	end
+end)
 
 -- Gives a reward and returns a short description of it
 local function grantReward(player, reward)
@@ -1811,6 +2089,7 @@ local function collectSave(player)
 			return list
 		end)(),
 		TutorialDone = data.TutorialDone,
+		BestLevel = data.BestLevel,
 		SavedAt = os.time(),
 	}
 end
@@ -1934,13 +2213,38 @@ local function giveSlap(player)
 	tool.Name = "Slap"
 	tool.CanBeDropped = false
 	tool.ToolTip = "Slap thieves to make them drop your game!"
+	-- A big cartoon hand: palm (the handle), four fingers and a thumb
+	local skin = Kit.rgb(255, 205, 160)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.6, 3, 0.6)
-	handle.Color = Kit.rgb(255, 200, 150)
+	handle.Size = Vector3.new(1.6, 0.5, 1.8)
+	handle.Color = skin
+	handle.Material = Enum.Material.SmoothPlastic
 	handle.CanCollide = false
 	handle.Massless = true
 	handle.Parent = tool
+	tool.GripPos = Vector3.new(0, 0, 0.6)
+	local function piece(name, size, offset)
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.Color = skin
+		p.Material = Enum.Material.SmoothPlastic
+		p.CanCollide = false
+		p.Massless = true
+		p.CFrame = handle.CFrame * offset
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = handle
+		weld.Part1 = p
+		weld.Parent = p
+		p.Parent = tool
+	end
+	for i, len in ipairs({1.1, 1.3, 1.25, 1.0}) do
+		piece("Finger", Vector3.new(0.34, 0.42, len), CFrame.new(-0.6 + (i - 1) * 0.4, 0, -0.9 - len / 2 + 0.1))
+	end
+	piece("Thumb", Vector3.new(0.38, 0.42, 0.9), CFrame.new(0.95, 0, -0.2) * CFrame.Angles(0, math.rad(-40), 0))
+	piece("Cuff", Vector3.new(1.8, 0.7, 0.5), CFrame.new(0, 0, 1.0))
+	tool:FindFirstChild("Cuff").Color = Kit.rgb(255, 80, 80)
 	local lastSlap = 0
 	tool.Activated:Connect(function()
 		if os.clock() - lastSlap < C.SLAP_COOLDOWN then return end
@@ -1971,6 +2275,8 @@ end
 -- PLAYERS
 ------------------------------------------------------------------
 local function onCharacter(player, char)
+	-- A new character means you died or fell: stolen games always go back first
+	dropStolen(player)
 	char:WaitForChild("HumanoidRootPart")
 	local hum = char:WaitForChild("Humanoid")
 	updateSpeed(player)
@@ -2048,6 +2354,17 @@ local function onPlayerAdded(player)
 			data.LastSpin = tonumber(saved.LastSpin)
 			data.ExtraSpins = tonumber(saved.ExtraSpins) or 0
 			data.TutorialDone = saved.TutorialDone == true
+			data.BestLevel = tonumber(saved.BestLevel)
+			if not data.BestLevel then
+				-- older saves: trust the deepest game they already own
+				data.BestLevel = 1
+				if type(saved.Games) == "table" then
+					for _, g in ipairs(saved.Games) do
+						data.BestLevel = math.max(data.BestLevel, tonumber(g.L) or 1)
+					end
+				end
+			end
+			player:SetAttribute("BestLevel", data.BestLevel)
 			if type(saved.AreaClaimed) == "table" then
 				for _, zi in ipairs(saved.AreaClaimed) do
 					data.AreaClaimed[tonumber(zi)] = true
@@ -2116,7 +2433,6 @@ Players.PlayerRemoving:Connect(function(player)
 	held[player] = nil
 	releasePlot(player)
 	playerData[player] = nil
-	animatedTrails[player] = nil
 	if data then
 		writeSave(player, data)
 	end
@@ -2169,28 +2485,45 @@ local function libraryEntry(rec, where)
 	return {
 		Id = rec.Id, SkipRobux = tier and tier.Steps * C.SKIP_ROBUX_PER_STEP or nil,
 		Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color:ToHex(), Level = rec.L, Where = where,
-		Income = rec.Installed and rec.Income or nil,
+		Income = rec.Installed and math.floor(rec.Income * (rec.Factor or 1)) or nil,
 		Progress = math.floor(rec.Progress), InstallTime = rec.InstallTime,
 	}
 end
 
 -- Every second: installs, income, podiums, the Downloads/Installed lists, restocks
+local lastDay = today()
 task.spawn(function()
 	while true do
 		task.wait(1)
 		local now = os.clock()
+		-- a new day: everyone's daily reward unlocks without rejoining
+		if today() ~= lastDay then
+			lastDay = today()
+			for p, d in pairs(playerData) do
+				if d.Loaded and p.Parent then
+					pushDaily(p)
+				end
+			end
+		end
 		for _, plot in ipairs(plots) do
 			local owner = plot.Owner
 			if owner then
 				local income = 0
 				local installing, installed, ranked = {}, {}, {}
 				local function tick(rec, item, where)
+					local factor = levelFactor(owner, rec)
+					if factor ~= (rec.Factor or 1) then
+						rec.Factor = factor
+						if item and rec.Installed then
+							setItemLabel(item, rec, where == "In your hands" and "held" or "case")
+						end
+					end
 					if not rec.Installed then
 						rec.Progress += C.ONLINE_INSTALL_RATE
 						if rec.Progress >= rec.InstallTime then
 							rec.Progress = rec.InstallTime
 							rec.Installed = true
-							installedEvent:FireClient(owner, {Name = rec.Name, Rarity = rec.Rarity, R = rec.R, Color = rec.Color:ToHex(), Income = rec.Income})
+							installedEvent:FireClient(owner, {Name = rec.Name, Rarity = rec.Rarity, R = rec.R, Color = rec.Color:ToHex(), Income = math.floor(rec.Income * (rec.Factor or 1))})
 							if item then
 								celebrate(item, rec, where ~= "In your hands")
 							end
@@ -2212,7 +2545,7 @@ task.spawn(function()
 						local was = rec.Installed
 						tick(rec, slot.Item, "Case " .. i)
 						if rec.Installed then
-							income += rec.Income
+							income += rec.Income * (rec.Factor or 1)
 							table.insert(ranked, rec)
 							if not was then
 								refreshSlotPrompts(plot, slot)
@@ -2231,11 +2564,11 @@ task.spawn(function()
 				plot.Bank += income
 				plot.PadLabel.Text = "$" .. fmt(plot.Bank) .. "\n+$" .. fmt(income) .. "/s"
 
-				table.sort(ranked, function(a, b) return a.Income > b.Income end)
+				table.sort(ranked, function(a, b) return a.Income * (a.Factor or 1) > b.Income * (b.Factor or 1) end)
 				local top = {}
 				for r = 1, math.min(3, #ranked) do
 					local rec = ranked[r]
-					top[r] = {Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color, IncomeText = "+$" .. fmt(rec.Income) .. "/s"}
+					top[r] = {Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color, IncomeText = "+$" .. fmt(rec.Income * (rec.Factor or 1)) .. "/s"}
 				end
 				Base.updatePodium(plot, top)
 
@@ -2258,10 +2591,16 @@ task.spawn(function()
 					plot.LockLeft -= 1
 				end
 				plot.LockLabel.Text = (paused and '<font color="#ffd23c">LOCKED (PAUSED)</font>\n' or "LOCKED\n") .. Kit.fmtTime(plot.LockLeft)
-				plot.Barrier.Transparency = 0.45
-			else
+			end
+			-- Lock walls: solid for everyone except the owner (the owner's game makes them passable)
+			local locked = plot.LockLeft > 0
+			if not locked then
 				plot.LockLabel.Text = "LOCK BASE"
-				plot.Barrier.Transparency = 1
+			end
+			for _, b in ipairs(Base.barriers(plot)) do
+				b.Transparency = locked and 0.45 or 1
+				b.CanCollide = locked
+				b:SetAttribute("OwnerId", plot.Owner and plot.Owner.UserId or 0)
 			end
 		end
 
@@ -2285,7 +2624,7 @@ task.spawn(function()
 	end
 end)
 
--- Every frame: treadmill belts and the Infinity trail. Every 0.1s: training, deliveries, locks.
+-- Every frame: treadmill belts. Every 0.1s: training, deliveries, locks.
 local checkTimer = 0
 RunService.Heartbeat:Connect(function(dt)
 	for _, plot in ipairs(plots) do
@@ -2300,16 +2639,6 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 	end
-	local hue = (os.clock() * 0.15) % 1
-	for _, trail in pairs(animatedTrails) do
-		if trail.Parent then
-			trail.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromHSV(hue, 0.6, 1)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromHSV((hue + 0.33) % 1, 0.7, 1)),
-				ColorSequenceKeypoint.new(1, Color3.fromHSV((hue + 0.66) % 1, 0.6, 1)),
-			})
-		end
-	end
 
 	checkTimer += dt
 	if checkTimer < 0.1 then return end
@@ -2322,9 +2651,16 @@ RunService.Heartbeat:Connect(function(dt)
 			if not runner.Parent or not getRoot(runner) then
 				stopTreadmill(plot)
 			else
-				local points = runner:GetAttribute("SpeedPoints") or C.START_SPEED
-				runner:SetAttribute("SpeedPoints", math.min(1e30, points + C.treadRate(runner:GetAttribute("TreadLevel") or 0) * step))
-				updateSpeed(runner)
+				-- exactly one fixed gain per full second on the belt, so the rate never wobbles
+				plot.TreadTime = (plot.TreadTime or 0) + step
+				while plot.TreadTime >= 1 do
+					plot.TreadTime -= 1
+					local gain = C.treadGain(runner:GetAttribute("TreadLevel") or 0)
+					local points = runner:GetAttribute("SpeedPoints") or C.START_SPEED
+					runner:SetAttribute("SpeedPoints", math.min(1e30, points + gain))
+					updateSpeed(runner)
+					treadGainEvent:FireClient(runner, gain)
+				end
 			end
 		end
 	end
@@ -2335,7 +2671,14 @@ RunService.Heartbeat:Connect(function(dt)
 		if #list > 0 and stolenCount(player) > 0 then
 			local root = getRoot(player)
 			local myPlot = playerPlots[player]
-			if root and myPlot and Base.insidePlot(myPlot, root.Position) then
+			-- Fell off the island with a stolen game: it goes back, no free steals
+			if root and root.Position.Y < C.FALL_RETURN_Y then
+				dropStolen(player)
+				notify(player, "You fell off! The game was returned.", RED)
+				if myPlot then
+					player.Character:PivotTo(myPlot.Spawn)
+				end
+			elseif root and myPlot and Base.insidePlot(myPlot, root.Position) then
 				local changed = false
 				for i = #list, 1, -1 do
 					local e = list[i]
@@ -2368,7 +2711,8 @@ RunService.Heartbeat:Connect(function(dt)
 			for _, player in ipairs(Players:GetPlayers()) do
 				if player ~= plot.Owner then
 					local root = getRoot(player)
-					if root and Base.insidePlot(plot, root.Position) then
+					-- Only for someone already deep inside when the lock went on (the walls stop everyone else)
+					if root and Base.insideCore(plot, root.Position) then
 						player.Character:PivotTo(plot.CF * CFrame.new(0, 4, -C.PLOT_D / 2 - 10))
 						notify(player, "That base is locked!", RED)
 					end

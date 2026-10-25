@@ -97,6 +97,29 @@ function UI.fmtTime(seconds)
 	return string.format("%d:%02d", m, s)
 end
 
+-- Is this frame actually on screen? (it and every parent visible, inside an enabled ScreenGui)
+function UI.shown(obj)
+	while obj do
+		if obj:IsA("LayerCollector") then
+			return obj.Enabled and obj.Parent ~= nil
+		end
+		if obj:IsA("GuiObject") and not obj.Visible then
+			return false
+		end
+		obj = obj.Parent
+	end
+	return false
+end
+
+-- A vertical list that scrolls (mouse wheel, drag or scroll bar)
+function UI.scroller(parent, pos, size)
+	return new("ScrollingFrame", {
+		Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 10,
+		ScrollBarImageColor3 = UI.WHITE, ScrollingDirection = Enum.ScrollingDirection.Y,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingEnabled = true, Active = true, Parent = parent,
+	})
+end
+
 -- A white shine that sweeps across a frame every few seconds
 function UI.shine(frame, period)
 	local clip = new("Frame", {Name = "ShineClip", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = frame.ZIndex + 2, Parent = frame})
@@ -105,7 +128,7 @@ function UI.shine(frame, period)
 	task.spawn(function()
 		while frame.Parent do
 			task.wait((period or 3) + math.random())
-			if frame.Parent and frame.Visible then
+			if UI.shown(frame) then
 				bar.Position = UDim2.fromScale(-0.4, 0.5)
 				TweenService:Create(bar, TweenInfo.new(0.7, Enum.EasingStyle.Quad), {Position = UDim2.fromScale(1.4, 0.5)}):Play()
 			end
@@ -119,7 +142,7 @@ function UI.sparkles(frame, rate)
 	task.spawn(function()
 		while frame.Parent do
 			task.wait(rate or 0.5)
-			if frame.Visible then
+			if UI.shown(frame) then
 				local size = math.random(10, 20)
 				local star = new("TextLabel", {
 					BackgroundTransparency = 1, Text = "\u{2726}", Font = UI.FONT, TextScaled = true,

@@ -121,10 +121,15 @@ C.SKIP_PRODUCTS = {
 }
 
 C.PRODUCTS = {
-	{Key = "Starter", Id = 0, Name = "Starter Pack", Desc = "$25K, +5,000 speed and an Epic game (once per player)", Price = 99, OneTime = true},
-	{Key = "Treadmill", Id = 0, Name = "Treadmill Upgrade", Desc = "+1 treadmill level instantly", Price = 49},
-	{Key = "CashS", Id = 0, Name = "Cash Bundle", Desc = "10 minutes of your base's income (at least $5K)", Price = 29},
-	{Key = "CashL", Id = 0, Name = "Mega Cash Bundle", Desc = "1 hour of your base's income (at least $50K)", Price = 149},
+	-- Section decides where it shows in the shop: "featured", "boost", "speed" or "cash"
+	{Key = "Starter", Section = "featured", Id = 0, Name = "Starter Pack", Desc = "$25K, +5,000 speed and an Epic game (once per player)", Price = 99, OneTime = true},
+	{Key = "Treadmill", Section = "boost", Id = 0, Name = "Treadmill Upgrade", Desc = "+1 treadmill level instantly", Price = 49},
+	{Key = "SpeedS", Section = "speed", Id = 0, Name = "Speed Boost", Desc = "+25% speed (at least +2,000)", Price = 19, Percent = 25, Min = 2000},
+	{Key = "SpeedM", Section = "speed", Id = 0, Name = "Speed Surge", Desc = "+100% speed (at least +10,000)", Price = 59, Percent = 100, Min = 10000},
+	{Key = "SpeedL", Section = "speed", Id = 0, Name = "Speed Storm", Desc = "+400% speed (at least +50,000)", Price = 199, Percent = 400, Min = 50000},
+	{Key = "CashS", Section = "cash", Id = 0, Name = "Cash Stack", Desc = "10 minutes of your base's income (at least $5K)", Price = 29, Minutes = 10, Min = 5000},
+	{Key = "CashL", Section = "cash", Id = 0, Name = "Cash Vault", Desc = "1 hour of your base's income (at least $50K)", Price = 99, Minutes = 60, Min = 50000},
+	{Key = "CashXL", Section = "cash", Id = 0, Name = "Cash Mountain", Desc = "6 hours of your base's income (at least $500K)", Price = 399, Minutes = 360, Min = 500000},
 }
 
 ------------------------------------------------------------------
@@ -206,6 +211,11 @@ end
 function C.treadCost(level)
 	return math.floor(C.TREAD_COST_BASE * C.TREAD_COST_GROWTH ^ level)
 end
+-- The exact amount the treadmill gives every second (rounded so the label and the pop-ups always match)
+function C.treadGain(level)
+	local r = C.treadRate(level)
+	return r < 10 and math.floor(r * 10 + 0.5) / 10 or math.floor(r)
+end
 
 -- Shopkeepers (speed points, same scale as players)
 C.GUARD_START_POINTS = 700
@@ -213,11 +223,32 @@ C.GUARD_POINT_GROWTH = 1.233    -- each level deeper is this much faster (level 
 C.GUARD_IDLE_REAL_SPEED = 20
 C.GUARD_REACTION = 0.6
 C.GUARD_GIVE_UP = 120
+C.GUARD_LATE_LEVEL = 25         -- past this level shopkeepers get an extra speed-up
+C.GUARD_LATE_GROWTH = 1.045
+-- Shopkeepers are giants: this many times a player's size (level 1 up to level 50). Max fits under the level signs.
+C.GUARD_SCALE_MIN = 4.2
+C.GUARD_SCALE_MAX = 5.6
+function C.guardScale(level)
+	return C.GUARD_SCALE_MIN + (C.GUARD_SCALE_MAX - C.GUARD_SCALE_MIN) * (level - 1) / math.max(1, C.NUM_LEVELS - 1)
+end
 function C.guardPoints(level)
-	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (level - 1)
+	local late = math.max(0, level - C.GUARD_LATE_LEVEL)
+	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (level - 1) * C.GUARD_LATE_GROWTH ^ late
+end
+
+-- The speed shown on each level's hanging sign: a little faster than its shopkeeper,
+-- rounded up to 2 significant digits so it reads cleanly (e.g. 1,234 -> 1,300)
+C.RECOMMENDED_MARGIN = 1.1
+function C.recommendedSpeed(level)
+	local v = C.guardPoints(level) * C.RECOMMENDED_MARGIN
+	local step = 10 ^ math.max(0, math.floor(math.log10(v)) - 1)
+	return math.ceil(v / step) * step
 end
 
 C.SLAP_COOLDOWN = 0.8
+C.STEAL_LEVEL_GRACE = 2         -- stolen games earn fully up to (deepest vault level you've stolen from + this)
+C.FALL_RETURN_Y = -40           -- falling below this height returns any stolen games
+C.FRIEND_CASH_BOOST = 0.1       -- +10% cash for every friend in the same server
 C.SLAP_RANGE = 8
 
 ------------------------------------------------------------------
@@ -315,26 +346,37 @@ C.WALL_H = 90
 C.ENTRANCE_W = 56
 C.ENTRANCE_H = 38
 C.HALL_START_Z = 20             -- the vault entrance
-C.BASE_RING_RADIUS = 280        -- distance from the entrance to the bases
+C.BASE_RING_RADIUS = 297        -- distance from the entrance to the bases
+C.BASE_YARD = 36                -- open front yard between the walkway loop and each base (the treadmill stands here)
+C.LOOP_R = C.BASE_RING_RADIUS - C.PLOT_D / 2 - 7 - C.BASE_YARD -- radius of the walkway loop
+C.TREAD_OFFSET_X = 20           -- treadmill sits in the front yard, this far to the right of the base's centre
 C.BASE_ARC = 150
 C.FENCE_R = 450                 -- leaves room for the biggest bases
 C.ISLAND_R = 640
 C.NUM_PLOTS = 8
+C.INVITE_SCALE = 1.5            -- size of the character on the Invite Friend pad
 
 ------------------------------------------------------------------
 -- TRAILS (cosmetic, sold at the Trail Shop by the vault entrance)
 ------------------------------------------------------------------
 C.TRAILS = {
-	{Name = "Dust",      Price = 500,           Colors = {rgb(220, 220, 220), rgb(130, 130, 130)}, Width = 1.0, Life = 0.4},
-	{Name = "Bubblegum", Price = 5000,          Colors = {rgb(255, 150, 210), rgb(255, 210, 235)}, Width = 1.2, Life = 0.5},
-	{Name = "Ocean",     Price = 25000,         Colors = {rgb(30, 120, 255), rgb(90, 230, 255)}, Width = 1.4, Life = 0.6, Light = 0.3},
-	{Name = "Sunset",    Price = 100000,        Colors = {rgb(255, 170, 60), rgb(255, 80, 120), rgb(150, 60, 220)}, Width = 1.6, Life = 0.7, Light = 0.5},
-	{Name = "Toxic",     Price = 500000,        Colors = {rgb(140, 255, 60), rgb(30, 160, 40)}, Width = 1.8, Life = 0.8, Light = 0.8, Particles = rgb(160, 255, 80)},
-	{Name = "Lava",      Price = 2500000,       Colors = {rgb(255, 240, 120), rgb(255, 120, 20), rgb(180, 20, 10)}, Width = 2.0, Life = 0.9, Light = 1, Particles = rgb(255, 140, 30)},
-	{Name = "Galaxy",    Price = 15000000,      Colors = {rgb(255, 120, 230), rgb(120, 60, 255), rgb(20, 20, 90)}, Width = 2.4, Life = 1.0, Light = 1, Particles = rgb(255, 255, 255)},
-	{Name = "Rainbow",   Price = 100000000,     Colors = {rgb(255, 60, 60), rgb(255, 200, 40), rgb(60, 230, 90), rgb(50, 150, 255), rgb(190, 80, 255)}, Width = 2.8, Life = 1.2, Light = 1, Particles = rgb(255, 255, 200)},
-	{Name = "Aurora",    Price = 1000000000,    Colors = {rgb(80, 255, 170), rgb(60, 200, 255), rgb(170, 90, 255)}, Width = 3.2, Life = 1.5, Light = 1, Particles = rgb(150, 255, 230)},
-	{Name = "Infinity",  Price = 25000000000,   Colors = {rgb(255, 255, 255), rgb(255, 215, 80), rgb(255, 255, 255)}, Width = 3.8, Life = 1.8, Light = 1, Particles = rgb(255, 230, 120), Animated = true},
+	-- Speed = multiplies your speed while equipped.  Fx = extra effects on higher trails.
+	{Name = "Dust",      Rarity = "Common",    Speed = 1.1,  Price = 500,       Colors = {rgb(220, 220, 220), rgb(130, 130, 130)}, Width = 1.0, Life = 0.4},
+	{Name = "Bubblegum", Rarity = "Common",    Speed = 1.2,  Price = 5000,      Colors = {rgb(255, 150, 210), rgb(255, 210, 235)}, Width = 1.2, Life = 0.5},
+	{Name = "Ocean",     Rarity = "Uncommon",  Speed = 1.3,  Price = 25000,     Colors = {rgb(30, 120, 255), rgb(90, 230, 255)}, Width = 1.4, Life = 0.6, Light = 0.3},
+	{Name = "Sunset",    Rarity = "Uncommon",  Speed = 1.4,  Price = 100000,    Colors = {rgb(255, 170, 60), rgb(255, 80, 120), rgb(150, 60, 220)}, Width = 1.6, Life = 0.7, Light = 0.5},
+	{Name = "Toxic",     Rarity = "Rare",      Speed = 1.5,  Price = 500000,    Colors = {rgb(140, 255, 60), rgb(30, 160, 40)}, Width = 1.8, Life = 0.8, Light = 0.8, Particles = rgb(160, 255, 80)},
+	{Name = "Lava",      Rarity = "Rare",      Speed = 1.65, Price = 2500000,   Colors = {rgb(255, 240, 120), rgb(255, 120, 20), rgb(180, 20, 10)}, Width = 2.0, Life = 0.9, Light = 1, Particles = rgb(255, 140, 30), Fx = "fire"},
+	{Name = "Galaxy",    Rarity = "Epic",      Speed = 1.8,  Price = 15000000,  Colors = {rgb(255, 120, 230), rgb(120, 60, 255), rgb(20, 20, 90)}, Width = 2.4, Life = 1.0, Light = 1, Particles = rgb(255, 255, 255), Fx = "stars"},
+	{Name = "Rainbow",   Rarity = "Epic",      Speed = 2.0,  Price = 100000000, Colors = {rgb(255, 60, 60), rgb(255, 200, 40), rgb(60, 230, 90), rgb(50, 150, 255), rgb(190, 80, 255)}, Width = 2.8, Life = 1.2, Light = 1, Particles = rgb(255, 255, 200), Fx = "stars"},
+	{Name = "Aurora",    Rarity = "Legendary", Speed = 2.25, Price = 1e9,       Colors = {rgb(80, 255, 170), rgb(60, 200, 255), rgb(170, 90, 255)}, Width = 3.2, Life = 1.5, Light = 1, Particles = rgb(150, 255, 230), Fx = "glow"},
+	{Name = "Lightning", Rarity = "Legendary", Speed = 2.5,  Price = 3e9,       Colors = {rgb(255, 250, 200), rgb(255, 200, 60), rgb(255, 140, 20)}, Width = 3.0, Life = 1.2, Light = 1, Particles = rgb(255, 230, 120), Fx = "lightning"},
+	{Name = "Plasma",    Rarity = "Mythic",    Speed = 2.75, Price = 8e9,       Colors = {rgb(120, 255, 255), rgb(40, 140, 255), rgb(150, 60, 255)}, Width = 3.4, Life = 1.3, Light = 1, Particles = rgb(140, 240, 255), Fx = "lightning"},
+	{Name = "Inferno",   Rarity = "Mythic",    Speed = 3.0,  Price = 2e10,      Colors = {rgb(255, 255, 150), rgb(255, 90, 20), rgb(120, 0, 0)}, Width = 3.6, Life = 1.4, Light = 1, Particles = rgb(255, 120, 30), Fx = "fire"},
+	{Name = "Frost",     Rarity = "Godly",     Speed = 3.25, Price = 5e10,      Colors = {rgb(255, 255, 255), rgb(170, 230, 255), rgb(80, 160, 255)}, Width = 3.6, Life = 1.5, Light = 1, Particles = rgb(220, 245, 255), Fx = "snow"},
+	{Name = "Void",      Rarity = "Godly",     Speed = 3.5,  Price = 1.25e11,   Colors = {rgb(170, 60, 255), rgb(60, 0, 120), rgb(10, 0, 20)}, Width = 3.8, Life = 1.6, Light = 0.6, Particles = rgb(200, 120, 255), Fx = "void"},
+	{Name = "Celestial", Rarity = "Celestial", Speed = 3.75, Price = 3e11,      Colors = {rgb(255, 200, 255), rgb(255, 240, 180), rgb(180, 220, 255)}, Width = 4.0, Life = 1.7, Light = 1, Particles = rgb(255, 240, 255), Fx = "stars"},
+	{Name = "Infinity",  Rarity = "Infinity",  Speed = 4.0,  Price = 1e12,      Colors = {rgb(255, 255, 255), rgb(255, 215, 80), rgb(255, 255, 255)}, Width = 4.2, Life = 1.8, Light = 1, Particles = rgb(255, 230, 120), Animated = true, Fx = "lightning"},
 }
 
 ------------------------------------------------------------------

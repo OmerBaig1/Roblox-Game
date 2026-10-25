@@ -64,6 +64,27 @@ function Base.insidePlot(plot, position)
 	return math.abs(lp.X) <= C.PLOT_W / 2 + 10 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < C.MAX_FLOORS * C.FLOOR_H + 10
 end
 
+-- Strictly inside the walls (not on the stairs or the treadmill outside)
+function Base.insideCore(plot, position)
+	local lp = plot.CF:PointToObjectSpace(position)
+	return math.abs(lp.X) < C.PLOT_W / 2 - 1 and lp.Z > FRONT + 1 and lp.Z < backZ(plot) - 1 and lp.Y > -5 and lp.Y < C.MAX_FLOORS * C.FLOOR_H + 10
+end
+
+-- Every lock wall of a base: the front, and the doorway at the top of each staircase
+function Base.barriers(plot)
+	local list = {plot.Barrier}
+	for f, m in pairs(plot.FloorModels) do
+		if f >= 2 and m.Parent then
+			for _, d in ipairs(m:GetChildren()) do
+				if d.Name == "DoorBarrier" then
+					table.insert(list, d)
+				end
+			end
+		end
+	end
+	return list
+end
+
 ------------------------------------------------------------------
 -- WALLS: panelled lower half, painted upper half, trim, pilasters, sconces
 ------------------------------------------------------------------
@@ -98,8 +119,8 @@ local function addPilaster(parent, plot, f, cf, inward, lamp)
 		local sconce = part(parent, {Name = "Sconce", Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = cf * CFrame.new(0, y0 + 9.5, inward * 1.6), Color = Color3.fromRGB(255, 240, 200), Material = M.Neon, CanCollide = false})
 		local glow = Instance.new("PointLight")
 		glow.Color = Color3.fromRGB(255, 235, 200)
-		glow.Range = 14
-		glow.Brightness = 0.9
+		glow.Range = 12
+		glow.Brightness = 0.45
 		glow.Shadows = false
 		glow.Parent = sconce
 	end
@@ -320,14 +341,20 @@ function Base.new(index, cf, parent)
 		Index = index, CF = cf, Model = model, Accent = accent, Owner = nil,
 		Slots = {}, Floors = 1, Cases = 0, FloorModels = {}, Bank = 0, LockedUntil = 0,
 		Runner = nil, SlatOffset = 0, Slats = {},
-		TreadCF = cf * CFrame.new(0, 0, -14),
+		-- the treadmill sits in the front yard, a little to the right of the entrance,
+		-- with its console facing out toward the lobby
+		TreadCF = cf * CFrame.new(C.TREAD_OFFSET_X, 0, FRONT - 4),
 		Spawn = cf * CFrame.new(0, 4, -6),
 		Podium = {},
 	}
 
 	plot.Barrier = part(model, {Name = "LaserBarrier", Size = Vector3.new(W, 14, 0.4), CFrame = at(0, 8, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
 	local signPart = part(model, {Name = "Sign", Size = Vector3.new(1, 1, 1), CFrame = at(0, 20, FRONT), Transparency = 1, CanCollide = false})
+	plot.SignPart = signPart
 	plot.SignLabel = Kit.billboard(signPart, 620, 110, 3, "Empty Base", 400)
+	-- the treadmill stands on its own platform in the front yard
+	local pad = part(model, {Name = "TreadPad", Size = Vector3.new(13, 1, 23), CFrame = plot.TreadCF * CFrame.new(0, 0.5, -10.5), Color = rgb(235, 235, 245), Material = M.Marble})
+	part(model, {Name = "TreadPadTrim", Size = Vector3.new(13.6, 0.5, 23.6), CFrame = plot.TreadCF * CFrame.new(0, 0.25, -10.5), Color = accent, Material = M.SmoothPlastic})
 
 	-- Potted bushes at the entrance
 	for _, sx in ipairs({-1, 1}) do
@@ -390,6 +417,11 @@ local function buildFloor(plot, f)
 			end
 		end
 	end
+	-- Lock wall across this floor's doorway (stairs stay walkable)
+	do
+		local s = stairSide(f)
+		part(model, {Name = "DoorBarrier", Size = Vector3.new(0.6, 14, GAP_Z2 - GAP_Z1), CFrame = at(s * (W / 2 - 0.5), y0 + 8, (GAP_Z1 + GAP_Z2) / 2), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
+	end
 	local floorSign = part(model, {Name = "FloorSign", Size = Vector3.new(12, 2.4, 0.3), CFrame = at(0, y0 + 18.2, BACK - 1.2), Color = rgb(25, 25, 32)})
 	Kit.surfaceText(floorSign, Enum.NormalId.Front, "FLOOR " .. f, accent, 30)
 
@@ -438,7 +470,7 @@ local function buildCase(plot, slotIndex, callbacks)
 	model.Parent = plot.FloorModels[f] or plot.Model
 
 	local ped = part(model, {Name = "Pedestal", Size = Vector3.new(5.5, 2, 5.5), CFrame = cf, Color = L.Pedestal, Material = M.Marble})
-	part(model, {Name = "CaseBase", Size = Vector3.new(5.9, 0.3, 5.9), CFrame = cf * CFrame.new(0, 1.15, 0), Color = accent, Material = M.Neon})
+	part(model, {Name = "CaseBase", Size = Vector3.new(5.9, 0.3, 5.9), CFrame = cf * CFrame.new(0, 1.15, 0), Color = accent:Lerp(Color3.new(0, 0, 0), 0.15), Material = M.SmoothPlastic})
 	part(model, {Name = "CaseGlass", Size = Vector3.new(5.3, 6.4, 5.3), CFrame = cf * CFrame.new(0, 4.5, 0), Color = rgb(220, 240, 255), Material = M.SmoothPlastic, Transparency = 0.9, Reflectance = 0.1, CanCollide = false})
 	for _, cx in ipairs({-2.7, 2.7}) do
 		for _, cz in ipairs({-2.7, 2.7}) do
@@ -447,8 +479,8 @@ local function buildCase(plot, slotIndex, callbacks)
 	end
 	local lid = part(model, {Name = "CaseLid", Size = Vector3.new(5.8, 0.3, 5.8), CFrame = cf * CFrame.new(0, 7.85, 0), Color = L.Trim, Material = M.Metal})
 	local light = Instance.new("PointLight")
-	light.Range = 7
-	light.Brightness = 1
+	light.Range = 6
+	light.Brightness = 0.35
 	light.Shadows = false
 	light.Parent = lid
 	local number = part(model, {Name = "CaseNumber", Size = Vector3.new(2.4, 1, 0.2), CFrame = cf * CFrame.new(-sx * 2.86, 0, 0) * CFrame.Angles(0, -sx * math.pi / 2, 0), Color = rgb(25, 25, 32)})
@@ -463,7 +495,8 @@ local function buildCase(plot, slotIndex, callbacks)
 
 	local slot = {
 		Index = slotIndex, Floor = f, Side = sx, Model = model, Pedestal = ped,
-		ItemCF = cf * CFrame.new(0, 3.8, 0) * CFrame.Angles(0, -sx * math.pi / 2, 0),
+		-- the cover faces into the aisle
+		ItemCF = cf * CFrame.new(0, 3.8, 0) * CFrame.Angles(0, sx * math.pi / 2, 0),
 		MainPrompt = mainPrompt, SellPrompt = sellPrompt,
 		Item = nil, Data = nil, Reserved = false,
 	}
@@ -512,6 +545,10 @@ function Base.setLayout(plot, floors, cases, callbacks)
 		end
 	end
 	plot.Floors, plot.Cases = floors, cases
+	-- keep the owner's name above the top floor so the railing never hides it
+	if plot.SignPart then
+		plot.SignPart.CFrame = plot.CF * CFrame.new(0, 20 + (floors - 1) * C.FLOOR_H + 2, FRONT)
+	end
 end
 
 ------------------------------------------------------------------
@@ -547,8 +584,8 @@ function Base.setPlaceholders(plot, nextKind, costText, onBuy)
 		local cf = plot.CF * lcf
 		local isNext = (i == plot.Cases + 1) and nextKind == "case"
 		local color = isNext and Kit.GOLD or rgb(130, 130, 150)
-		local pad = part(model, {Name = "CaseSpot", Size = Vector3.new(5.6, 0.2, 5.6), CFrame = cf * CFrame.new(0, -0.9, 0), Color = color, Material = M.Neon, Transparency = isNext and 0.2 or 0.65, CanCollide = false})
-		part(model, {Name = "CaseGhost", Size = Vector3.new(5.3, 7.5, 5.3), CFrame = cf * CFrame.new(0, 2.85, 0), Color = color, Material = M.ForceField, Transparency = isNext and 0.2 or 0.6, CanCollide = false, CanQuery = false})
+		local pad = part(model, {Name = "CaseSpot", Size = Vector3.new(5.6, 0.2, 5.6), CFrame = cf * CFrame.new(0, -0.9, 0), Color = color, Material = isNext and M.Neon or M.SmoothPlastic, Transparency = isNext and 0.45 or 0.7, CanCollide = false})
+		part(model, {Name = "CaseGhost", Size = Vector3.new(5.3, 7.5, 5.3), CFrame = cf * CFrame.new(0, 2.85, 0), Color = color, Material = M.ForceField, Transparency = isNext and 0.45 or 0.75, CanCollide = false, CanQuery = false})
 		local text = isNext
 			and string.format('<font color="#ffd23c">ADD CASE %d</font>\n%s', i, costText)
 			or ('<font color="#9696aa">LOCKED</font>\nCase ' .. i)
@@ -598,35 +635,95 @@ function Base.rebuildTreadmill(plot, level, tier, labelText)
 	model.Name = "Treadmill"
 	model.Parent = plot.Model
 	plot.TreadModel = model
+	local t = math.clamp(math.floor(level / C.TREAD_LEVELS_PER_TIER) + 1, 1, #C.TREAD_TIERS)
+	local glowMat = tier.AccentMat == M.Neon and M.Neon or M.SmoothPlastic
 
+	-- Belt frame, skirts and glowing edges
 	local wide = tier.Panels and 1 or 0
-	part(model, {Name = "Frame", Size = Vector3.new(7 + wide, 0.6, 13.5), CFrame = at(0, 1.3, -10), Color = tier.Frame, Material = tier.FrameMat})
+	part(model, {Name = "Frame", Size = Vector3.new(7.4 + wide, 0.7, 14.5), CFrame = at(0, 1.35, -10), Color = tier.Frame, Material = tier.FrameMat})
+	for _, sx in ipairs({-1, 1}) do
+		part(model, {Name = "Skirt", Size = Vector3.new(0.8, 1.1, 14.5), CFrame = at(sx * (3.9 + wide / 2), 1.55, -10), Color = tier.Frame:Lerp(Color3.new(0, 0, 0), 0.25), Material = tier.FrameMat})
+		part(model, {Name = "BeltEdge", Size = Vector3.new(0.25, 0.12, 13.6), CFrame = at(sx * 3.15, Base.BELT_TOP + 0.02, -10), Color = tier.Accent, Material = glowMat, CanCollide = false})
+	end
 	plot.Slats = {}
 	for i = 1, SLAT_COUNT do
-		local slatColor = (tier.AccentMat == M.Neon and i % 2 == 0) and tier.Accent:Lerp(Kit.DARK, 0.65) or rgb(22, 22, 25)
+		local slatColor = (i % 2 == 0) and tier.Accent:Lerp(Kit.DARK, 0.7) or rgb(22, 22, 28)
 		local slat = part(model, {Name = "Slat", Size = Vector3.new(6, 0.3, SLAT_GAP - 0.1), CFrame = at(0, Base.BELT_TOP - 0.15, -16 + (i - 1) * SLAT_GAP), Color = slatColor, Material = M.Fabric})
 		table.insert(plot.Slats, slat)
 	end
-	for _, sx in ipairs({-1, 1}) do
-		part(model, {Name = "Rail", Size = Vector3.new(0.4, 0.4, 10), CFrame = at(sx * 3.4, 4.4, -11), Color = tier.Accent, Material = tier.AccentMat})
-		part(model, {Name = "RailPost", Size = Vector3.new(0.4, 2.8, 0.4), CFrame = at(sx * 3.4, 3, -15.8), Color = tier.Frame, Material = tier.FrameMat})
-		if tier.Panels then
-			part(model, {Name = "SidePanel", Size = Vector3.new(0.5, 1, 13.5), CFrame = at(sx * 4.1, 1.6, -10), Color = tier.Accent, Material = tier.AccentMat})
-		end
+	-- Runes / code symbols on the deck for better tiers
+	if t >= 3 then
+		local deck = part(model, {Name = "Deck", Size = Vector3.new(6, 0.05, 12.4), CFrame = at(0, Base.BELT_TOP + 0.05, -10), Transparency = 1, CanCollide = false})
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = Enum.NormalId.Top
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		sg.PixelsPerStud = 20
+		sg.LightInfluence = 0
+		sg.Parent = deck
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.Arcade
+		label.TextScaled = true
+		label.TextColor3 = tier.Accent
+		label.TextTransparency = 0.35
+		label.Text = (t % 2 == 1) and "1 0 1 1\n0 1 1 0\n1 1 0 1\n0 1 0 1" or "\u{2726} \u{25C7} \u{2726}\n\u{25C7} \u{2726} \u{25C7}\n\u{2726} \u{25C7} \u{2726}"
+		label.Parent = sg
 	end
-	local console = part(model, {Name = "Console", Size = Vector3.new(6, 3.5, 1), CFrame = at(0, 2.75, -17.5), Color = tier.Frame, Material = tier.FrameMat})
-	part(model, {Name = "Screen", Size = Vector3.new(4, 1.4, 0.2), CFrame = at(0, 3.3, -17.05), Color = tier.Accent:Lerp(rgb(80, 170, 255), 0.4), Material = M.Neon})
+
+	-- Console
+	local console = part(model, {Name = "Console", Size = Vector3.new(6, 3.5, 1), CFrame = at(0, 2.85, -17.6), Color = tier.Frame, Material = tier.FrameMat})
+	part(model, {Name = "Screen", Size = Vector3.new(4, 1.4, 0.2), CFrame = at(0, 3.4, -17.05), Color = tier.Accent:Lerp(rgb(80, 170, 255), 0.4), Material = M.Neon})
 	local n = C.TREAD_MAX_LEVEL
 	local spacing = 5.4 / n
 	for i = 1, n do
 		local lit = i <= level
-		part(model, {Name = "Meter", Size = Vector3.new(spacing * 0.7, 0.5, 0.15), CFrame = at(-2.7 + (i - 0.5) * spacing, 2.1, -16.95), Color = lit and tier.Accent or rgb(40, 40, 45), Material = lit and M.Neon or M.SmoothPlastic})
+		part(model, {Name = "Meter", Size = Vector3.new(spacing * 0.7, 0.5, 0.15), CFrame = at(-2.7 + (i - 0.5) * spacing, 2.2, -16.95), Color = lit and tier.Accent or rgb(40, 40, 45), Material = lit and M.Neon or M.SmoothPlastic})
+	end
+	for _, sx in ipairs({-1, 1}) do
+		part(model, {Name = "Rail", Size = Vector3.new(0.45, 0.45, 9), CFrame = at(sx * 3.5, 4.4, -12), Color = tier.Accent, Material = tier.AccentMat})
+		part(model, {Name = "RailPost", Size = Vector3.new(0.45, 2.8, 0.45), CFrame = at(sx * 3.5, 3, -16.2), Color = tier.Frame, Material = tier.FrameMat})
+	end
+
+	-- The gateway arch over the front of the belt (every tier gets one, fancier as you go)
+	local gateH = 9 + t * 0.6
+	local stone = tier.Frame:Lerp(Color3.new(0, 0, 0), 0.15)
+	for _, sx in ipairs({-1, 1}) do
+		local x = sx * (4.9 + wide / 2)
+		part(model, {Name = "GatePillar", Size = Vector3.new(1.8, gateH, 1.8), CFrame = at(x, 1 + gateH / 2, -16.4), Color = stone, Material = tier.FrameMat})
+		part(model, {Name = "GateBase", Size = Vector3.new(2.6, 1.2, 2.6), CFrame = at(x, 1.6, -16.4), Color = stone:Lerp(Color3.new(0, 0, 0), 0.2), Material = tier.FrameMat})
+		-- glowing strip down each pillar
+		part(model, {Name = "GateStrip", Size = Vector3.new(0.3, gateH - 2, 0.3), CFrame = at(x - sx * 0.95, 1 + gateH / 2, -15.5), Color = tier.Accent, Material = glowMat, CanCollide = false})
+		-- crystal orb on top
+		local orb = part(model, {Name = "GateOrb", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8), CFrame = at(x, 2 + gateH, -16.4), Color = tier.Accent, Material = M.Neon, CanCollide = false})
+		if t >= 2 then
+			local l = Instance.new("PointLight")
+			l.Color = tier.Accent
+			l.Range = 8
+			l.Brightness = 0.8 + t * 0.15
+			l.Shadows = false
+			l.Parent = orb
+		end
+	end
+	local beam = part(model, {Name = "GateBeam", Size = Vector3.new(11.6 + wide, 1.6, 2.2), CFrame = at(0, 1 + gateH + 0.2, -16.4), Color = stone, Material = tier.FrameMat})
+	local plaque = part(model, {Name = "GatePlaque", Size = Vector3.new(7, 1.2, 0.2), CFrame = at(0, 1 + gateH + 0.2, -15.25) * CFrame.Angles(0, math.pi, 0), Color = tier.Accent:Lerp(Color3.new(0, 0, 0), 0.6)})
+	local pt = Kit.surfaceText(plaque, Enum.NormalId.Front, string.upper(tier.Name), tier.Accent:Lerp(Color3.new(1, 1, 1), 0.3), 30)
+	pt.TextStrokeTransparency = 1
+
+	-- Better tiers: side pylons with glowing panels
+	if t >= 4 then
+		for _, sx in ipairs({-1, 1}) do
+			for _, z in ipairs({-11, -5.5}) do
+				part(model, {Name = "Pylon", Size = Vector3.new(1.2, 3 + t * 0.3, 1.2), CFrame = at(sx * (5.2 + wide / 2), 1 + (3 + t * 0.3) / 2, z), Color = stone, Material = tier.FrameMat})
+				part(model, {Name = "PylonGlow", Size = Vector3.new(0.4, 1.2, 0.8), CFrame = at(sx * (5.85 + wide / 2), 2.4 + t * 0.15, z), Color = tier.Accent, Material = M.Neon, CanCollide = false})
+			end
+		end
 	end
 	if tier.Light then
 		local light = Instance.new("PointLight")
 		light.Color = tier.Accent
 		light.Range = 14
-		light.Brightness = 2
+		light.Brightness = 1.5
 		light.Parent = console
 	end
 	if tier.Sparkles then
@@ -634,31 +731,26 @@ function Base.rebuildTreadmill(plot, level, tier, labelText)
 		sparkles.SparkleColor = tier.Accent
 		sparkles.Parent = console
 	end
-	if tier.Arch then
-		for _, sx in ipairs({-1, 1}) do
-			part(model, {Name = "ArchPost", Size = Vector3.new(0.6, 9, 0.6), CFrame = at(sx * 4.4, 5.5, -4), Color = tier.Accent, Material = M.Neon})
-		end
-		part(model, {Name = "ArchTop", Size = Vector3.new(9.4, 0.6, 0.6), CFrame = at(0, 10, -4), Color = tier.Accent, Material = M.Neon})
-	end
 	if tier.Rings then
 		for i = 0, 1 do
-			part(model, {Name = "Ring", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 9, 9), CFrame = at(0, 5, -7 - i * 5) * CFrame.Angles(0, math.pi / 2, 0), Color = tier.Accent, Material = M.Neon, Transparency = 0.35, CanCollide = false})
+			part(model, {Name = "Ring", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 9, 9), CFrame = at(0, 5.5, -8 - i * 4.5) * CFrame.Angles(0, math.pi / 2, 0), Color = tier.Accent, Material = M.Neon, Transparency = 0.45, CanCollide = false})
 		end
 	end
 	if tier.Fins then
 		for _, sx in ipairs({-1, 1}) do
-			Kit.wedge(model, {Name = "Fin", Size = Vector3.new(0.4, 4, 6), CFrame = at(sx * 4.6, 3.6, -15) * CFrame.Angles(0, math.pi, 0), Color = tier.Accent, Material = M.Neon})
+			Kit.wedge(model, {Name = "Fin", Size = Vector3.new(0.4, 4, 6), CFrame = at(sx * 5.4, 3.6, -8) * CFrame.Angles(0, math.pi, 0), Color = tier.Accent, Material = M.Neon})
 		end
 	end
+	-- A little better every single level: more light bars and glow
 	local step = level % C.TREAD_LEVELS_PER_TIER
 	for i = 1, step do
-		part(model, {Name = "LevelBar", Size = Vector3.new(0.7, 0.5 + i * 0.35, 0.5), CFrame = at(-2.4 + (i - 1) * 1.2, 4.75 + (0.5 + i * 0.35) / 2, -17.5), Color = tier.Accent, Material = M.Neon})
+		part(model, {Name = "LevelBar", Size = Vector3.new(0.7, 0.5 + i * 0.35, 0.5), CFrame = at(-2.4 + (i - 1) * 1.2, 4.85 + (0.5 + i * 0.35) / 2, -17.6), Color = tier.Accent, Material = M.Neon})
 	end
 	if step > 0 then
 		local glow = Instance.new("PointLight")
 		glow.Color = tier.Accent
 		glow.Range = 8 + step * 3
-		glow.Brightness = 0.6 + step * 0.4
+		glow.Brightness = 0.5 + step * 0.3
 		glow.Shadows = false
 		glow.Parent = console
 	end
