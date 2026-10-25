@@ -7,8 +7,23 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local Guards = {}
+
+-- Each area's shopkeeper laughs in their own way when they catch you: {sound, pitch}
+local LAUGHS = {
+	{"rbxassetid://9116452672", 0.75},     -- Clearance Bouncer: deep chuckle
+	{"rbxassetid://88881326385243", 1},    -- Pixel Patrol: 8-bit laugh
+	{"rbxassetid://9116452494", 1.6},      -- Toy Soldier: squeaky wind-up toy
+	{"rbxassetid://95889123106297", 1},    -- Pirate Captain: ship's bell and a laugh
+	{"rbxassetid://130665625557386", 0.9}, -- Crypt Keeper: witch's cackle
+	{"rbxassetid://9118542198", 0.9},      -- Cyber Enforcer: synth robot laugh
+	{"rbxassetid://82098286607079", 0.9},  -- Shadow Ninja: sinister laugh
+	{"rbxassetid://100272190583394", 1},   -- Security Bot: robot laugh
+	{"rbxassetid://9114628818", 0.85},     -- Dragon Knight: rumbling growl
+	{"rbxassetid://9113090712", 1},        -- Space Ranger: alien giggle
+}
 
 -- Roblox's standard R15 animations
 local ANIM = {
@@ -21,7 +36,11 @@ local ANIM = {
 function Guards.create(C, Kit, level, parent, post)
 	local rgb, M = Kit.rgb, Kit.M
 	local L = C.LEVELS[level]
-	local look = L.Zone.Guard
+	-- Each of an area's 5 shopkeepers has a rank: its own title, more arm stripes and a tinted hat
+	local RANKS = {"Rookie", "Senior", "Veteran", "Elite", "Boss"}
+	local look = table.clone(L.Zone.Guard)
+	look.Title = RANKS[L.Sub] .. " " .. look.Title
+	look.HatColor = look.HatColor:Lerp(L.Accent, (L.Sub - 1) * 0.15)
 	local shirt = look.Shirt:Lerp(Color3.new(0, 0, 0), (L.Sub - 1) * 0.08)
 	local scale = C.guardScale(level)
 	local scary = (level - 1) / math.max(1, C.NUM_LEVELS - 1) -- 0 at level 1, 1 at level 50
@@ -199,7 +218,7 @@ function Guards.create(C, Kit, level, parent, post)
 		end
 	end
 
-	model.Name = string.format("%02d_%s", level, look.Title)
+	model.Name = string.format("%02d_%s", level, L.Zone.Guard.Title)
 	model:SetAttribute("Scale", scale)
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	local root = model:FindFirstChild("HumanoidRootPart")
@@ -209,6 +228,13 @@ function Guards.create(C, Kit, level, parent, post)
 	hum.Health = math.huge
 	hum.BreakJointsOnDeath = false
 	hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+	-- Giants never trip, ragdoll, climb or swim: those states caused the twisted, glitchy poses
+	for _, st in ipairs({Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Climbing, Enum.HumanoidStateType.Swimming, Enum.HumanoidStateType.Seated, Enum.HumanoidStateType.PlatformStanding}) do
+		hum:SetStateEnabled(st, false)
+	end
+	-- ScaleTo also bumps the body-scale values; with auto scaling on, Roblox can re-apply them
+	-- on top of the giant size (the "massive shopkeeper" bug), so freeze the size first
+	hum.AutomaticScalingEnabled = false
 	pcall(function()
 		model:ScaleTo(scale)
 	end)
@@ -244,7 +270,10 @@ function Guards.create(C, Kit, level, parent, post)
 	local upper = model:FindFirstChild("UpperTorso")
 	local lower = model:FindFirstChild("LowerTorso")
 	local armour = shirt:Lerp(Color3.new(0, 0, 0), 0.35)
-	if upper then
+	local zi = L.ZoneIndex
+	-- the toy soldier, robot and astronaut have their own outfits instead of armour
+	local ownOutfit = zi == 3 or zi == 8 or zi == 10
+	if upper and not ownOutfit then
 		local w, h, d = upper.Size.X, upper.Size.Y, upper.Size.Z
 		for _, sx in ipairs({-1, 1}) do
 			addOn(model, upper, Vector3.new(w * 0.42, h * 0.22, d * 1.25), CFrame.new(sx * w * 0.55, h * 0.42, 0) * CFrame.Angles(0, 0, -sx * 0.25), armour, {Name = "ShoulderPad", Material = M.Metal})
@@ -261,6 +290,233 @@ function Guards.create(C, Kit, level, parent, post)
 	local hand = model:FindFirstChild("RightHand")
 	if hand then
 		addWeapon(model, hand, L.ZoneIndex, accent)
+	end
+
+	------------------------------------------------------------------
+	-- COSTUMES: every shopkeeper gets a look you can recognise at a glance
+	------------------------------------------------------------------
+	local P = function(name) return model:FindFirstChild(name) end
+	local function paint(names, color, mat)
+		for _, n in ipairs(names) do
+			local p = P(n)
+			if p then
+				p.Color = color
+				if mat then
+					p.Material = mat
+				end
+			end
+		end
+	end
+	local ARMS = {"LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm"}
+	local LEGS = {"LeftUpperLeg", "LeftLowerLeg", "RightUpperLeg", "RightLowerLeg"}
+	local FEET = {"LeftFoot", "RightFoot"}
+	local HANDS = {"LeftHand", "RightHand"}
+	local s = head and head.Size.Y or scale
+	local function onHead(size, offset, color, props)
+		return head and addOn(model, head, size * s, offset, color, props)
+	end
+	local function on(partName, size, offset, color, props)
+		local p = P(partName)
+		return p and addOn(model, p, size, offset, color, props)
+	end
+	local uw, uh, ud = 1, 1, 1
+	if upper then
+		uw, uh, ud = upper.Size.X, upper.Size.Y, upper.Size.Z
+	end
+
+	if zi == 1 then
+		-- CLEARANCE BOUNCER: black tee, gold chain, dark shades, earpiece
+		paint({"UpperTorso", "LowerTorso", unpack(ARMS)}, rgb(30, 30, 36))
+		onHead(Vector3.new(0.95, 0.2, 0.08), CFrame.new(0, s * 0.1, -s * 0.55), rgb(10, 10, 12), {Name = "Shades", Material = M.Glass})
+		onHead(Vector3.new(0.12, 0.2, 0.12), CFrame.new(s * 0.55, 0, 0), rgb(40, 40, 40), {Name = "Earpiece"})
+		on("UpperTorso", Vector3.new(uw * 0.7, uh * 0.06, ud * 0.1), CFrame.new(0, uh * 0.3, -ud * 0.55) * CFrame.Angles(0, 0, 0), Kit.GOLD, {Name = "Chain", Material = M.Metal})
+		on("UpperTorso", Vector3.new(uw * 0.25, uh * 0.25, ud * 0.1), CFrame.new(0, uh * 0.12, -ud * 0.56), Kit.GOLD, {Name = "Medallion", Material = M.Metal, Shape = Enum.PartType.Cylinder})
+	elseif zi == 2 then
+		-- PIXEL PATROL: blocky 8-bit helmet, pixel chest lights
+		onHead(Vector3.new(1.25, 1.25, 1.25), CFrame.new(0, s * 0.05, 0), rgb(70, 60, 140), {Name = "PixelHelmet"})
+		onHead(Vector3.new(0.9, 0.35, 0.05), CFrame.new(0, s * 0.08, -s * 0.64), rgb(120, 255, 140), {Name = "PixelVisor", Material = M.Neon})
+		for k = 0, 5 do
+			on("UpperTorso", Vector3.new(uw * 0.12, uw * 0.12, ud * 0.05), CFrame.new(-uw * 0.3 + (k % 3) * uw * 0.3, uh * 0.15 - math.floor(k / 3) * uh * 0.2, -ud * 0.56), ({rgb(255, 80, 80), rgb(80, 220, 120), rgb(80, 160, 255)})[k % 3 + 1], {Name = "Pixel", Material = M.Neon})
+		end
+	elseif zi == 3 then
+		-- TOY SOLDIER: red coat, white cross-belts, gold buttons, tall black shako, wind-up key
+		paint({"UpperTorso", unpack(ARMS)}, rgb(205, 30, 40))
+		paint({"LowerTorso", unpack(LEGS)}, rgb(25, 35, 80))
+		paint(FEET, rgb(15, 15, 18))
+		paint(HANDS, rgb(250, 250, 250))
+		if head then
+			head.Color = rgb(255, 215, 180)
+		end
+		onHead(Vector3.new(1.6, 0.95, 0.95), CFrame.new(0, s * 1.1, 0) * UPRIGHT, rgb(20, 20, 25), {Name = "Shako", Shape = CYL})
+		onHead(Vector3.new(0.05, 0.4, 0.4), CFrame.new(0, s * 1.05, -s * 0.47) * CFrame.Angles(0, math.pi / 2, 0), Kit.GOLD, {Name = "ShakoPlate", Shape = CYL, Material = M.Metal})
+		onHead(Vector3.new(0.3, 0.6, 0.3), CFrame.new(0, s * 2, 0), rgb(230, 30, 40), {Name = "Plume", Shape = Enum.PartType.Ball})
+		onHead(Vector3.new(0.08, 0.5, 0.08), CFrame.new(0, s * 0.45, -s * 0.5), rgb(20, 20, 25), {Name = "ChinStrap"})
+		for _, cx in ipairs({-1, 1}) do
+			onHead(Vector3.new(0.22, 0.22, 0.05), CFrame.new(cx * s * 0.32, -s * 0.08, -s * 0.5), rgb(255, 120, 130), {Name = "Cheek", Shape = Enum.PartType.Ball})
+			onHead(Vector3.new(0.14, 0.14, 0.05), CFrame.new(cx * s * 0.18, s * 0.12, -s * 0.52), rgb(10, 10, 10), {Name = "PaintedEye", Shape = Enum.PartType.Ball})
+			-- white cross-belts
+			on("UpperTorso", Vector3.new(uw * 0.16, uh * 1.25, ud * 1.12), CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, cx * 0.62), rgb(250, 250, 250), {Name = "CrossBelt"})
+			-- gold epaulettes
+			on("UpperTorso", Vector3.new(uw * 0.38, uh * 0.1, ud * 1.1), CFrame.new(cx * uw * 0.42, uh * 0.47, 0), Kit.GOLD, {Name = "Epaulette", Material = M.Metal})
+		end
+		for k = 0, 3 do
+			for _, bx in ipairs({-0.18, 0.18}) do
+				on("UpperTorso", Vector3.new(uw * 0.08, uw * 0.08, ud * 0.08), CFrame.new(uw * bx, uh * (0.32 - k * 0.2), -ud * 0.53), Kit.GOLD, {Name = "Button", Shape = Enum.PartType.Ball, Material = M.Metal})
+			end
+		end
+		-- wind-up key on the back
+		on("UpperTorso", Vector3.new(ud * 0.9, uw * 0.1, uw * 0.1), CFrame.new(0, uh * 0.05, ud * 0.9) * CFrame.Angles(0, math.pi / 2, 0), Kit.GOLD, {Name = "KeyShaft", Shape = CYL, Material = M.Metal})
+		for _, kx in ipairs({-1, 1}) do
+			on("UpperTorso", Vector3.new(uw * 0.08, uw * 0.35, uw * 0.35), CFrame.new(kx * uw * 0.2, uh * 0.05, ud * 1.35) * CFrame.Angles(0, math.pi / 2, 0), Kit.GOLD, {Name = "KeyWing", Shape = CYL, Material = M.Metal})
+		end
+	elseif zi == 4 then
+		-- PIRATE CAPTAIN: long red coat with gold trim and a parrot on the shoulder
+		paint({"UpperTorso", unpack(ARMS)}, rgb(150, 25, 30))
+		if lower then
+			local lw, lh, ld = lower.Size.X, lower.Size.Y, lower.Size.Z
+			on("LowerTorso", Vector3.new(lw * 1.08, lh * 2.2, ld * 0.15), CFrame.new(0, -lh * 0.8, ld * 0.5), rgb(150, 25, 30), {Name = "CoatTail"})
+			on("LowerTorso", Vector3.new(lw * 1.1, lh * 0.15, ld * 0.17), CFrame.new(0, -lh * 1.85, ld * 0.5), Kit.GOLD, {Name = "CoatTrim"})
+		end
+		local sh = Vector3.new(uw * 0.42, uh * 0.55, 0)
+		local parrot = on("UpperTorso", Vector3.new(uw * 0.22, uh * 0.32, uw * 0.22), CFrame.new(-sh.X, sh.Y + uh * 0.12, 0), rgb(40, 190, 70), {Name = "Parrot", Shape = Enum.PartType.Ball})
+		if parrot then
+			addOn(model, parrot, Vector3.one * uw * 0.17, CFrame.new(0, uh * 0.18, -uw * 0.02), rgb(230, 40, 40), {Name = "ParrotHead", Shape = Enum.PartType.Ball})
+			addOn(model, parrot, Vector3.new(uw * 0.05, uw * 0.05, uw * 0.1), CFrame.new(0, uh * 0.17, -uw * 0.12), rgb(255, 200, 40), {Name = "Beak"})
+			addOn(model, parrot, Vector3.new(uw * 0.06, uh * 0.3, uw * 0.12), CFrame.new(0, -uh * 0.18, uw * 0.06) * CFrame.Angles(0.4, 0, 0), rgb(40, 110, 230), {Name = "ParrotTail"})
+		end
+	elseif zi == 5 then
+		-- CRYPT KEEPER: skull face, flowing cape, chains, a lantern
+		if head then
+			head.Color = rgb(235, 230, 215)
+		end
+		for _, cx in ipairs({-1, 1}) do
+			onHead(Vector3.new(0.3, 0.3, 0.05), CFrame.new(cx * s * 0.2, s * 0.08, -s * 0.53), rgb(10, 10, 10), {Name = "EyeSocket", Shape = Enum.PartType.Ball})
+		end
+		on("UpperTorso", Vector3.new(uw * 1.25, uh * 2.4, ud * 0.12), CFrame.new(0, -uh * 0.6, ud * 0.58), rgb(30, 20, 45), {Name = "Cape", Material = M.Fabric})
+		on("UpperTorso", Vector3.new(uw * 1.15, uh * 0.08, ud * 1.15), CFrame.new(0, -uh * 0.1, 0) * CFrame.Angles(0, 0, 0.5), rgb(120, 120, 130), {Name = "Chain", Material = M.Metal})
+		local lantern = on("LeftHand", Vector3.new(0.6, 0.8, 0.6) * scale, CFrame.new(0, -0.6 * scale, 0), rgb(80, 255, 120), {Name = "Lantern", Material = M.Neon, Transparency = 0.2})
+		if lantern then
+			local l = Instance.new("PointLight")
+			l.Color = rgb(120, 255, 140)
+			l.Range = 6 + scale * 2
+			l.Parent = lantern
+		end
+	elseif zi == 6 then
+		-- CYBER ENFORCER: glowing circuit lines, shoulder lights, battery pack
+		for _, n in ipairs({"LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}) do
+			local p = P(n)
+			if p then
+				addOn(model, p, Vector3.new(p.Size.X * 1.04, p.Size.Y * 0.1, p.Size.Z * 1.04), CFrame.new(0, 0, 0), rgb(60, 230, 255), {Name = "Circuit", Material = M.Neon})
+			end
+		end
+		on("UpperTorso", Vector3.new(uw * 0.6, uh * 0.7, ud * 0.5), CFrame.new(0, 0, ud * 0.7), rgb(40, 40, 55), {Name = "Battery", Material = M.Metal})
+		on("UpperTorso", Vector3.new(uw * 0.4, uh * 0.1, ud * 0.52), CFrame.new(0, uh * 0.2, ud * 0.71), rgb(60, 230, 255), {Name = "BatteryLight", Material = M.Neon})
+	elseif zi == 7 then
+		-- SHADOW NINJA: face mask, red sash, sword on the back
+		paint({"UpperTorso", "LowerTorso", unpack(ARMS)}, rgb(25, 25, 32))
+		paint(LEGS, rgb(25, 25, 32))
+		onHead(Vector3.new(1.06, 0.5, 1.06), CFrame.new(0, -s * 0.22, 0), rgb(25, 25, 32), {Name = "Mask", Material = M.Fabric})
+		on("LowerTorso", Vector3.new(lower and lower.Size.X * 1.1 or 1, lower and lower.Size.Y * 0.3 or 0.3, lower and lower.Size.Z * 1.1 or 1), CFrame.new(0, 0, 0), rgb(200, 30, 40), {Name = "Sash", Material = M.Fabric})
+		on("UpperTorso", Vector3.new(uw * 0.12, uh * 2, ud * 0.12), CFrame.new(0, 0, ud * 0.65) * CFrame.Angles(0, 0, 0.7), rgb(30, 20, 15), {Name = "Sheath"})
+		on("UpperTorso", Vector3.new(uw * 0.3, uh * 0.06, ud * 0.06), CFrame.new(uw * 0.55, uh * 0.75, ud * 0.65) * CFrame.Angles(0, 0, 0.7), Kit.GOLD, {Name = "Hilt"})
+	elseif zi == 8 then
+		-- SECURITY BOT: all metal, boxy head, chest panel with blinking lights, bolts
+		paint({"UpperTorso", "LowerTorso", unpack(ARMS)}, rgb(150, 160, 175), M.Metal)
+		paint(LEGS, rgb(120, 130, 145), M.Metal)
+		paint(FEET, rgb(70, 75, 85), M.Metal)
+		paint(HANDS, rgb(70, 75, 85), M.Metal)
+		if head then
+			head.Color = rgb(150, 160, 175)
+			head.Material = M.Metal
+		end
+		onHead(Vector3.new(1.2, 1.05, 1.15), CFrame.new(0, 0, 0), rgb(165, 175, 190), {Name = "BotHead", Material = M.Metal})
+		onHead(Vector3.new(0.9, 0.22, 0.05), CFrame.new(0, s * 0.1, -s * 0.6), rgb(255, 60, 60), {Name = "BotEyes", Material = M.Neon})
+		on("UpperTorso", Vector3.new(uw * 0.6, uh * 0.45, ud * 0.1), CFrame.new(0, uh * 0.05, -ud * 0.55), rgb(40, 45, 55), {Name = "Panel"})
+		for k = 0, 2 do
+			on("UpperTorso", Vector3.new(uw * 0.1, uw * 0.1, ud * 0.06), CFrame.new(-uw * 0.18 + k * uw * 0.18, uh * 0.1, -ud * 0.62), ({rgb(255, 60, 60), rgb(255, 220, 60), rgb(60, 255, 120)})[k + 1], {Name = "PanelLight", Shape = Enum.PartType.Ball, Material = M.Neon})
+		end
+		for _, cx in ipairs({-1, 1}) do
+			on("UpperTorso", Vector3.new(uw * 0.12, uw * 0.25, uw * 0.25), CFrame.new(cx * uw * 0.52, uh * 0.35, 0) * CFrame.Angles(0, 0, 0), rgb(255, 200, 40), {Name = "Bolt", Shape = CYL, Material = M.Metal})
+		end
+	elseif zi == 9 then
+		-- DRAGON KNIGHT: wings, a long scaly tail, spiked shoulders
+		local wing = rgb(140, 30, 30)
+		for _, cx in ipairs({-1, 1}) do
+			Kit.wedge(model, {Name = "Wing", Size = Vector3.new(uw * 0.08, uh * 1.8, uw * 1.4), CFrame = upper and upper.CFrame * CFrame.new(cx * uw * 0.7, uh * 0.4, ud * 0.9) * CFrame.Angles(0, cx * 0.6, cx * 0.35) or CFrame.new(), Color = wing, CanCollide = false, Massless = true})
+			on("UpperTorso", Vector3.new(uw * 0.12, uw * 0.4, uw * 0.12), CFrame.new(cx * uw * 0.55, uh * 0.62, 0) * CFrame.Angles(0, 0, -cx * 0.4), rgb(255, 200, 60), {Name = "Spike", Material = M.Metal})
+		end
+		-- weld the wings to the body
+		for _, w in ipairs(model:GetChildren()) do
+			if w.Name == "Wing" and upper and not w:FindFirstChildOfClass("WeldConstraint") then
+				w.CanQuery, w.CanTouch = false, false
+				w.Anchored = false
+				w.Massless = true
+				local wc = Instance.new("WeldConstraint")
+				wc.Part0 = upper
+				wc.Part1 = w
+				wc.Parent = w
+			end
+		end
+		local prev = lower
+		for k = 1, 5 do
+			if prev then
+				local sz = (1 - k * 0.15) * scale * 0.7
+				prev = addOn(model, prev, Vector3.one * sz, CFrame.new(0, -sz * 0.35, sz * 0.85) * CFrame.Angles(0.25, 0, 0), wing:Lerp(rgb(255, 120, 40), k / 6), {Name = "Tail", Shape = Enum.PartType.Ball})
+			end
+		end
+	elseif zi == 10 then
+		-- ASTRONAUT: white spacesuit, big helmet with a gold visor, life-support backpack, chest panel
+		paint({"UpperTorso", "LowerTorso", unpack(ARMS)}, rgb(240, 240, 245))
+		paint(LEGS, rgb(235, 235, 240))
+		paint(FEET, rgb(150, 155, 165))
+		paint(HANDS, rgb(200, 205, 215))
+		for _, d in ipairs(model:GetChildren()) do
+			if d.Name == "Hat" then
+				d:Destroy() -- replace the old glass bubble
+			end
+		end
+		onHead(Vector3.new(1.55, 1.55, 1.55), CFrame.new(0, s * 0.08, 0), rgb(245, 245, 250), {Name = "SpaceHelmet", Shape = Enum.PartType.Ball})
+		onHead(Vector3.new(1.0, 0.75, 0.6), CFrame.new(0, s * 0.08, -s * 0.5), rgb(255, 190, 60), {Name = "Visor", Material = M.Glass, Reflectance = 0.5})
+		on("UpperTorso", Vector3.new(uw * 0.8, uh * 0.9, ud * 0.7), CFrame.new(0, uh * 0.05, ud * 0.85), rgb(230, 230, 238), {Name = "LifePack"})
+		for _, cx in ipairs({-1, 1}) do
+			on("UpperTorso", Vector3.new(uw * 0.12, uh * 0.7, uw * 0.12), CFrame.new(cx * uw * 0.3, uh * 0.45, ud * 0.25) * CFrame.Angles(0.5, 0, 0), rgb(120, 125, 135), {Name = "Tube", Shape = CYL})
+		end
+		on("UpperTorso", Vector3.new(uw * 0.45, uh * 0.3, ud * 0.1), CFrame.new(0, -uh * 0.05, -ud * 0.55), rgb(50, 55, 70), {Name = "ChestPanel"})
+		for k = 0, 2 do
+			on("UpperTorso", Vector3.new(uw * 0.08, uw * 0.08, ud * 0.06), CFrame.new(-uw * 0.12 + k * uw * 0.12, -uh * 0.05, -ud * 0.62), ({rgb(255, 60, 60), rgb(60, 160, 255), rgb(60, 255, 120)})[k + 1], {Name = "Button", Shape = Enum.PartType.Ball, Material = M.Neon})
+		end
+		on("LeftUpperArm", Vector3.new(0.05, 0.3, 0.45) * scale, CFrame.new(-0.5 * scale, 0.1 * scale, 0), rgb(40, 80, 200), {Name = "Patch"})
+	end
+
+	-- RANK STRIPES: gold bands around both upper arms, one per rank above Rookie
+	for _, n in ipairs({"LeftUpperArm", "RightUpperArm"}) do
+		local p = P(n)
+		if p then
+			for k = 1, L.Sub - 1 do
+				addOn(model, p, Vector3.new(p.Size.X * 1.08, p.Size.Y * 0.06, p.Size.Z * 1.08), CFrame.new(0, p.Size.Y * (0.38 - (k - 1) * 0.11), 0), Kit.GOLD, {Name = "RankStripe", Material = M.Metal})
+			end
+		end
+	end
+	-- The area's Boss also gets a gold glow and drifting gold sparkles
+	if L.Sub == 5 then
+		local aura = Instance.new("ParticleEmitter")
+		aura.Name = "BossAura"
+		aura.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		aura.Color = ColorSequence.new(Kit.GOLD, Color3.new(1, 1, 1))
+		aura.LightEmission = 1
+		aura.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.4, scale * 0.35), NumberSequenceKeypoint.new(1, 0)})
+		aura.Lifetime = NumberRange.new(0.8, 1.4)
+		aura.Rate = 10
+		aura.Speed = NumberRange.new(0.5, 1.5)
+		aura.SpreadAngle = Vector2.new(180, 180)
+		aura.Parent = root
+		local glow = Instance.new("PointLight")
+		glow.Name = "BossGlow"
+		glow.Color = Kit.GOLD
+		glow.Range = 8 + scale * 2
+		glow.Brightness = 0.8
+		glow.Shadows = false
+		glow.Parent = root
 	end
 
 	-- A trail behind them, in their level's colour, darker and redder deeper in
@@ -340,16 +596,30 @@ function Guards.create(C, Kit, level, parent, post)
 		run.Looped = true
 		run.Priority = Enum.AnimationPriority.Movement
 	end
-	hum.Running:Connect(function(runSpeed)
+	-- The run animation follows how fast the giant REALLY moves (not Humanoid.Running,
+	-- which never reports "stopped" after a teleport - that left guards running in place)
+	local animConn
+	animConn = RunService.Heartbeat:Connect(function()
+		if not model.Parent then
+			animConn:Disconnect()
+			return
+		end
 		if not run then return end
-		if runSpeed > 0.5 then
+		local v = root.AssemblyLinearVelocity
+		local flatSpeed = Vector3.new(v.X, 0, v.Z).Magnitude
+		-- MoveDirection stays 0 for server MoveTo, so judge by real speed only
+		local moving = flatSpeed > 1.5
+		if moving then
 			if not run.IsPlaying then
 				run:Play(0.2)
 			end
 			-- big legs take longer strides, so the animation runs slower than a player's
-			run:AdjustSpeed(math.clamp(runSpeed / (14 * scale), 0.35, 6))
+			run:AdjustSpeed(math.clamp(flatSpeed / (14 * scale), 0.35, 6))
 		elseif run.IsPlaying then
-			run:Stop(0.3)
+			run:Stop(0.25)
+		end
+		if idle and not idle.IsPlaying then
+			idle:Play(0.3)
 		end
 	end)
 	local function act(name, speed)
@@ -365,9 +635,22 @@ function Guards.create(C, Kit, level, parent, post)
 			end)
 		end
 	end
+	-- the laugh is a 3D sound in their head, so everyone nearby hears it; each rank a little higher
+	local laughDef = LAUGHS[zi] or LAUGHS[1]
+	local laugh = Instance.new("Sound")
+	laugh.Name = "Laugh"
+	laugh.SoundId = laughDef[1]
+	laugh.PlaybackSpeed = laughDef[2] * (1 + (L.Sub - 3) * 0.04)
+	laugh.Volume = 0.9
+	laugh.RollOffMaxDistance = 180
+	laugh.Parent = head or root
 	local actions = {
 		Taunt = function() act("Point", 1.3) end,
-		Laugh = function() act("Laugh", 1.2) end,
+		Laugh = function()
+			act("Laugh", 1.2)
+			laugh.TimePosition = 0
+			laugh:Play()
+		end,
 		Stomp = function()
 			dust:Emit(10)
 		end,

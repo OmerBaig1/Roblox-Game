@@ -22,17 +22,57 @@ local function makeCharacter(shirt, pants, skin)
 		model = Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R15)
 	end)
 	if model then
+		-- Only the root is anchored. The limbs stay joined by their Motor6Ds, so the body
+		-- always holds together (anchoring every part froze them where they spawned, which
+		-- is what stretched the Invite Friend character's neck) and it can be animated.
 		for _, d in ipairs(model:GetDescendants()) do
 			if d:IsA("BasePart") then
-				d.Anchored = true
+				d.Anchored = d.Name == "HumanoidRootPart"
+				d.CanCollide = false
 			end
 		end
 		local hum = model:FindFirstChildOfClass("Humanoid")
 		if hum then
 			hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			for _, st in ipairs({Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Dead}) do
+				hum:SetStateEnabled(st, false)
+			end
 		end
 	end
 	return model
+end
+
+-- A gentle idle, plus an occasional friendly wave
+local function animateNpc(model, waveEvery)
+	local hum = model and model:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+	local function load(id)
+		local a = Instance.new("Animation")
+		a.AnimationId = id
+		local ok, track = pcall(function()
+			return animator:LoadAnimation(a)
+		end)
+		return ok and track or nil
+	end
+	local idle = load("rbxassetid://507766388")
+	if idle then
+		idle.Looped = true
+		idle.Priority = Enum.AnimationPriority.Idle
+		idle:Play()
+	end
+	if waveEvery then
+		local wave = load("rbxassetid://507770239")
+		if wave then
+			wave.Priority = Enum.AnimationPriority.Action
+			task.spawn(function()
+				while model.Parent do
+					task.wait(waveEvery)
+					wave:Play(0.3)
+				end
+			end)
+		end
+	end
 end
 
 local World = {}
@@ -220,7 +260,8 @@ function World.build(C, Kit)
 		for _, y in ipairs({2.4, 5.2}) do
 			part(lobby, {Name = "FenceRail", Size = Vector3.new(len + 0.2, 0.6, 0.4), CFrame = cf * CFrame.new(0, y, 0), Color = RAIL, Material = M.WoodPlanks})
 		end
-		part(lobby, {Name = "InvisibleWall", Size = Vector3.new(len + 1, WALL_HEIGHT, 2), CFrame = cf * CFrame.new(0, WALL_HEIGHT / 2, 0), Transparency = 1, CanQuery = false, CastShadow = false})
+		-- thick, so even the fastest runners can't slip through between physics steps
+		part(lobby, {Name = "InvisibleWall", Size = Vector3.new(len + 2, WALL_HEIGHT, 12), CFrame = cf * CFrame.new(0, WALL_HEIGHT / 2, 0), Transparency = 1, CanQuery = false, CastShadow = false})
 	end
 	local segs = 260
 	local segLen = 2 * C.FENCE_R * math.sin(math.pi / segs)
@@ -785,7 +826,7 @@ function World.build(C, Kit)
 
 		-- Recommended speed: a smaller sign hanging on two chains under the level's name sign
 		do
-			local hangW, hangH = zoneStart and 32 or 26, zoneStart and 7 or 6
+			local hangW, hangH = zoneStart and 40 or 34, zoneStart and 9.5 or 8.5
 			local chainTop = signY - signH / 2 - 0.8
 			local chainLen = 2.4
 			local hy = chainTop - chainLen - hangH / 2
@@ -808,8 +849,9 @@ function World.build(C, Kit)
 		Kit.setGroup(decor, "Decor")
 	end
 	local lastL = C.LEVELS[C.NUM_LEVELS]
-	-- Invisible roof over the whole vault
-	part(vault, {Name = "InvisibleRoof", Size = Vector3.new(C.ROOM_W + 12, 2, hallEnd - C.HALL_START_Z), CFrame = CFrame.new(0, C.WALL_H + 9, (C.HALL_START_Z + hallEnd) / 2), Transparency = 1, CanCollide = true})
+	-- Invisible roof: sits right on top of the walls (no gap to climb into) and is thick
+	-- and wider than the hallway, so nobody gets in or out over the top at any speed
+	part(vault, {Name = "InvisibleRoof", Size = Vector3.new(C.ROOM_W + 24, 10, hallEnd - C.HALL_START_Z + 8), CFrame = CFrame.new(0, C.WALL_H + 2 + 5, (C.HALL_START_Z + hallEnd) / 2), Transparency = 1, CanCollide = true, CanQuery = false, CastShadow = false})
 	part(vault, {Name = "VaultEnd", Size = Vector3.new(C.ROOM_W + 6, C.WALL_H, 3), CFrame = CFrame.new(0, C.WALL_H / 2, hallEnd + 1.5), Color = lastL.Wall, Material = lastL.Zone.WallMat})
 
 	-- Grand entrance: a big, bright, game-themed gateway
@@ -831,7 +873,8 @@ function World.build(C, Kit)
 		-- Pixel squares sprinkled over the wall
 		for i = 1, 60 do
 			local sx = (i % 2 == 0) and 1 or -1
-			local x = sx * (EW / 2 + 2 + rng:NextNumber(0, sideW - 4))
+			-- only on the wall beyond the towers, never hidden inside them
+			local x = sx * (EW / 2 + 21 + rng:NextNumber(0, math.max(0, sideW - 24)))
 			part(front, {Name = "Pixel", Size = Vector3.new(3, 3, 0.4), CFrame = CFrame.new(x, rng:NextNumber(4, C.WALL_H - 4), z - 2.2), Color = PALETTE[rng:NextInteger(1, #PALETTE)], CanCollide = false})
 		end
 
@@ -840,9 +883,10 @@ function World.build(C, Kit)
 			local tx = sx * (EW / 2 + 10)
 			local towerColor = sx < 0 and rgb(255, 85, 95) or rgb(70, 160, 255)
 			local towerH = C.WALL_H + 22
-			part(front, {Name = "Tower", Size = Vector3.new(20, towerH, 16), CFrame = CFrame.new(tx, towerH / 2, z - 8), Color = towerColor, Material = M.SmoothPlastic})
-			part(front, {Name = "TowerTop", Size = Vector3.new(22, 3, 18), CFrame = CFrame.new(tx, towerH + 1.5, z - 8), Color = WHITE})
-			local fz = z - 16.4
+			-- the tower stands just in front of the wall (it used to sink into it and flicker)
+			part(front, {Name = "Tower", Size = Vector3.new(19.6, towerH, 14), CFrame = CFrame.new(tx + sx * 0.2, towerH / 2, z - 9.2), Color = towerColor, Material = M.SmoothPlastic})
+			part(front, {Name = "TowerTop", Size = Vector3.new(21.6, 3, 16), CFrame = CFrame.new(tx + sx * 0.2, towerH + 1.5, z - 9.2), Color = WHITE})
+			local fz = z - 16.6
 			-- A/B/X/Y buttons
 			for _, btn in ipairs({{0, 22, rgb(255, 230, 60)}, {4.5, 18, rgb(90, 220, 90)}, {-4.5, 18, rgb(70, 170, 255)}, {0, 14, rgb(255, 120, 200)}}) do
 				part(front, {Name = "Button", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 4.6, 4.6), CFrame = CFrame.new(tx + btn[1], btn[2], fz) * CFrame.Angles(0, math.pi / 2, 0), Color = btn[3]})
@@ -866,9 +910,10 @@ function World.build(C, Kit)
 
 		-- Rainbow arch around the doorway
 		local bands = {rgb(255, 70, 70), rgb(255, 160, 40), rgb(255, 230, 60), rgb(90, 220, 90), rgb(70, 160, 255), rgb(150, 90, 255)}
-		local cy = EH - 4
+		-- the rainbow sits on top of the doorway, between the towers (it used to cut into them)
+		local cy = EH
 		for bi, color in ipairs(bands) do
-			local r = EW / 2 + 1 + (bi - 1) * 2.2
+			local r = EW / 2 - 1.5 - (bi - 1) * 2.2
 			local segs = 24
 			for sgi = 0, segs - 1 do
 				local ang = math.pi * (sgi + 0.5) / segs
@@ -878,7 +923,7 @@ function World.build(C, Kit)
 		end
 
 		-- Marquee sign with light bulbs
-		local signY = cy + 18
+		local signY = cy + 35 -- above the rainbow
 		local signW, signH = EW - 14, 11
 		local sign = part(front, {Name = "VaultSign", Size = Vector3.new(signW, signH, 1), CFrame = CFrame.new(0, signY, z - 4.6), Color = rgb(45, 30, 90)})
 		local signText = Kit.surfaceText(sign, Enum.NormalId.Front, "THE GAME VAULT", Kit.GOLD, 20)
@@ -983,9 +1028,18 @@ function World.build(C, Kit)
 			local head = npc:FindFirstChild("Head")
 			if head then
 				local cap = part(npc, {Name = "Cap", Size = Vector3.new(1.3, 0.45, 1.3), CFrame = head.CFrame * CFrame.new(0, 0.6, 0), Color = rgb(90, 230, 255), CanCollide = false})
-				part(npc, {Name = "CapBrim", Size = Vector3.new(1.2, 0.12, 0.8), CFrame = head.CFrame * CFrame.new(0, 0.45, -0.75), Color = rgb(90, 230, 255), CanCollide = false})
+				local brim = part(npc, {Name = "CapBrim", Size = Vector3.new(1.2, 0.12, 0.8), CFrame = head.CFrame * CFrame.new(0, 0.45, -0.75), Color = rgb(90, 230, 255), CanCollide = false})
 				Kit.billboard(head, 240, 50, 2.6, '<font color="#ff96f0">TRAIL TRADER</font>', 80)
-				cap.Anchored = true
+				-- welded on so the cap moves with his head when he animates
+				for _, p in ipairs({cap, brim}) do
+					p.Anchored = false
+					p.Massless = true
+					local w = Instance.new("WeldConstraint")
+					w.Part0 = head
+					w.Part1 = p
+					w.Parent = p
+				end
+				animateNpc(npc)
 			end
 			W.ShopPrompt = Kit.prompt(anchor, "Talk", "Trail Trader", 0, 14)
 		else
@@ -1006,48 +1060,115 @@ function World.build(C, Kit)
 	end
 
 	------------------------------------------------------------------
-	-- LUCKY SPIN booth (mirrors the Trail Shop on the other side of the entrance)
+	-- LUCKY SPIN: a standalone prize wheel on a round stage (no hut)
 	------------------------------------------------------------------
 	do
-		local booth = Instance.new("Model")
-		booth.Name = "LuckySpin"
-		booth.Parent = lobby
+		local spin = Instance.new("Model")
+		spin.Name = "LuckySpin"
+		spin.Parent = lobby
 		local pos = ENTRANCE + Vector3.new(C.ENTRANCE_W / 2 + 46, 0, -16)
 		local cf = CFrame.lookAt(pos, pos + Vector3.new(0, 0, -1))
 		local function at(x, y, z)
 			return cf * CFrame.new(x, y, z)
 		end
 		local WHITE = Color3.new(1, 1, 1)
-		part(booth, {Name = "Floor", Size = Vector3.new(26, 1, 18), CFrame = at(0, 0.5, 2), Color = rgb(40, 110, 200), Material = M.WoodPlanks})
-		part(booth, {Name = "Counter", Size = Vector3.new(18, 4, 3), CFrame = at(0, 3, -4), Color = rgb(60, 150, 255), Material = M.WoodPlanks})
-		part(booth, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = at(0, 5.2, -4), Color = rgb(255, 230, 60)})
-		part(booth, {Name = "Back", Size = Vector3.new(26, 22, 1), CFrame = at(0, 12, 10.5), Color = rgb(40, 90, 180), Material = M.WoodPlanks})
+		local FLAT = CFrame.Angles(0, 0, math.pi / 2) -- a cylinder lying flat (round side up)
+		local FACE = CFrame.Angles(0, math.pi / 2, 0) -- a cylinder facing forward like a wheel
+		-- Round two-step stage with a ring of bulbs
+		part(spin, {Name = "Stage", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 30, 30), CFrame = at(0, 0.5, 0) * FLAT, Color = rgb(70, 45, 140)})
+		part(spin, {Name = "StageTop", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 22, 22), CFrame = at(0, 1.5, 0) * FLAT, Color = rgb(120, 80, 230)})
+		part(spin, {Name = "StageTrim", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 30.4, 30.4), CFrame = at(0, 1.05, 0) * FLAT, Color = Kit.GOLD, Material = M.SmoothPlastic})
+		for i = 0, 23 do
+			local ang = i / 24 * math.pi * 2
+			part(spin, {Name = "StageBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.9, 0.9, 0.9), CFrame = at(math.cos(ang) * 14.2, 1.3, math.sin(ang) * 14.2), Color = i % 2 == 0 and WHITE or Kit.GOLD, Material = M.Neon, CanCollide = false})
+		end
+		-- White supports holding the wheel up, and two poles for the sign
 		for _, sx in ipairs({-1, 1}) do
-			part(booth, {Name = "Post", Size = Vector3.new(1.2, 20, 1.2), CFrame = at(sx * 12.4, 10, -6), Color = WHITE, Material = M.Marble})
+			part(spin, {Name = "Leg", Size = Vector3.new(1.6, 16, 1.6), CFrame = at(sx * 3.2, 9.5, 1.2) * CFrame.Angles(0, 0, sx * 0.32), Color = WHITE, Material = M.Marble})
+			Kit.cylinder(spin, 27, 1, at(sx * 10.5, 15, 1.2), {Name = "SignPole", Color = WHITE, Material = M.Marble})
+			part(spin, {Name = "PoleTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2, 2, 2), CFrame = at(sx * 10.5, 29.2, 1.2), Color = Kit.GOLD, Material = M.Neon, CanCollide = false})
 		end
-		local stripes = {rgb(255, 230, 60), WHITE}
-		for i = 0, 12 do
-			part(booth, {Name = "Awning", Size = Vector3.new(2, 0.4, 19), CFrame = at(-12 + i * 2, 21.5, 1.5) * CFrame.Angles(math.rad(-12), 0, 0), Color = stripes[i % 2 + 1]})
-		end
-		local sign = part(booth, {Name = "Sign", Size = Vector3.new(22, 5, 0.6), CFrame = at(0, 25, -6.5), Color = rgb(25, 40, 90)})
-		Kit.surfaceText(sign, Enum.NormalId.Front, "LUCKY SPIN", rgb(255, 230, 60), 30)
-		part(booth, {Name = "SignFrame", Size = Vector3.new(23, 6, 0.4), CFrame = at(0, 25, -6.2), Color = rgb(255, 230, 60)})
-
-		-- The big prize wheel on the back wall
-		local wheelCF = at(0, 12.5, 9.6)
+		-- The wheel (its own model, so every player's game can spin it gently)
+		local wheel = Instance.new("Model")
+		wheel.Name = "SpinWheel"
+		wheel.Parent = spin
+		local hub = at(0, 15, 0)
+		wheel:SetAttribute("Axis", hub.Position)
+		wheel:SetAttribute("Facing", hub.LookVector)
+		part(wheel, {Name = "Rim", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.4, 22, 22), CFrame = hub * FACE, Color = Kit.GOLD, Material = M.Metal})
+		part(wheel, {Name = "Face", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.6, 20.2, 20.2), CFrame = hub * CFrame.new(0, 0, -0.05) * FACE, Color = WHITE})
 		local colors = {rgb(255, 80, 80), rgb(255, 170, 40), rgb(255, 230, 60), rgb(90, 220, 90), rgb(70, 170, 255), rgb(150, 90, 255), rgb(255, 120, 200), rgb(40, 210, 200)}
-		part(booth, {Name = "WheelRim", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 17, 17), CFrame = wheelCF * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(255, 230, 60)})
-		part(booth, {Name = "WheelFace", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.8, 15.4, 15.4), CFrame = wheelCF * CFrame.new(0, 0, -0.1) * CFrame.Angles(0, math.pi / 2, 0), Color = WHITE})
 		for i = 0, 7 do
 			local ang = i * math.pi / 4
-			part(booth, {Name = "Slice", Size = Vector3.new(2.8, 7.2, 0.3), CFrame = wheelCF * CFrame.new(0, 0, -0.6) * CFrame.Angles(0, 0, ang) * CFrame.new(0, 3.8, 0), Color = colors[i + 1], CanCollide = false})
-			part(booth, {Name = "Peg", Shape = Enum.PartType.Ball, Size = Vector3.new(0.8, 0.8, 0.8), CFrame = wheelCF * CFrame.new(0, 0, -0.7) * CFrame.Angles(0, 0, ang + math.pi / 8) * CFrame.new(0, 7.6, 0), Color = WHITE, CanCollide = false})
+			local slice = part(wheel, {Name = "Slice", Size = Vector3.new(6.6, 8.8, 0.3), CFrame = hub * CFrame.Angles(0, 0, -ang) * CFrame.new(0, 5.2, -0.9), Color = colors[i + 1], CanCollide = false})
+			local reward = C.SPIN_REWARDS[i + 1]
+			if reward then
+				local t = Kit.surfaceText(slice, Enum.NormalId.Front, reward.Icon, WHITE, 20)
+				t.TextStrokeTransparency = 1
+				t.Size = UDim2.fromScale(0.7, 0.42)
+				t.Position = UDim2.fromScale(0.15, 0.08)
+			end
+			part(wheel, {Name = "Spoke", Size = Vector3.new(0.35, 9.8, 0.4), CFrame = hub * CFrame.Angles(0, 0, -(ang + math.pi / 8)) * CFrame.new(0, 5, -0.95), Color = Kit.GOLD, Material = M.Metal, CanCollide = false})
 		end
-		part(booth, {Name = "Hub", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 3, 3), CFrame = wheelCF * CFrame.new(0, 0, -0.8) * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(255, 230, 60)})
-		Kit.wedge(booth, {Name = "Pointer", Size = Vector3.new(0.6, 2.4, 2), CFrame = wheelCF * CFrame.new(0, 9.4, -0.8) * CFrame.Angles(math.pi / 2, 0, 0), Color = rgb(230, 40, 50)})
+		for i = 0, 15 do
+			local ang = i * math.pi / 8 + math.pi / 16
+			part(wheel, {Name = "RimBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.8, 0.8, 0.8), CFrame = hub * CFrame.Angles(0, 0, ang) * CFrame.new(0, 10.4, -0.8), Color = i % 2 == 0 and WHITE or rgb(255, 230, 120), Material = M.Neon, CanCollide = false})
+		end
+		local hubCap = part(wheel, {Name = "Hub", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 4, 4), CFrame = hub * CFrame.new(0, 0, -1.2) * FACE, Color = Kit.GOLD, Material = M.Metal, CanCollide = false})
+		local glow = Instance.new("PointLight")
+		glow.Color = rgb(255, 230, 150)
+		glow.Range = 20
+		glow.Brightness = 1.2
+		glow.Parent = hubCap
+		-- Red pointer at the top (does not spin)
+		Kit.wedge(spin, {Name = "Pointer", Size = Vector3.new(0.8, 2.6, 2.4), CFrame = hub * CFrame.new(0, 12, -1.3) * CFrame.Angles(math.pi / 2, 0, 0), Color = rgb(230, 40, 50)})
+		-- Sign across the top
+		local sign = part(spin, {Name = "Sign", Size = Vector3.new(22, 4.4, 0.8), CFrame = at(0, 29.2, 1.2), Color = rgb(40, 25, 90)})
+		local st = Kit.surfaceText(sign, Enum.NormalId.Front, "LUCKY SPIN", Kit.GOLD, 30)
+		st.TextStrokeTransparency = 1
+		part(spin, {Name = "SignFrame", Size = Vector3.new(23, 5.4, 0.5), CFrame = at(0, 29.2, 1.6), Color = Kit.GOLD})
+		for x = -10.5, 10.5, 1.75 do
+			for _, y in ipairs({31.9, 26.5}) do
+				part(spin, {Name = "SignBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.6, 0.6, 0.6), CFrame = at(x, y, 0.8), Color = rgb(255, 245, 190), Material = M.Neon, CanCollide = false})
+			end
+		end
+		local sparkle = Instance.new("ParticleEmitter")
+		sparkle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		sparkle.Color = ColorSequence.new(rgb(255, 240, 160))
+		sparkle.LightEmission = 1
+		sparkle.Size = NumberSequence.new(0.6, 0)
+		sparkle.Lifetime = NumberRange.new(1, 1.6)
+		sparkle.Rate = 8
+		sparkle.Speed = NumberRange.new(1, 3)
+		sparkle.SpreadAngle = Vector2.new(180, 180)
+		sparkle.Parent = hubCap
+		-- Walk up to the front of the stage to spin
+		local anchor = part(spin, {Name = "SpinAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 4, -12), Transparency = 1, CanCollide = false})
+		W.SpinPrompt = Kit.prompt(anchor, "Spin the Wheel", "Lucky Spin", 0, 16)
+	end
 
-		local anchor = part(booth, {Name = "SpinAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 6, -5), Transparency = 1, CanCollide = false})
-		W.SpinPrompt = Kit.prompt(anchor, "Spin the Wheel", "Lucky Spin", 0, 14)
+	------------------------------------------------------------------
+	-- TOP 10 LEADERBOARD board (players' games draw the board and its Money/Speed tabs)
+	------------------------------------------------------------------
+	do
+		local lb = Instance.new("Model")
+		lb.Name = "Leaderboard"
+		lb.Parent = lobby
+		local pos = ENTRANCE + Vector3.new(-34, 0, -75)
+		local cf = CFrame.lookAt(pos, pos + Vector3.new(0.7, 0, -0.7))
+		local function at(x, y, z)
+			return cf * CFrame.new(x, y, z)
+		end
+		for _, sx in ipairs({-1, 1}) do
+			part(lb, {Name = "Post", Size = Vector3.new(1.6, 26, 1.6), CFrame = at(sx * 12.6, 13, 0.8), Color = rgb(250, 250, 255), Material = M.Marble})
+			part(lb, {Name = "PostTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2.6, 2.6, 2.6), CFrame = at(sx * 12.6, 26.6, 0.8), Color = Kit.GOLD, Material = M.Neon, CanCollide = false})
+		end
+		part(lb, {Name = "Frame", Size = Vector3.new(25, 21, 0.6), CFrame = at(0, 14.5, 0.5), Color = Kit.GOLD, Material = M.SmoothPlastic})
+		local screen = part(lb, {Name = "LeaderboardScreen", Size = Vector3.new(23.6, 19.6, 0.4), CFrame = at(0, 14.5, 0), Color = rgb(30, 22, 60)})
+		screen:SetAttribute("Leaderboard", true)
+		part(lb, {Name = "Base", Size = Vector3.new(28, 1, 5), CFrame = at(0, 0.5, 0.8), Color = rgb(70, 45, 140)})
+		W.LeaderboardScreen = screen
+		W.Center = ENTRANCE -- the island's centre (the fence ring is measured from here)
 	end
 
 	------------------------------------------------------------------
@@ -1093,6 +1214,7 @@ function World.build(C, Kit)
 			npc:PivotTo(npc:GetPivot() + Vector3.new(0, pos.Y + 0.6 - (box.Position.Y - size.Y / 2), 0))
 			standH = size.Y
 			npc.Parent = inviteModel
+			animateNpc(npc, 6)
 		end
 		-- The label floats on its own part, so swapping the character keeps it
 		local labelPart = part(inviteModel, {Name = "InviteLabel", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(pos + Vector3.new(0, standH + 1.5, 0)), Transparency = 1, CanCollide = false, CanQuery = false})

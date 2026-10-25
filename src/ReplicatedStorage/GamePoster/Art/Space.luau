@@ -209,4 +209,33 @@ A["Steal a Brainrut"] = function(k, rng)
 	k.text(0.22, 0.2, 0.3, 0.12, "STEAL!", GOLD, {stroke = true})
 end
 
+-- parody of Devil May Cry 5: a smug white-haired demon hunter, a huge sword and hellfire
+A["Devil May Nubs V"] = function(k, rng)
+	k.sky(rgb(25, 0, 8), rgb(150, 15, 25))
+	k.text(0.5, 0.46, 0.95, 0.9, "V", rgb(255, 40, 50), {t = 0.35, font = Enum.Font.GothamBlack})
+	-- hellfire along the bottom
+	k.ellipse(0.5, 1.02, 1.5, 0.45, rgb(255, 80, 20), {t = 0.25})
+	for i = 0, 6 do
+		local x = 0.04 + i * 0.155
+		k.ellipse(x, 0.96, 0.13, 0.3 + rng:NextNumber(0, 0.18), rgb(255, 130, 30), {t = 0.1})
+		k.ellipse(x, 0.99, 0.07, 0.16, rgb(255, 230, 120))
+	end
+	-- the big sword over his shoulder
+	k.rect(0.66, 0.42, 0.045, 0.8, rgb(205, 210, 220), {rot = 28})
+	k.rect(0.79, 0.1, 0.16, 0.035, rgb(60, 55, 65), {rot = 28})
+	k.circle(0.82, 0.05, 0.05, rgb(200, 30, 40))
+	-- long red coat
+	k.ellipse(0.5, 0.8, 0.4, 0.5, rgb(185, 20, 30))
+	k.rect(0.5, 0.8, 0.06, 0.45, rgb(35, 10, 12))
+	-- face, swept white hair and a smirk
+	k.circle(0.5, 0.46, 0.2, rgb(255, 215, 185))
+	k.ellipse(0.5, 0.37, 0.28, 0.14, rgb(240, 240, 250))
+	k.ellipse(0.4, 0.45, 0.07, 0.17, rgb(240, 240, 250), {rot = 10})
+	k.ellipse(0.6, 0.45, 0.07, 0.17, rgb(240, 240, 250), {rot = -10})
+	k.rect(0.46, 0.46, 0.04, 0.016, B, {rot = 8})
+	k.rect(0.54, 0.46, 0.04, 0.016, B, {rot = -8})
+	k.rect(0.52, 0.53, 0.05, 0.012, rgb(120, 40, 40), {rot = -12})
+	k.text(0.5, 0.09, 0.86, 0.13, "DEVIL MAY NUBS", GOLD, {stroke = true})
+end
+
 return A

@@ -17,7 +17,8 @@ C.ROTATE_TIME = 420             -- every 7 minutes every vault level gets 3 bran
 C.LOCK_TIME = 90                -- seconds a base stays locked (the timer pauses while you're being chased)
 C.SELL_MULTIPLIER = 30          -- an installed game sells for (income per second x this)
 C.UNINSTALLED_SELL = 10         -- a game that isn't installed yet sells for (its level's base income x this)
-C.MAX_HELD = 2                  -- games a player can hold at once
+C.MAX_HELD = 1                  -- games a player can hold at once
+C.MAX_HELD_PASS = 2             -- ...with the 2x Steal game pass
 C.SAVE_STORE = "StealAGameSave_v2"
 C.AUTOSAVE_TIME = 60
 
@@ -37,6 +38,7 @@ C.CHANCE_SETS = {
 	{55, 33, 12}, {50, 35, 15}, {58, 30, 12}, {45, 40, 15},
 	{52, 33, 15}, {48, 38, 14}, {60, 30, 10}, {47, 41, 12},
 }
+C.EXTRA_CHANCE = 5              -- spawn chance of a level's bonus 4th game (only the last level has one)
 
 ------------------------------------------------------------------
 -- RARITY (rolled for every copy of a game)
@@ -103,6 +105,7 @@ C.DAILY = {
 C.GAMEPASSES = {
 	{Key = "DoubleMoney", Id = 0, Name = "2x Money", Desc = "Every game in your base earns double!", Price = 199},
 	{Key = "DoubleSpeed", Id = 0, Name = "2x Speed", Desc = "Run twice as fast as everyone else!", Price = 149},
+	{Key = "DoubleSteal", Id = 0, Name = "2x Steal", Desc = "Carry 2 games at once, forever!", Price = 250},
 }
 -- Spin the Lucky Wheel again without waiting a day
 C.SPIN_PRODUCT = {Key = "Spin", Id = 0, Name = "Extra Spin", Price = 25}
@@ -124,12 +127,18 @@ C.PRODUCTS = {
 	-- Section decides where it shows in the shop: "featured", "boost", "speed" or "cash"
 	{Key = "Starter", Section = "featured", Id = 0, Name = "Starter Pack", Desc = "$25K, +5,000 speed and an Epic game (once per player)", Price = 99, OneTime = true},
 	{Key = "Treadmill", Section = "boost", Id = 0, Name = "Treadmill Upgrade", Desc = "+1 treadmill level instantly", Price = 49},
-	{Key = "SpeedS", Section = "speed", Id = 0, Name = "Speed Boost", Desc = "+25% speed (at least +2,000)", Price = 19, Percent = 25, Min = 2000},
-	{Key = "SpeedM", Section = "speed", Id = 0, Name = "Speed Surge", Desc = "+100% speed (at least +10,000)", Price = 59, Percent = 100, Min = 10000},
-	{Key = "SpeedL", Section = "speed", Id = 0, Name = "Speed Storm", Desc = "+400% speed (at least +50,000)", Price = 199, Percent = 400, Min = 50000},
-	{Key = "CashS", Section = "cash", Id = 0, Name = "Cash Stack", Desc = "10 minutes of your base's income (at least $5K)", Price = 29, Minutes = 10, Min = 5000},
-	{Key = "CashL", Section = "cash", Id = 0, Name = "Cash Vault", Desc = "1 hour of your base's income (at least $50K)", Price = 99, Minutes = 60, Min = 50000},
-	{Key = "CashXL", Section = "cash", Id = 0, Name = "Cash Mountain", Desc = "6 hours of your base's income (at least $500K)", Price = 399, Minutes = 360, Min = 500000},
+	-- SPEED PACKS: a fixed amount of speed (same units as the speed counter)
+	{Key = "SpeedS", Section = "speed", Id = 0, Name = "Speed Snack", Amount = 10000, Price = 9},
+	{Key = "SpeedM", Section = "speed", Id = 0, Name = "Speed Boost", Amount = 100000, Price = 29},
+	{Key = "SpeedL", Section = "speed", Id = 0, Name = "Speed Surge", Amount = 1000000, Price = 79},
+	{Key = "SpeedXL", Section = "speed", Id = 0, Name = "Speed Storm", Amount = 10000000, Price = 199},
+	{Key = "SpeedXXL", Section = "speed", Id = 0, Name = "Speed Supernova", Amount = 100000000, Price = 449},
+	-- CASH PACKS: minutes of your base's income (the shop shows the exact amount you'd get)
+	{Key = "Cash5", Section = "cash", Id = 0, Name = "Cash Handful", Minutes = 5, Min = 2500, Price = 9},
+	{Key = "CashS", Section = "cash", Id = 0, Name = "Cash Stack", Minutes = 15, Min = 5000, Price = 25},
+	{Key = "CashL", Section = "cash", Id = 0, Name = "Cash Vault", Minutes = 60, Min = 50000, Price = 79},
+	{Key = "CashXL", Section = "cash", Id = 0, Name = "Cash Mountain", Minutes = 360, Min = 500000, Price = 249},
+	{Key = "CashXXL", Section = "cash", Id = 0, Name = "Cash Planet", Minutes = 1440, Min = 2000000, Price = 699},
 }
 
 ------------------------------------------------------------------
@@ -221,6 +230,7 @@ end
 C.GUARD_START_POINTS = 700
 C.GUARD_POINT_GROWTH = 1.233    -- each level deeper is this much faster (level 50 is about 20 million)
 C.GUARD_IDLE_REAL_SPEED = 20
+C.GUARD_RETURN_SPEED = 90       -- how fast a shopkeeper walks back to their post after a chase
 C.GUARD_REACTION = 0.6
 C.GUARD_GIVE_UP = 120
 C.GUARD_LATE_LEVEL = 25         -- past this level shopkeepers get an extra speed-up
@@ -246,7 +256,9 @@ function C.recommendedSpeed(level)
 end
 
 C.SLAP_COOLDOWN = 0.8
+C.SLAP_HIT_DELAY = 0.12        -- the slap lands as the arm swings across (matches the animation)
 C.STEAL_LEVEL_GRACE = 2         -- stolen games earn fully up to (deepest vault level you've stolen from + this)
+C.ESCAPE_CONFIRM_TIME = 0.6     -- seconds you must stay out of the vault before the chase ends
 C.FALL_RETURN_Y = -40           -- falling below this height returns any stolen games
 C.FRIEND_CASH_BOOST = 0.1       -- +10% cash for every friend in the same server
 C.SLAP_RANGE = 8
@@ -259,31 +271,41 @@ C.PLOT_D = 84
 C.FLOOR_H = 20
 C.CASES_PER_FLOOR = 8           -- on the Starter base (4 on each side); bigger bases have more
 C.START_CASES = 4
-C.MAX_FLOORS = 2                -- every base tier has 2 floors
+C.MAX_FLOORS = 4                -- the biggest base type has 4 floors
 C.CASE_COST_BASE = 150          -- price of case #5, each case after costs CASE_COST_GROWTH times more
 C.CASE_COST_GROWTH = 1.55
 C.CASE_COST_AFTER_8 = 25        -- cases 9+ cost this many times more
 C.FLOOR_COST = 250000           -- price of the 2nd floor
+C.FLOOR_COSTS = {[2] = 250000, [3] = 1e12, [4] = 3e13} -- price of each extra floor
 
 -- BASE TIERS: after both floors are full, the next upgrade revamps the whole
 -- base: longer, more rows of cases on every floor, and a nicer look.
 C.BASE_TIERS = {
-	{Name = "Starter Base", Rows = 4, Cost = 0,
+	{Name = "Starter Base", Rows = 4, Floors = 2, Cost = 0,
 		Wall = rgb(255, 246, 228), WallMat = M.SmoothPlastic, Wainscot = rgb(150, 105, 70), WainscotMat = M.WoodPlanks,
 		Trim = rgb(255, 255, 255), TrimMat = M.SmoothPlastic, Floor = rgb(215, 190, 150), FloorMat = M.WoodPlanks, Tile = rgb(195, 165, 125),
 		Pillar = rgb(255, 255, 255), PillarMat = M.Marble, Pedestal = rgb(70, 70, 85)},
-	{Name = "Deluxe Base", Rows = 6, Cost = 5e6,
+	{Name = "Deluxe Base", Rows = 6, Floors = 2, Cost = 5e6,
 		Wall = rgb(225, 238, 255), WallMat = M.SmoothPlastic, Wainscot = rgb(60, 95, 180), WainscotMat = M.SmoothPlastic,
 		Trim = rgb(255, 205, 60), TrimMat = M.Metal, Floor = rgb(235, 235, 245), FloorMat = M.Marble, Tile = rgb(195, 205, 230),
 		Pillar = rgb(245, 245, 250), PillarMat = M.Marble, Pedestal = rgb(50, 70, 140), Windows = true, Banners = true},
-	{Name = "Mega Base", Rows = 8, Cost = 2e8,
+	{Name = "Mega Base", Rows = 8, Floors = 2, Cost = 2e8,
 		Wall = rgb(240, 225, 255), WallMat = M.SmoothPlastic, Wainscot = rgb(120, 60, 200), WainscotMat = M.SmoothPlastic,
 		Trim = rgb(255, 255, 255), TrimMat = M.Marble, Floor = rgb(245, 240, 255), FloorMat = M.Marble, Tile = rgb(215, 195, 250),
 		Pillar = rgb(170, 110, 255), PillarMat = M.SmoothPlastic, Pedestal = rgb(90, 50, 160), Windows = true, Banners = true, Glow = true},
-	{Name = "Ultimate Base", Rows = 10, Cost = 5e9,
+	{Name = "Ultimate Base", Rows = 10, Floors = 2, Cost = 5e9,
 		Wall = rgb(255, 255, 255), WallMat = M.Marble, Wainscot = rgb(255, 200, 50), WainscotMat = M.Metal,
 		Trim = rgb(255, 215, 80), TrimMat = M.Metal, Floor = rgb(255, 250, 235), FloorMat = M.Marble, Tile = rgb(255, 225, 140),
 		Pillar = rgb(255, 215, 80), PillarMat = M.Metal, Pedestal = rgb(40, 40, 50), Windows = true, Banners = true, Glow = true, Statues = true},
+	-- Late game: even longer bases with extra floors (stairs keep alternating sides)
+	{Name = "Legendary Base", Rows = 12, Floors = 3, Cost = 2e11,
+		Wall = rgb(255, 245, 225), WallMat = M.Marble, Wainscot = rgb(255, 150, 40), WainscotMat = M.Metal,
+		Trim = rgb(255, 215, 80), TrimMat = M.Metal, Floor = rgb(255, 248, 235), FloorMat = M.Marble, Tile = rgb(255, 200, 120),
+		Pillar = rgb(255, 170, 40), PillarMat = M.Metal, Pedestal = rgb(60, 40, 30), Windows = true, Banners = true, Glow = true, Statues = true},
+	{Name = "Galaxy Base", Rows = 12, Floors = 4, Cost = 8e12,
+		Wall = rgb(235, 230, 255), WallMat = M.SmoothPlastic, Wainscot = rgb(80, 50, 200), WainscotMat = M.SmoothPlastic,
+		Trim = rgb(170, 230, 255), TrimMat = M.SmoothPlastic, Floor = rgb(240, 238, 255), FloorMat = M.Marble, Tile = rgb(190, 170, 255),
+		Pillar = rgb(130, 90, 255), PillarMat = M.SmoothPlastic, Pedestal = rgb(30, 25, 60), Windows = true, Banners = true, Glow = true, Statues = true},
 }
 
 local function caseCost(n)
@@ -302,7 +324,7 @@ function C.baseLayout(upgrades)
 		local per = C.BASE_TIERS[tier].Rows * 2
 		if cases < floors * per then
 			cases += 1
-		elseif floors < C.MAX_FLOORS then
+		elseif floors < (C.BASE_TIERS[tier].Floors or 2) then
 			floors += 1
 		elseif tier < #C.BASE_TIERS then
 			tier += 1
@@ -319,8 +341,8 @@ function C.nextUpgrade(floors, cases, tier)
 	local per = C.BASE_TIERS[tier].Rows * 2
 	if cases < floors * per then
 		return "case", caseCost(cases + 1)
-	elseif floors < C.MAX_FLOORS then
-		return "floor", C.FLOOR_COST
+	elseif floors < (C.BASE_TIERS[tier].Floors or 2) then
+		return "floor", C.FLOOR_COSTS[floors + 1] or C.FLOOR_COST
 	elseif tier < #C.BASE_TIERS then
 		return "tier", C.BASE_TIERS[tier + 1].Cost
 	end
@@ -515,7 +537,8 @@ C.ZONES = {
 			{"Nebula Nook", {"Among Bus", "Outer Mild", "Herbal Space Program"}},
 			{"Black Hole Bazaar", {"Bed Space", "Hallo Infinite", "Elite Dangerless"}},
 			{"Starlight Archive", {"Super Marco Galaxy", "Ratchet & Crank", "Metro-Void Prime"}},
-			{"The Forbidden Archive", {"Grand Theft Avocado VI", "Half-Lite 3", "Steal a Brainrut"}},
+			-- the 4th game is the rarest in the whole vault (see EXTRA_CHANCE)
+			{"The Forbidden Archive", {"Grand Theft Avocado VI", "Half-Lite 3", "Steal a Brainrut", "Devil May Nubs V"}},
 		},
 	},
 }
@@ -530,7 +553,7 @@ for zi, zone in ipairs(C.ZONES) do
 		local chances = C.CHANCE_SETS[(i - 1) % #C.CHANCE_SETS + 1]
 		local games = {}
 		for gi, name in ipairs(store[2]) do
-			table.insert(games, {Name = name, Rarity = zone.Rarity, Color = zone.Color, Chance = chances[gi], GI = gi})
+			table.insert(games, {Name = name, Rarity = zone.Rarity, Color = zone.Color, Chance = chances[gi] or C.EXTRA_CHANCE, GI = gi})
 		end
 		table.insert(C.LEVELS, {
 			Index = i, Zone = zone, ZoneIndex = zi, Sub = si, Store = store[1], Games = games,

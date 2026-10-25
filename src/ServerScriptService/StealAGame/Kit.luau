@@ -60,6 +60,9 @@ end
 pcall(function() PhysicsService:RegisterCollisionGroup("Guards") end)
 pcall(function() PhysicsService:RegisterCollisionGroup("Decor") end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Guards", "Decor", false) end)
+-- Players pass through shopkeepers (catching is by distance), so bumping one never knocks its body apart
+pcall(function() PhysicsService:RegisterCollisionGroup("Players") end)
+pcall(function() PhysicsService:CollisionGroupSetCollidable("Guards", "Players", false) end)
 
 ------------------------------------------------------------------
 -- NUMBERS

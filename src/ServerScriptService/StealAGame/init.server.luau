@@ -34,6 +34,7 @@ local Kit = require(script.Kit)
 local World = require(script.World)
 local Guards = require(script.Guards)
 local Base = require(script.Base)
+local Pets = require(script.Pets)
 local GamePoster = require(ReplicatedStorage:WaitForChild("GamePoster"))
 Base.init(C, Kit)
 
@@ -59,9 +60,11 @@ local areaFunction = Kit.func("ClaimArea")
 local installedEvent = Kit.event("Installed")
 local rewardEvent = Kit.event("RewardPopup")
 local alertEvent = Kit.event("Alert")
+local soundEvent = Kit.event("PlaySound")
 local slowEvent = Kit.event("SlowDown")
 local tutorialEvent = Kit.event("TutorialDone")
 local treadGainEvent = Kit.event("TreadGain")
+local slapSwingEvent = Kit.event("SlapSwing")
 
 ------------------------------------------------------------------
 -- DATA FOR THE CLIENT (Index, trails, speed numbers)
@@ -310,8 +313,9 @@ local function addAura(item, rec)
 	local zi = rec.R or 1
 	local light = item:FindFirstChildOfClass("PointLight")
 	if light then
-		light.Range = 10 + zi * 1.6
-		light.Brightness = 1.5 + zi * 0.2
+		-- kept soft: the case's white posts and glass sit right next to it and blow out under bloom
+		light.Range = 7 + zi * 0.6
+		light.Brightness = 0.45 + zi * 0.07
 	end
 	if zi < 3 then return end
 	local colors
@@ -476,8 +480,8 @@ local function createItem(rec, hidden)
 	CollectionService:AddTag(timer.Parent, "InstallTimer")
 	local light = Instance.new("PointLight")
 	light.Color = hidden and Color3.new(1, 1, 1) or rec.Color
-	light.Range = 10
-	light.Brightness = 1.5
+	light.Range = 7
+	light.Brightness = 0.45
 	light.Shadows = false
 	light.Parent = item
 	if not hidden then
@@ -514,8 +518,8 @@ local function celebrate(item, rec, bounce)
 	burst:Emit(50 + (rec.R or 1) * 10)
 	local flash = Instance.new("PointLight")
 	flash.Color = rec.Color
-	flash.Range = 22
-	flash.Brightness = 6
+	flash.Range = 14
+	flash.Brightness = 2
 	flash.Parent = item
 	TweenService:Create(flash, TweenInfo.new(1.2), {Brightness = 0}):Play()
 	if bounce and item.Anchored then
@@ -592,6 +596,10 @@ local function syncHeld(player)
 	updateSpeed(player)
 end
 
+local function maxHeld(player)
+	return player:GetAttribute("Pass_DoubleSteal") == true and C.MAX_HELD_PASS or C.MAX_HELD
+end
+
 local function canTake(player)
 	local plot = playerPlots[player]
 	if not plot then
@@ -602,8 +610,13 @@ local function canTake(player)
 		notify(player, "Get off the treadmill first!", RED)
 		return false
 	end
-	if #heldList(player) >= C.MAX_HELD then
-		notify(player, "Your hands are full! (" .. C.MAX_HELD .. " games max)", RED)
+	local max = maxHeld(player)
+	if #heldList(player) >= max then
+		if max < C.MAX_HELD_PASS then
+			notify(player, "Your hands are full! Get 2x Steal in the Shop to carry 2 games.", RED)
+		else
+			notify(player, "Your hands are full! (" .. max .. " games max)", RED)
+		end
 		return false
 	end
 	return true
@@ -791,7 +804,7 @@ local function onCase(player, plot, slot)
 			return
 		end
 		if slot.Data then
-			if #list < C.MAX_HELD then
+			if #list < maxHeld(player) then
 				local item, rec = takeFromSlot(plot, slot)
 				table.insert(list, {Item = item, Data = rec, Kind = "own"})
 				syncHeld(player)
@@ -881,6 +894,7 @@ local function doUpgrade(player, plot)
 		return
 	end
 	cash.Value -= cost
+	soundEvent:FireClient(player, "buy")
 	local data = playerData[player]
 	data.Upgrades += 1
 	local floors, cases, tier = C.baseLayout(data.Upgrades)
@@ -1035,12 +1049,40 @@ for i, cf in ipairs(world.PlotCFrames) do
 	plot.LockLeft = 0
 	plot.LockButton.Touched:Connect(function(hit)
 		local player = Players:GetPlayerFromCharacter(hit.Parent)
+		-- relocking is instant: the unlock button is up on the wall, out of reach of the pad
 		if player and player == plot.Owner and plot.LockLeft <= 0 then
 			plot.LockLeft = C.LOCK_TIME
 			plot.Barrier.Transparency = 0.45
+			if plot.UnlockPrompt then
+				plot.UnlockPrompt.MaxActivationDistance = 8
+			end
 			notify(player, "Base locked for " .. Kit.fmtTime(C.LOCK_TIME) .. "! (The timer pauses while you're being chased)", GREEN)
+			soundEvent:FireClient(player, "lock")
 		end
 	end)
+	-- Hold the UNLOCK button on the wall to open your base early
+	if plot.UnlockPrompt then
+		plot.UnlockPrompt.Triggered:Connect(function(player)
+			if player ~= plot.Owner or plot.LockLeft <= 0 then return end
+			plot.LockLeft = 0
+			plot.UnlockPrompt.MaxActivationDistance = 0
+			for _, b in ipairs(Base.barriers(plot)) do
+				b.Transparency = 1
+				b.CanCollide = false
+			end
+			plot.LockLabel.Text = "LOCK BASE"
+			notify(player, "Base unlocked!", BLUE)
+			soundEvent:FireClient(player, "unlock")
+			-- the button flashes as a "done!"
+			local btn = plot.UnlockButton
+			if btn then
+				btn.Color = Color3.fromRGB(255, 255, 255)
+				task.delay(0.35, function()
+					btn.Color = Color3.fromRGB(70, 220, 110)
+				end)
+			end
+		end)
+	end
 
 	table.insert(plots, plot)
 end
@@ -1055,6 +1097,9 @@ end)
 ------------------------------------------------------------------
 -- SHOPKEEPERS
 ------------------------------------------------------------------
+-- PETS: eggs, hatching, and the Pet Hatchery beside the Trail Shop (pets speed up installs)
+Pets.init({Kit = Kit, fmt = fmt, lobby = workspace:FindFirstChild("StealAGameMap") and workspace.StealAGameMap:FindFirstChild("Lobby")})
+
 local function guardLabelText(g)
 	return string.format('<font color="#%s">%s</font>', C.LEVELS[g.Level].Accent:ToHex(), string.upper(g.Title))
 end
@@ -1072,8 +1117,21 @@ for level = 1, C.NUM_LEVELS do
 			CheckPos = root.Position, CheckTime = os.clock(),
 		}
 		g.RealSpeed = C.realSpeed(g.Points)
+		g.MustBeat = C.realSpeed(C.recommendedSpeed(level))
 		g.IdleText = guardLabelText(g)
-		g.Label = Kit.billboard(head or root, 420, 96, head and head.Size.Y * 1.3 + 2 or 4, g.IdleText, 160)
+		-- float the name above the tallest hat/helmet piece (a Toy Soldier's shako and plume covered it)
+		local top = head and head.Size.Y / 2 or 2
+		if head then
+			for _, p in ipairs(model:GetDescendants()) do
+				local d = p:IsA("BasePart") and p.Position - head.Position
+				if d and Vector3.new(d.X, 0, d.Z).Magnitude < head.Size.X then
+					-- largest side, since hats like the shako are cylinders turned upright
+					top = math.max(top, d.Y + math.max(p.Size.X, p.Size.Y, p.Size.Z) / 2)
+				end
+			end
+		end
+		g.Label = Kit.billboard(head or root, 420, 96, top + 2.2, g.IdleText, 160)
+		g.Label.TextWrapped = false -- one line at every distance (it used to drop the last word when you got close)
 		guards[level] = g
 	end)
 end
@@ -1132,6 +1190,12 @@ local function insideHall(p)
 	return Vector3.new(math.clamp(p.X, -C.ROOM_W / 2 + 4, C.ROOM_W / 2 - 4), p.Y, math.clamp(p.Z, C.HALL_START_Z + 4, world.HallEnd - 4))
 end
 
+-- A REAL escape: you are out past the entrance (or outside the walls), judged by where
+-- you stand on the ground plan - height is ignored, so a big jump never counts.
+local function outOfVault(p)
+	return p.Z < C.HALL_START_Z - 4 or math.abs(p.X) > C.ROOM_W / 2 + 8 or p.Z > world.HallEnd + 8
+end
+
 local function updateGuard(g, now)
 	local root, hum = g.Root, g.Humanoid
 	if not root.Parent then return end
@@ -1145,13 +1209,22 @@ local function updateGuard(g, now)
 	end
 	if now < g.PauseUntil then
 		hum:MoveTo(root.Position)
+		-- standing still on purpose (laughing) is not "stuck", so don't teleport them home after
+		g.CheckPos, g.CheckTime = root.Position, now
 		return
 	end
 	local t = g.Target
 	if t then
 		local tr = t.Parent and getRoot(t)
 		local valid = tr and holdsFromLevel(t, g.Level)
-		if valid and not world.roomAt(tr.Position) then
+		-- must stay out for a moment, so touching a boundary at high speed doesn't count
+		if valid and outOfVault(tr.Position) then
+			g.OutSince = g.OutSince or now
+		else
+			g.OutSince = nil
+		end
+		if valid and g.OutSince and now - g.OutSince >= C.ESCAPE_CONFIRM_TIME then
+			g.OutSince = nil
 			for _, e in ipairs(heldList(t)) do
 				if e.Kind == "vault" and e.Spot.Level == g.Level then
 					e.Escaped = true
@@ -1190,8 +1263,14 @@ local function updateGuard(g, now)
 			hum:MoveTo(root.Position)
 			return
 		end
-		hum.WalkSpeed = g.RealSpeed
 		local tRoot = getRoot(t)
+		-- slower than the level's recommended speed: the shopkeeper always out-runs you
+		local tHum = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
+		local speed = g.RealSpeed
+		if tHum and tHum.WalkSpeed < g.MustBeat then
+			speed = math.max(speed, tHum.WalkSpeed * 1.25)
+		end
+		hum.WalkSpeed = speed
 		local tp = tRoot.Position
 		-- Aim a little ahead of a moving player, and only catch when actually touching
 		local ahead = tp + tRoot.AssemblyLinearVelocity * 0.1
@@ -1204,16 +1283,26 @@ local function updateGuard(g, now)
 		end
 	else
 		g.Label.Text = g.IdleText
-		hum.WalkSpeed = math.max(C.GUARD_IDLE_REAL_SPEED, g.RealSpeed * 0.5)
 		local flat = Vector3.new(g.Post.X - root.Position.X, 0, g.Post.Z - root.Position.Z)
+		-- hurrying home: a fixed fast pace, whatever their chase speed
+		hum.WalkSpeed = flat.Magnitude > 2 and math.max(C.GUARD_RETURN_SPEED, g.RealSpeed) or C.GUARD_IDLE_REAL_SPEED
 		if flat.Magnitude > 2 then
+			g.Settled = false
 			hum:MoveTo(g.Post)
 			if now - g.CheckTime > 3 then
 				if (root.Position - g.CheckPos).Magnitude < 1 then
-					g.Model:PivotTo(CFrame.new(g.Post))
+					-- stuck: put them back at their post, facing the entrance
+					g.Model:PivotTo(CFrame.lookAt(g.Post, g.Post + Vector3.new(0, 0, -1)))
 				end
 				g.CheckPos, g.CheckTime = root.Position, now
 			end
+		elseif not g.Settled then
+			-- arrived: stop walking completely and face the entrance again
+			g.Settled = true
+			hum:Move(Vector3.zero)
+			hum:MoveTo(root.Position)
+			local p = root.Position
+			g.Model:PivotTo(CFrame.lookAt(p, p + Vector3.new(0, 0, -1)))
 		end
 	end
 end
@@ -1256,6 +1345,7 @@ local function applyTrail(player)
 	root:SetAttribute("TrailFx", nil)
 	root:SetAttribute("TrailColor", nil)
 	root:SetAttribute("TrailRainbow", nil)
+	root:SetAttribute("TrailBubbles", nil)
 	local idx = player:GetAttribute("TrailEquipped") or 0
 	local t = C.TRAILS[idx]
 	if not t then return end
@@ -1300,10 +1390,16 @@ local function applyTrail(player)
 		tagRainbow(tr)
 		return tr
 	end
+	-- near-white trails glare under bloom, so they glow about half as much
+	local lum = 0
+	for _, c in ipairs(t.Colors) do
+		lum += (c.R * 0.3 + c.G * 0.59 + c.B * 0.11) / #t.Colors
+	end
+	local glow = lum > 0.75 and 0.5 or 1
 	local function emitter(props)
 		local pe = Instance.new("ParticleEmitter")
 		pe.Name = "StealTrail"
-		pe.LightEmission = 1
+		pe.LightEmission = 0.6 * glow
 		pe.SpreadAngle = Vector2.new(180, 180)
 		for k, v in pairs(props) do
 			pe[k] = v
@@ -1316,7 +1412,7 @@ local function applyTrail(player)
 		l.Name = "StealTrail"
 		l.Color = color
 		l.Range = range or 12
-		l.Brightness = 1.5
+		l.Brightness = 0.7 * glow
 		l.Shadows = false
 		l.Parent = root
 	end
@@ -1325,12 +1421,12 @@ local function applyTrail(player)
 	trail({
 		Lifetime = t.Life, WidthScale = NumberSequence.new(t.Width, 0.15),
 		Transparency = NumberSequence.new({kp(0, 0.05), kp(0.6, 0.35), kp(1, 1)}),
-		LightEmission = t.Animated and 0.35 or (t.Light or 0),
+		LightEmission = (t.Animated and 0.35 or (t.Light or 0) * 0.6) * glow,
 	})
-	trail({Lifetime = t.Life * 0.8, WidthScale = NumberSequence.new(t.Width * 1.9, 0.3), Transparency = NumberSequence.new(0.8, 1), LightEmission = 1})
+	trail({Lifetime = t.Life * 0.8, WidthScale = NumberSequence.new(t.Width * 1.9, 0.3), Transparency = NumberSequence.new(0.86, 1), LightEmission = 0.5 * glow})
 	if idx >= 4 then
 		trail({
-			Lifetime = t.Life * 0.55, WidthScale = NumberSequence.new(t.Width * 0.28, 0), Transparency = NumberSequence.new(0, 1), LightEmission = 1,
+			Lifetime = t.Life * 0.55, WidthScale = NumberSequence.new(t.Width * 0.28, 0), Transparency = NumberSequence.new(0.2, 1), LightEmission = 0.6 * glow,
 			Color = t.Animated and colors or ColorSequence.new(Color3.new(1, 1, 1), t.Colors[1]),
 		})
 	end
@@ -1378,6 +1474,56 @@ local function applyTrail(player)
 		-- aurora: soft drifting ribbons of light
 		emitter({Texture = TEX_SMOKE, Color = colors, Size = NumberSequence.new(2, 4), Transparency = NumberSequence.new(0.7, 1), Lifetime = NumberRange.new(1, 1.6), Rate = 10, Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, 3, 0), LightEmission = 1})
 		light(t.Colors[1], 14)
+	end
+	-- SIGNATURE EFFECT: every trail has one thing of its own
+	local down, up = Vector3.new(0, -26, 0), Vector3.new(0, 3, 0)
+	local name = t.Name
+	if name == "Dust" then
+		-- little dust puffs kicked up at your feet
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(200, 190, 175)), Size = NumberSequence.new(0.6, 2.2), Transparency = NumberSequence.new(0.55, 1), Lifetime = NumberRange.new(0.6, 1), Rate = 12, Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, 1.5, 0), LightEmission = 0, EmissionDirection = Enum.NormalId.Bottom, SpreadAngle = Vector2.new(70, 70)})
+	elseif name == "Bubblegum" then
+		root:SetAttribute("TrailBubbles", "ff8fd0") -- shiny pink bubbles drawn by each player's game
+	elseif name == "Ocean" then
+		root:SetAttribute("TrailBubbles", "7fd8ff")
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(200, 240, 255), rgb(60, 160, 255)), Size = NumberSequence.new(0.35, 0.1), Lifetime = NumberRange.new(0.5, 0.8), Rate = 20, Speed = NumberRange.new(5, 8), Acceleration = down, EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(35, 35)})
+	elseif name == "Sunset" then
+		-- warm embers drifting up into a soft glow
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(255, 200, 90), rgb(255, 90, 140)), Size = NumberSequence.new({kp(0, 0), kp(0.3, 0.45), kp(1, 0)}), Lifetime = NumberRange.new(1, 1.6), Rate = 14, Speed = NumberRange.new(0.5, 1.2), Acceleration = up})
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(255, 150, 90), rgb(170, 70, 200)), Size = NumberSequence.new(1.5, 3), Transparency = NumberSequence.new(0.82, 1), Lifetime = NumberRange.new(0.8, 1.2), Rate = 6, Speed = NumberRange.new(0.3, 0.8), LightEmission = 0.3})
+	elseif name == "Toxic" then
+		root:SetAttribute("TrailBubbles", "8cff4a")
+		-- slime drips
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(170, 255, 80), rgb(40, 170, 40)), Size = NumberSequence.new(0.3, 0.15), Orientation = Enum.ParticleOrientation.VelocityParallel, Squash = NumberSequence.new(1.5), Lifetime = NumberRange.new(0.5, 0.8), Rate = 14, Speed = NumberRange.new(0.5, 1), Acceleration = down})
+	elseif name == "Lava" or name == "Inferno" then
+		-- glowing embers spat up and falling back down
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(255, 230, 120), rgb(255, 80, 10)), Size = NumberSequence.new(0.35, 0.1), Lifetime = NumberRange.new(0.6, 1), Rate = name == "Inferno" and 26 or 16, Speed = NumberRange.new(6, 10), Acceleration = down, EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(40, 40)})
+	elseif name == "Galaxy" then
+		-- a drifting purple nebula
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(255, 120, 230), rgb(90, 50, 220)), Size = NumberSequence.new(1.6, 3.4), Transparency = NumberSequence.new(0.78, 1), Lifetime = NumberRange.new(1, 1.5), Rate = 8, Speed = NumberRange.new(0.3, 1), RotSpeed = NumberRange.new(-60, 60), LightEmission = 0.5})
+	elseif name == "Rainbow" then
+		-- rainbow confetti tumbling down
+		emitter({Color = ColorSequence.new({ColorSequenceKeypoint.new(0, rgb(255, 70, 70)), ColorSequenceKeypoint.new(0.25, rgb(255, 210, 50)), ColorSequenceKeypoint.new(0.5, rgb(70, 230, 100)), ColorSequenceKeypoint.new(0.75, rgb(60, 150, 255)), ColorSequenceKeypoint.new(1, rgb(190, 90, 255))}), Size = NumberSequence.new(0.25), Squash = NumberSequence.new(-0.5), Lifetime = NumberRange.new(0.9, 1.4), Rate = 22, Speed = NumberRange.new(4, 7), Acceleration = Vector3.new(0, -10, 0), Drag = 1.5, Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-300, 300), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(60, 60), LightEmission = 0.2})
+	elseif name == "Aurora" or name == "Celestial" then
+		-- slow rising motes of light
+		local c = name == "Aurora" and rgb(150, 255, 220) or rgb(255, 225, 140)
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(c, Color3.new(1, 1, 1)), Size = NumberSequence.new({kp(0, 0), kp(0.4, 0.5), kp(1, 0)}), Lifetime = NumberRange.new(1.4, 2.2), Rate = 12, Speed = NumberRange.new(0.2, 0.6), Acceleration = Vector3.new(0, 2, 0), Shape = Enum.ParticleEmitterShape.Sphere})
+	elseif name == "Lightning" or name == "Plasma" then
+		-- crackling static flickering around your body
+		local c = name == "Lightning" and rgb(255, 240, 150) or rgb(140, 240, 255)
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(Color3.new(1, 1, 1), c), Size = NumberSequence.new(0.5, 0), Lifetime = NumberRange.new(0.05, 0.12), Rate = 35, Speed = NumberRange.new(0, 0.5), Shape = Enum.ParticleEmitterShape.Box, Rotation = NumberRange.new(0, 360)})
+		if name == "Plasma" then
+			-- orbs of energy pulled into you
+			emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(rgb(140, 240, 255), rgb(150, 60, 255)), Size = NumberSequence.new(0.5, 0.1), Lifetime = NumberRange.new(0.5, 0.7), Rate = 14, Speed = NumberRange.new(-7, -5), Shape = Enum.ParticleEmitterShape.Sphere})
+		end
+	elseif name == "Frost" then
+		-- ice shards falling off you
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(Color3.new(1, 1, 1), rgb(140, 210, 255)), Size = NumberSequence.new(0.3, 0.1), Orientation = Enum.ParticleOrientation.VelocityParallel, Squash = NumberSequence.new(2), Lifetime = NumberRange.new(0.5, 0.9), Rate = 14, Speed = NumberRange.new(1, 3), Acceleration = Vector3.new(0, -18, 0)})
+	elseif name == "Void" then
+		-- black wisps curling around your feet
+		emitter({Texture = TEX_SMOKE, Color = ColorSequence.new(rgb(20, 0, 35)), Size = NumberSequence.new(1, 2.5), Transparency = NumberSequence.new(0.5, 1), Lifetime = NumberRange.new(0.7, 1.1), Rate = 12, Speed = NumberRange.new(0.5, 1), LightEmission = 0, EmissionDirection = Enum.NormalId.Bottom, RotSpeed = NumberRange.new(-180, 180)})
+	elseif name == "Infinity" then
+		-- bursts of golden sparkles
+		emitter({Texture = TEX_SPARKLE, Color = ColorSequence.new(Color3.new(1, 1, 1), rgb(255, 215, 80)), Size = NumberSequence.new({kp(0, 0), kp(0.2, 0.7), kp(1, 0)}), Lifetime = NumberRange.new(0.6, 1), Rate = 18, Speed = NumberRange.new(5, 8), Drag = 4, Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-200, 200), Shape = Enum.ParticleEmitterShape.Sphere})
 	end
 	if t.Animated then
 		root:SetAttribute("TrailRainbow", true)
@@ -1648,6 +1794,12 @@ local function grantProduct(player, key)
 				local amount = math.floor(math.max(p.Min or 0, income * 60 * p.Minutes))
 				player.leaderstats.Cash.Value += amount
 				notify(player, "+$" .. fmt(amount) .. "!", GOLD)
+			elseif p.Key == key and p.Amount then
+				-- speed packs give a fixed amount of speed
+				local points = player:GetAttribute("SpeedPoints") or C.START_SPEED
+				player:SetAttribute("SpeedPoints", points + p.Amount)
+				updateSpeed(player)
+				notify(player, "+" .. fmt(p.Amount) .. " speed!", GOLD)
 			elseif p.Key == key and p.Percent then
 				local points = player:GetAttribute("SpeedPoints") or C.START_SPEED
 				local amount = math.floor(math.max(p.Min or 0, points * p.Percent / 100))
@@ -1767,9 +1919,12 @@ local function buildInviteAvatar(player)
 	if not best or not player.Parent then return end
 	local made, model = pcall(Players.CreateHumanoidModelFromUserId, Players, best.Id)
 	if not made or not model or not player.Parent then return end
+	-- Scale first, then anchor ONLY the root. Anchoring every part froze the limbs before the
+	-- avatar's body proportions were applied, which stretched necks on some avatars.
+	model:ScaleTo(C.INVITE_SCALE)
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
-			d.Anchored = true
+			d.Anchored = d.Name == "HumanoidRootPart"
 			d.CanCollide = false
 			d.CanQuery = false
 		elseif d:IsA("LuaSourceContainer") then
@@ -1779,8 +1934,10 @@ local function buildInviteAvatar(player)
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	if hum then
 		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		for _, st in ipairs({Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Dead}) do
+			hum:SetStateEnabled(st, false)
+		end
 	end
-	model:ScaleTo(C.INVITE_SCALE)
 	model.Name = tostring(player.UserId)
 	model:SetAttribute("FriendName", best.DisplayName)
 	model.Parent = inviteAvatars
@@ -1831,17 +1988,28 @@ local function grantReward(player, reward)
 	elseif reward.Kind == "game" then
 		local top = bestLevel(player)
 		local r = reward.Rarity
+		local lo, hi = math.max(1, top - 2), math.min(C.NUM_LEVELS, top + 1)
 		if reward.Mystery then
 			r = math.random() < 0.3 and 5 or 4
+			-- sized to your money: a game earning about (cash / 5000) per second, so it's a real
+			-- boost for anyone - never a jackpot for a new player or a dud for a rich one.
+			-- Capped at the levels you can earn fully from.
+			local target = math.max(1, player.leaderstats.Cash.Value / 5000)
+			local perLevel = C.INCOME_BASE * C.RARITY_INCOME_MULT ^ (r - 1)
+			local L = 1 + math.log(math.max(1, target / perLevel)) / math.log(C.INCOME_GROWTH)
+			L = math.clamp(math.floor(L + 0.5), 1, math.min(C.NUM_LEVELS, top + C.STEAL_LEVEL_GRACE))
+			lo, hi = math.max(1, L - 1), L
 		end
-		local rec = giveGame(player, math.max(1, top - 2), math.min(C.NUM_LEVELS, top + 1), r)
-		return rec.Rarity .. " " .. rec.Name
+		local rec = giveGame(player, lo, hi, r)
+		return rec.Rarity .. " " .. rec.Name, rec
 	end
 	return ""
 end
 
-local function popup(player, title, sub, color, icon)
-	rewardEvent:FireClient(player, {Title = title, Sub = sub, Color = color:ToHex(), Icon = icon})
+local function popup(player, title, sub, color, icon, rec)
+	-- rec: a game to reveal in the pop-up (its cover art instead of the icon)
+	local game = rec and {Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color:ToHex()}
+	rewardEvent:FireClient(player, {Title = title, Sub = sub, Color = color:ToHex(), Icon = icon, Game = game})
 end
 
 ------------------------------------------------------------------
@@ -1906,9 +2074,9 @@ playtimeFunction.OnServerInvoke = function(player, which)
 	for i, reward in ipairs(C.PLAYTIME) do
 		if (which == "all" or which == i) and not data.PlayClaimed[i] and played >= reward.Minute * 60 then
 			data.PlayClaimed[i] = true
-			local text = grantReward(player, reward)
+			local text, rec = grantReward(player, reward)
 			table.insert(got, text)
-			popup(player, reward.Mystery and "MYSTERY GAME!" or (reward.Minute .. " MINUTE GIFT!"), text, reward.Color, reward.Icon)
+			popup(player, reward.Mystery and "MYSTERY GAME!" or (reward.Minute .. " MINUTE GIFT!"), text, reward.Color, reward.Icon, reward.Mystery and rec)
 		end
 	end
 	pushPlaytime(player)
@@ -2090,6 +2258,7 @@ local function collectSave(player)
 		end)(),
 		TutorialDone = data.TutorialDone,
 		BestLevel = data.BestLevel,
+		Pets = Pets.save(player),
 		SavedAt = os.time(),
 	}
 end
@@ -2249,6 +2418,14 @@ local function giveSlap(player)
 	tool.Activated:Connect(function()
 		if os.clock() - lastSlap < C.SLAP_COOLDOWN then return end
 		lastSlap = os.clock()
+		-- everyone else sees your arm swing too (the swinger animates their own on click)
+		for _, other in ipairs(Players:GetPlayers()) do
+			if other ~= player then
+				slapSwingEvent:FireClient(other, player)
+			end
+		end
+		-- the hit lands when the swinging arm reaches the front (matches the client's swing)
+		task.wait(C.SLAP_HIT_DELAY)
 		local root = getRoot(player)
 		if not root then return end
 		for _, other in ipairs(Players:GetPlayers()) do
@@ -2257,6 +2434,8 @@ local function giveSlap(player)
 				if otherRoot and not otherRoot.Anchored then
 					local offset = otherRoot.Position - root.Position
 					if offset.Magnitude <= C.SLAP_RANGE and root.CFrame.LookVector:Dot(offset.Unit) > 0.2 then
+						soundEvent:FireClient(player, "slap")
+						soundEvent:FireClient(other, "slap")
 						knockEvent:FireClient(other, root.CFrame.LookVector * 70 + Vector3.new(0, 35, 0))
 						if stolenCount(other) > 0 then
 							dropStolen(other)
@@ -2279,6 +2458,12 @@ local function onCharacter(player, char)
 	dropStolen(player)
 	char:WaitForChild("HumanoidRootPart")
 	local hum = char:WaitForChild("Humanoid")
+	Kit.setGroup(char, "Players")
+	char.DescendantAdded:Connect(function(d)
+		if d:IsA("BasePart") then
+			d.CollisionGroup = "Players"
+		end
+	end)
 	updateSpeed(player)
 	hum.Died:Connect(function()
 		dropStolen(player)
@@ -2405,6 +2590,7 @@ local function onPlayerAdded(player)
 	pushSpin(player)
 	pushPlaytime(player)
 	pushAreas(player)
+	Pets.load(player, loadedOK and type(saved) == "table" and saved.Pets or nil)
 	player:SetAttribute("TutorialDone", playerData[player].TutorialDone == true)
 	task.spawn(checkPasses, player)
 	if not plot then
@@ -2433,6 +2619,7 @@ Players.PlayerRemoving:Connect(function(player)
 	held[player] = nil
 	releasePlot(player)
 	playerData[player] = nil
+	Pets.remove(player)
 	if data then
 		writeSave(player, data)
 	end
@@ -2461,6 +2648,139 @@ game:BindToClose(function()
 		task.wait()
 	end
 end)
+
+------------------------------------------------------------------
+-- STAY INSIDE THE FENCE: if someone ends up outside (through a gap, a glitch or
+-- sheer speed), they're put back just inside. The vault hallway is exempt, since it
+-- runs out past the fence on purpose.
+------------------------------------------------------------------
+-- The Studio-only Pet Lab sits far outside the fence; don't pull testers back from it.
+-- workspace.PetLab only exists during Studio playtests, so this never applies on live servers.
+-- (PetLabDev sets InPetLab on the server, and only in Studio.)
+local function inPetLab(player)
+	return player:GetAttribute("InPetLab") == true
+end
+task.spawn(function()
+	while true do
+		task.wait(0.2)
+		local center = world.Center or Vector3.zero
+		for _, p in ipairs(Players:GetPlayers()) do
+			local r = getRoot(p)
+			if r and r.Position.Y > C.FALL_RETURN_Y then
+				local pos = r.Position
+				local flat = Vector3.new(pos.X - center.X, 0, pos.Z - center.Z)
+				local inVault = math.abs(pos.X) < C.ROOM_W / 2 + 12 and pos.Z > C.HALL_START_Z - 6
+				if flat.Magnitude > C.FENCE_R - 3 and not inVault and not inPetLab(p) then
+					local back = center + flat.Unit * (C.FENCE_R - 14)
+					p.Character:PivotTo(CFrame.lookAt(Vector3.new(back.X, 5, back.Z), Vector3.new(center.X, 5, center.Z)))
+					r.AssemblyLinearVelocity = Vector3.zero
+				end
+			end
+		end
+	end
+end)
+
+------------------------------------------------------------------
+-- TOP 10 LEADERBOARDS (Money and Speed)
+-- Global: saved in ordered data stores, so rankings cover every server and survive
+-- restarts. Each player's value is written every minute (and when they leave); the
+-- top 10 is read back every minute. Values come from the server only - never the client.
+-- Ordered data stores only hold whole numbers, so values are stored as log10 x 1e9
+-- (keeps the order exact and fits even huge numbers).
+------------------------------------------------------------------
+do
+	local LB_EVERY = 60
+	local stores = {}
+	pcall(function()
+		stores.Cash = DataStoreService:GetOrderedDataStore("StealAGameTop_Cash_v1")
+		stores.Speed = DataStoreService:GetOrderedDataStore("StealAGameTop_Speed_v1")
+	end)
+	local function encode(v)
+		return math.floor(math.log10(math.max(1, v)) * 1e9)
+	end
+	local function decode(n)
+		return 10 ^ (n / 1e9)
+	end
+	local names = {}
+	local function nameOf(userId)
+		if names[userId] then
+			return names[userId]
+		end
+		local p = Players:GetPlayerByUserId(userId)
+		if p then
+			names[userId] = p.DisplayName
+			return p.DisplayName
+		end
+		local ok, n = pcall(Players.GetNameFromUserIdAsync, Players, userId)
+		names[userId] = ok and n or "Player"
+		return names[userId]
+	end
+	local function valuesOf(p)
+		local ls = p:FindFirstChild("leaderstats")
+		if not ls then return nil end
+		return {Cash = ls:FindFirstChild("Cash") and ls.Cash.Value or 0, Speed = ls:FindFirstChild("Speed") and ls.Speed.Value or 0}
+	end
+	local function write(p)
+		local data = playerData[p]
+		local v = valuesOf(p)
+		if not (data and data.Loaded and v) then return end
+		for key, store in pairs(stores) do
+			pcall(function()
+				store:SetAsync("U" .. p.UserId, encode(v[key]))
+			end)
+		end
+	end
+	local board = ReplicatedStorage:FindFirstChild("LeaderboardData") or Instance.new("StringValue")
+	board.Name = "LeaderboardData"
+	board.Parent = ReplicatedStorage
+	local function refresh()
+		local result = {Global = true}
+		for _, key in ipairs({"Cash", "Speed"}) do
+			local list = {}
+			local store = stores[key]
+			local ok, pages = false, nil
+			if store then
+				ok, pages = pcall(function()
+					return store:GetSortedAsync(false, 10)
+				end)
+			end
+			if ok and pages then
+				for rank, entry in ipairs(pages:GetCurrentPage()) do
+					local uid = tonumber(string.sub(entry.key, 2)) or 0
+					list[rank] = {Rank = rank, Name = nameOf(uid), Value = decode(entry.value)}
+				end
+			else
+				-- saving is unavailable: honestly show this server only
+				result.Global = false
+				local all = {}
+				for _, p in ipairs(Players:GetPlayers()) do
+					local v = valuesOf(p)
+					if v then
+						table.insert(all, {Name = p.DisplayName, Value = v[key]})
+					end
+				end
+				table.sort(all, function(a, b) return a.Value > b.Value end)
+				for rank = 1, math.min(10, #all) do
+					all[rank].Rank = rank
+					list[rank] = all[rank]
+				end
+			end
+			result[key] = list
+		end
+		board.Value = HttpService:JSONEncode(result)
+	end
+	Players.PlayerRemoving:Connect(write)
+	task.spawn(function()
+		task.wait(8)
+		while true do
+			for _, p in ipairs(Players:GetPlayers()) do
+				write(p)
+			end
+			refresh()
+			task.wait(LB_EVERY)
+		end
+	end)
+end
 
 ------------------------------------------------------------------
 -- LOOPS
@@ -2518,8 +2838,9 @@ task.spawn(function()
 							setItemLabel(item, rec, where == "In your hands" and "held" or "case")
 						end
 					end
-					if not rec.Installed then
-						rec.Progress += C.ONLINE_INSTALL_RATE
+					-- games only install inside a case, never while you're carrying them
+					if not rec.Installed and where ~= "In your hands" then
+						rec.Progress += C.ONLINE_INSTALL_RATE * Pets.installMult(owner)
 						if rec.Progress >= rec.InstallTime then
 							rec.Progress = rec.InstallTime
 							rec.Installed = true
@@ -2561,6 +2882,7 @@ task.spawn(function()
 				income *= moneyMult(owner)
 				refreshMultipliers(owner)
 				plot.LastIncome = income
+				owner:SetAttribute("IncomePerSec", income)
 				plot.Bank += income
 				plot.PadLabel.Text = "$" .. fmt(plot.Bank) .. "\n+$" .. fmt(income) .. "/s"
 
@@ -2596,6 +2918,11 @@ task.spawn(function()
 			local locked = plot.LockLeft > 0
 			if not locked then
 				plot.LockLabel.Text = "LOCK BASE"
+			end
+			if plot.UnlockPrompt then
+				-- only reachable while the base is locked (the owner-only tag decides who sees it)
+				plot.UnlockPrompt.MaxActivationDistance = locked and 8 or 0
+				plot.UnlockPrompt:SetAttribute("OwnerId", plot.Owner and plot.Owner.UserId or 0)
 			end
 			for _, b in ipairs(Base.barriers(plot)) do
 				b.Transparency = locked and 0.45 or 1
@@ -2689,13 +3016,10 @@ RunService.Heartbeat:Connect(function(dt)
 							finalizeStolen(player, e)
 							placeInSlot(myPlot, slot, e.Item, e.Data)
 							changed = true
-						else
-							finalizeStolen(player, e)
-							changed = true
-							if clock - (fullWarned[player] or 0) > 5 then
-								fullWarned[player] = clock
-								notify(player, "No empty case! Swap it with one of your games, sell one, or upgrade your base.", GOLD)
-							end
+						elseif clock - (fullWarned[player] or 0) > 5 then
+							-- keep holding it as a stolen game (it never installs on your head); it drops in once a case is free
+							fullWarned[player] = clock
+							notify(player, "All your cases are full! Sell a game, or drop the one you're holding (G).", GOLD)
 						end
 					end
 				end

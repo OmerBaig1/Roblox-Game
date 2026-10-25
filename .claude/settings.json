@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rojo serve:*)",
+      "Bash(rojo build:*)",
+      "Bash(rojo upload:*)",
+      "Edit(src/**)"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "SerializedOverrides": {
+      "BinaryString": ""
+    }
+  },
+  "attributes": {
+    "Origin": {
+      "Vector3": [
+        3000.0,
+        150.0,
+        0.0
+      ]
+    }
+  }
+}

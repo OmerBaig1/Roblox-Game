@@ -61,13 +61,13 @@ end
 
 function Base.insidePlot(plot, position)
 	local lp = plot.CF:PointToObjectSpace(position)
-	return math.abs(lp.X) <= C.PLOT_W / 2 + 10 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < C.MAX_FLOORS * C.FLOOR_H + 10
+	return math.abs(lp.X) <= C.PLOT_W / 2 + 10 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < (plot.Look and plot.Look.Floors or 2) * C.FLOOR_H + 10
 end
 
 -- Strictly inside the walls (not on the stairs or the treadmill outside)
 function Base.insideCore(plot, position)
 	local lp = plot.CF:PointToObjectSpace(position)
-	return math.abs(lp.X) < C.PLOT_W / 2 - 1 and lp.Z > FRONT + 1 and lp.Z < backZ(plot) - 1 and lp.Y > -5 and lp.Y < C.MAX_FLOORS * C.FLOOR_H + 10
+	return math.abs(lp.X) < C.PLOT_W / 2 - 1 and lp.Z > FRONT + 1 and lp.Z < backZ(plot) - 1 and lp.Y > -5 and lp.Y < (plot.Look and plot.Look.Floors or 2) * C.FLOOR_H + 10
 end
 
 -- Every lock wall of a base: the front, and the doorway at the top of each staircase
@@ -138,7 +138,8 @@ local function buildWalls(parent, plot, f)
 
 	-- Side walls run the whole length, with doorways for the stairs
 	local topGap = (f >= 2) and stairSide(f) or 0
-	local lowGap = (f >= 2 and f < C.MAX_FLOORS) and stairSide(f + 1) or 0
+	-- a doorway out to the next floor's stairs, only if this base type has another floor above
+	local lowGap = (f >= 2 and f < (plot.Look.Floors or 2)) and stairSide(f + 1) or 0
 	for _, sx in ipairs({-1, 1}) do
 		local x = sx * (W / 2 - 0.5)
 		local cuts = {}
@@ -255,7 +256,8 @@ local function buildShell(plot)
 	end
 	if L.Statues then
 		for _, sx in ipairs({-1, 1}) do
-			local x = sx * (W / 2 + 4)
+			-- well clear of every staircase (they used to stand at the foot of the stairs)
+			local x = sx * (W / 2 + 15)
 			part(model, {Name = "StatueBase", Size = Vector3.new(5, 3, 5), CFrame = at(x, 1.5, FRONT - 4), Color = rgb(245, 245, 250), Material = M.Marble})
 			Kit.cylinder(model, 5, 1.2, at(x, 5.5, FRONT - 4), {Name = "TrophyStem", Color = Kit.GOLD, Material = M.Metal})
 			part(model, {Name = "TrophyCup", Shape = Enum.PartType.Ball, Size = Vector3.new(4, 4, 4), CFrame = at(x, 9.2, FRONT - 4), Color = Kit.GOLD, Material = M.Metal})
@@ -371,6 +373,33 @@ function Base.new(index, cf, parent)
 	part(model, {Name = "LockPadRim", Size = Vector3.new(7, 0.3, 7), CFrame = at(14, 1.1, FRONT + 6), Color = rgb(255, 255, 255), Material = M.SmoothPlastic})
 	plot.LockButton = lockButton
 	plot.LockLabel = Kit.billboard(lockButton, 230, 60, 4.5, "LOCK BASE")
+	-- UNLOCK button on the wall beside it: hold E (or hold on a phone) to unlock early
+	do
+		-- wx is the wall's inner face; everything sits in front of it, above the chair rail and clear of the potted bush
+		local wx = W / 2 - 1.0
+		local uz = FRONT + 8.5
+		local panel = part(model, {Name = "UnlockPanel", Size = Vector3.new(0.4, 4.2, 3.6), CFrame = at(wx - 0.35, 8.4, uz), Color = rgb(40, 40, 55)})
+		part(model, {Name = "UnlockPanelTrim", Size = Vector3.new(0.3, 4.8, 4.2), CFrame = at(wx - 0.15, 8.4, uz), Color = rgb(255, 255, 255)})
+		local btn = part(model, {Name = "UnlockButton", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 2.2, 2.2), CFrame = at(wx - 0.75, 8.7, uz), Color = rgb(70, 220, 110), Material = M.Neon})
+		local sign = part(model, {Name = "UnlockSign", Size = Vector3.new(0.2, 0.9, 3.4), CFrame = at(wx - 0.65, 7.0, uz), Color = rgb(40, 40, 55)})
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = Enum.NormalId.Left
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		sg.PixelsPerStud = 40
+		sg.LightInfluence = 0
+		sg.Parent = sign
+		local t = Instance.new("TextLabel")
+		t.Size = UDim2.fromScale(1, 1)
+		t.BackgroundTransparency = 1
+		t.Font = Enum.Font.FredokaOne
+		t.TextScaled = true
+		t.TextColor3 = Color3.new(1, 1, 1)
+		t.Text = "UNLOCK"
+		t.Parent = sg
+		plot.UnlockButton = btn
+		plot.UnlockPrompt = Kit.prompt(btn, "Hold to Unlock", "Base Lock", 1.5, 8, "OwnerOnlyPrompt")
+		plot.UnlockPrompt.MaxActivationDistance = 0 -- turned on only while the base is locked
+	end
 
 	-- Treadmill prompts live on an invisible part that never gets rebuilt
 	local treadAnchor = part(model, {Name = "TreadmillAnchor", Size = Vector3.new(1, 1, 1), CFrame = plot.TreadCF * CFrame.new(0, 3, -10), Transparency = 1, CanCollide = false})
