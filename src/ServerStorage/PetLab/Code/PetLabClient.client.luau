@@ -2,7 +2,9 @@
 	PetLabClient (Studio only)
 	The server copies this into your PlayerGui during Studio playtests. It never runs on live servers.
 	  P  - jump to the Pet Lab, press again to go back
-	  L  - a copy of the lab's test pet follows you anywhere (press again to dismiss)
+	  L  - the next lab pet (roster order) follows you anywhere; after the last one the follower goes away
+	  K  - put the selected pet on the turntable
+	Every pet in PetLab.Pets idles in place on its gallery row, with the same distance LOD the game will use.
 ]]
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -26,50 +28,89 @@ gui.Parent = player:WaitForChild("PlayerGui")
 local hint = Instance.new("TextLabel")
 hint.AnchorPoint = Vector2.new(0, 1)
 hint.Position = UDim2.new(0, 12, 1, -12)
-hint.Size = UDim2.fromOffset(330, 26)
+hint.Size = UDim2.fromOffset(520, 26)
 hint.BackgroundColor3 = Color3.fromRGB(20, 17, 31)
 hint.BackgroundTransparency = 0.2
 hint.TextColor3 = Color3.fromRGB(255, 179, 122)
 hint.Font = Enum.Font.GothamMedium
 hint.TextSize = 14
-hint.Text = "PET LAB (Studio only)  ·  P: lab  ·  L: test pet follows"
 hint.Parent = gui
 Instance.new("UICorner", hint).CornerRadius = UDim.new(0, 6)
 
--- pets on display spin slowly on the turntable and run their idle
-local showcase = {}
-for _, m in ipairs(lab:WaitForChild("Pets"):GetChildren()) do
-	m:WaitForChild("Root")
-	for _, part in ipairs({"Body", "Head", "Tail"}) do
-		m:WaitForChild(part)
+-- every pet on display idles in place on its gallery row. Pets stream in one by one, so each is added once it
+-- has fully arrived.
+local gallery = {}
+local selected = 0 -- index into gallery, 0 = none
+local showHint
+local function addPet(m)
+	while #m:GetDescendants() < (m:GetAttribute("Descendants") or 0) do
+		task.wait()
 	end
+	m:WaitForChild("Root")
 	if not m.PrimaryPart then
 		m.PrimaryPart = m.Root
 	end
 	local cfg = Configs[m.Name]
-	if cfg and m.PrimaryPart then
-		table.insert(showcase, {Model = m, Anim = PetAnimator.new(m, cfg), Base = m.PrimaryPart.CFrame})
+	if not cfg then
+		return
+	end
+	local cur = gallery[selected]
+	table.insert(gallery, {Model = m, Cfg = cfg, Anim = PetAnimator.new(m, cfg)})
+	table.sort(gallery, function(a, b)
+		return (a.Cfg.No or math.huge) < (b.Cfg.No or math.huge)
+	end)
+	selected = cur and table.find(gallery, cur) or 0
+	showHint()
+end
+
+function showHint()
+	local g = gallery[selected]
+	hint.Text = "PET LAB (Studio only)  ·  P: lab  ·  L: next follower"
+		.. (g and string.format(" [%s %d/%d]", g.Model.Name, selected, #gallery) or "")
+		.. "  ·  K: turntable"
+end
+showHint()
+local petsFolder = lab:WaitForChild("Pets")
+petsFolder.ChildAdded:Connect(addPet)
+for _, m in ipairs(petsFolder:GetChildren()) do
+	task.spawn(addPet, m)
+end
+
+local function spawnCopy(src, name)
+	local m = src.Model:Clone()
+	m.Name = name
+	m.Parent = workspace
+	return m, PetAnimator.new(m, src.Cfg)
+end
+
+-- the turntable copy (the stage streams in only near the lab, so it's looked up when K is pressed)
+local spot, shown, shownAnim
+local function toTurntable()
+	if shown then
+		shown:Destroy()
+		shown = nil
+	end
+	local tt = lab:FindFirstChild("Stage") and lab.Stage:FindFirstChild("Turntable")
+	spot = tt and tt:FindFirstChild("PetSpot")
+	if spot and gallery[selected] then
+		shown, shownAnim = spawnCopy(gallery[selected], "PetLabTurntable")
 	end
 end
 
 -- the follower
 local follower, anim, pos, lastPos, yaw, speed = nil, nil, nil, nil, 0, 0
 local SLOT = Vector3.new(-3.6, 0, 1.6) -- left side, clear of the game's own pet slots
-local function toggleFollower()
+local function nextFollower()
 	if follower then
 		follower:Destroy()
 		follower = nil
-		return
 	end
-	local src = showcase[1] and showcase[1].Model
-	if not src then
-		return
+	selected = selected < #gallery and selected + 1 or 0
+	showHint()
+	if selected > 0 then
+		follower, anim = spawnCopy(gallery[selected], "PetLabFollower")
+		pos, lastPos, speed = nil, nil, 0
 	end
-	follower = src:Clone()
-	follower.Name = "PetLabFollower"
-	follower.Parent = workspace
-	anim = PetAnimator.new(follower, Configs[src.Name])
-	pos, lastPos, speed = nil, nil, 0
 end
 
 -- the server does the trip (see PetLabDev) so the game's fence check knows you're in the lab
@@ -85,15 +126,25 @@ UIS.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.P then
 		toggleLab()
 	elseif input.KeyCode == Enum.KeyCode.L then
-		toggleFollower()
+		nextFollower()
+	elseif input.KeyCode == Enum.KeyCode.K then
+		toTurntable()
 	end
 end)
 
+local camera = workspace.CurrentCamera
+local function camDist(m)
+	return (camera.CFrame.Position - m.PrimaryPart.Position).Magnitude
+end
+
 RunService.RenderStepped:Connect(function(dt)
 	local t = os.clock()
-	for _, s in ipairs(showcase) do
-		s.Model.PrimaryPart.CFrame = s.Base * CFrame.Angles(0, t * 0.35, 0)
-		s.Anim:Step(dt, t, 0, 0)
+	for _, g in ipairs(gallery) do
+		g.Anim:Step(dt, t, 0, 0, camDist(g.Model))
+	end
+	if shown then
+		shown.PrimaryPart.CFrame = CFrame.new(spot.WorldPosition) * CFrame.Angles(0, t * 0.35, 0)
+		shownAnim:Step(dt, t, 0, 0, camDist(shown))
 	end
 	if not follower then
 		return
@@ -121,5 +172,5 @@ RunService.RenderStepped:Connect(function(dt)
 	local d = (want - yaw + math.pi) % (2 * math.pi) - math.pi
 	yaw += d * (1 - math.exp(-dt * 8))
 	follower.PrimaryPart.CFrame = CFrame.new(pos) * CFrame.Angles(0, yaw, 0)
-	anim:Step(dt, t, speed, math.clamp(-d * 1.5, -1, 1))
+	anim:Step(dt, t, speed, math.clamp(-d * 1.5, -1, 1), camDist(follower))
 end)

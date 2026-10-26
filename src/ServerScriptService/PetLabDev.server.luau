@@ -17,6 +17,15 @@ local lab = ServerStorage:FindFirstChild("PetLab")
 if not lab then
 	return
 end
+-- raw mesh generations are kept for comparison only; they stay out of the world
+local raws = lab:FindFirstChild("RawGenerations")
+if raws then
+	raws.Parent = ServerStorage
+end
+-- the client waits for this many descendants before animating a pet, so it never rigs half a model
+for _, m in ipairs(lab.Pets:GetChildren()) do
+	m:SetAttribute("Descendants", #m:GetDescendants())
+end
 lab.Parent = workspace
 local origin = lab:GetAttribute("Origin")
 
