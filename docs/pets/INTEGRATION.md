@@ -19,6 +19,14 @@ working (`N`, `R`, `Egg`, `Key`, `Boost`, `RARITIES`, `EQUIP_MAX`, `MAX_PETS`, `
 
 ---
 
+## Progress
+
+- Oct 26 2026: migration groundwork done and tested before any live change. `ReplicatedStorage.PetSystem.Catalog`
+  (new 8-egg catalog), `ServerScriptService.StealAGame.PetMigration` (migrateKey, migrateSave) and
+  `ServerStorage.UnitTest.Cases.PetMigration_Test` (18 tests, all pass). Nothing live requires them yet.
+  Open question for the owner: old Secrets from eggs 1-5 become the Crystal Heart Golem (boost 28-71% -> 112%), per the
+  rule below. Next: Phase 1.
+
 ## Phase 1: shared runtime
 
 - Move `PetAnimator` and `PetConfigs` from `ServerStorage.PetLab.Code` into a new `ReplicatedStorage.PetSystem` folder.
@@ -70,6 +78,11 @@ Shipping the new catalog without migration would **delete every player's pets**.
 - Keep the 250-stud cull and the teleport snap.
 
 ## Phase 5: UI previews and the hatch moment
+
+> Oct 26 2026: the hatch sequence in PetsUI is already rebuilt (fly-in, build-up, crack, themed opening, reveal,
+> HATCH AGAIN). It is driven by two tables there: `THEMES` keyed by egg `Pattern` (all eight new-egg patterns already
+> have entries) and `TIERS` keyed by rarity. When the premium pets go in, keep those tables and only swap the reveal's
+> pet viewport for a `WorldModel` one that runs the animator, so Mythic and Secret can also play their signature move.
 
 - Every ViewportFrame showing a rigged pet (shop odds list, hatch reveal, bag) needs a `WorldModel` inside it.
   Run the animator in idle for the hatch reveal and the selected bag pet only, not for every slot in the bag.

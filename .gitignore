@@ -6,3 +6,6 @@ rojo.exe
 /*.rbxl.lock
 
 sourcemap.json
+
+# Claude Code local config and skills
+.claude/

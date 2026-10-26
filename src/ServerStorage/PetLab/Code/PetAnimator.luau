@@ -105,7 +105,7 @@ function PetAnimator.new(model, cfg)
 	self.Loose = {} -- joints no block drives that are holding a special's offset
 	self.S = {spX = -1, spB = 0} -- this frame's shared values (mode, special) for the joint blocks
 	self.Held, self.Skip, self.RateScale = 0, false, 1
-	self.Special = {Next = cfg.Special and randRange(cfg.Special.Every, self.Rng) or math.huge, X = -1, Out = false, Fired = {}}
+	self.Special = {Next = cfg.Special and -1 or math.huge, X = -1, Out = false, Fired = {}} -- -1: timed from the first Step
 	return self
 end
 
@@ -243,7 +243,15 @@ function Modes.Glide(self, c, s)
 	local behind = 0
 	if g.Snap then
 		self.SnapX = (self.SnapX + s.dt * g.Snap) % 1
-		behind = math.min(s.speed * self.SnapX / g.Snap, 1.5) * mv
+		local k = self.SnapX
+		if g.Zoom then
+			-- falls behind, then eases forward over the last quarter instead of snapping (a snail's zoom); the lag is
+			-- scaled rather than clipped so the whole catch-up stays eased
+			k = k < 0.75 and k / 0.75 or 1 - smooth((k - 0.75) / 0.25)
+			behind = math.min(s.speed * 0.75 / g.Snap, 1.5) * k * mv
+		else
+			behind = math.min(s.speed * k / g.Snap, 1.5) * mv
+		end
 	end
 	s.Lift = sin(w) * g.Bob
 	s.Pitch = -g.Tilt * mv + math.cos(w) * g.Climb
@@ -417,6 +425,9 @@ function Specials.Ignite(self, sp, s)
 			if st.Grow then
 				st.Grow.Size = st.Size
 			end
+			if st.Fill then
+				st.Fill.FillTransparency = 1
+			end
 			for _, r in ipairs(st.Rays) do
 				r[1].Enabled = false
 			end
@@ -451,6 +462,11 @@ function Specials.Ignite(self, sp, s)
 	off.Neck = A(rad(10 * hold), 0, 0)
 	for j, r in pairs(sp.Pose or NONE) do
 		off[j] = A(rad(r.X * hold), rad(r.Y * hold), rad(r.Z * hold))
+	end
+	if sp.Fill then -- the whole body floods with light through the outline highlight
+		st.Fill = st.Fill or self.Model:FindFirstChild("Outline")
+		st.Fill.FillColor = sp.Hot
+		st.Fill.FillTransparency = 1 - sp.Fill * hold
 	end
 	if sp.Spread then -- wings thrown wide (a wyrmling's Refraction)
 		off.WingL = A(0, rad(-sp.Spread * 0.4 * hold), rad(-sp.Spread * hold))
@@ -690,6 +706,252 @@ function Specials.Coil(self, sp, s)
 	s.Still = hold * 0.7
 end
 
+-- Secret mechanic (a wyrm's Phase Shift): fades out, reappears Jump studs away (pet space; the follow slot is on
+-- the owner's left, so +X lands on their right), lingers, then fades out and back home. Beams go dark while it's
+-- gone; bursts mark the flashes at both points. Needs no Finish: an interrupt mirrors the progress, which lands
+-- in the matching fade, so the jump home always happens while it's invisible.
+function Specials.Phase(self, sp, s)
+	local st = self.PhaseState
+	if not st then
+		st = {Parts = {}}
+		for _, p in ipairs(self.Model:GetDescendants()) do
+			if p:IsA("BasePart") and p.Transparency < 1 then
+				table.insert(st.Parts, {p, p.Transparency})
+			end
+		end
+		self.PhaseState = st
+	end
+	local x = s.spX
+	if x < 0 then
+		if st.Active then
+			st.Active = false
+			for _, q in ipairs(st.Parts) do
+				q[1].Transparency = q[2]
+			end
+			for line, on in pairs(self.Lines) do
+				if line:IsA("Beam") then
+					line.Enabled = on and self.Lod == 0
+				end
+			end
+		end
+		return
+	end
+	st.Active = true
+	-- gone by .2, back in by .3; gone again by .8 (the jump home happens while invisible), back in by .9
+	local fade = math.max(smooth((x - 0.1) / 0.1) * (1 - smooth((x - 0.2) / 0.1)), smooth((x - 0.7) / 0.1) * (1 - smooth((x - 0.8) / 0.1)))
+	for _, q in ipairs(st.Parts) do
+		q[1].Transparency = q[2] + (1 - q[2]) * fade
+	end
+	for line, on in pairs(self.Lines) do
+		if line:IsA("Beam") then
+			line.Enabled = on and self.Lod == 0 and fade < 0.5
+		end
+	end
+	if x >= 0.2 and x < 0.8 then
+		self.Off.Body = CFrame.new(sp.Jump)
+	end
+	s.Still = 0.5
+end
+
+-- an armour hound's Lost My Head: the Joint pops straight up (Height studs), bobs there while it spins round Spins
+-- times, then drops back on under gravity with a clunk. Surge emitters (flame from the empty neck) flare while it's
+-- off. Pair with Finish = true.
+function Specials.PopOff(self, sp, s)
+	self.PopSurge = self.PopSurge or self:_emitters(sp.Surge.Emitters)
+	local x = s.spX
+	if x < 0 then
+		self:_surge(self.PopSurge, 1)
+		return
+	end
+	local up = smooth(x / 0.18)
+	local fall = math.clamp((x - 0.78) / 0.14, 0, 1)
+	local off = up * (1 - fall * fall) -- 1 while it's up, accelerates back down
+	local clunk = bump((x - 0.92) / 0.08)
+	local h = sp.Height * off + sin(x * TAU * 1.5) * 0.08 * off - clunk * 0.05
+	self.Off[sp.Joint] = CFrame.new(0, h, 0) * A(rad(clunk * 8), smooth((x - 0.15) / 0.6) * TAU * sp.Spins, 0)
+	self:_surge(self.PopSurge, 1 + sp.Surge.By * off)
+	s.Still = off
+end
+
+-- transformation (a chimera's Soul Rotation): each head in Heads awakens in turn, rearing up (Lift degrees) while its
+-- emitter surges; the Light and the body's Flame emitter take that head's colour, then it all settles back
+function Specials.Awaken(self, sp, s)
+	local st = self.AwakenState
+	if not st then
+		st = {Light = self.Fx[sp.Light], Flame = self.Fx[sp.Flame], Heads = {}}
+		st.LightColor = st.Light and st.Light.Color
+		st.FlameColor = st.Flame and st.Flame.Color
+		for i, h in ipairs(sp.Heads) do
+			st.Heads[i] = self:_emitters({h.Emitter})
+		end
+		self.AwakenState = st
+	end
+	local x = s.spX
+	if x < 0 then
+		if st.Lit then
+			st.Lit = false
+			if st.Light then
+				st.Light.Color = st.LightColor
+			end
+			if st.Flame then
+				st.Flame.Color = st.FlameColor
+			end
+			for _, list in ipairs(st.Heads) do
+				self:_surge(list, 1)
+			end
+		end
+		return
+	end
+	st.Lit = true
+	local n = #sp.Heads
+	local f = x * n
+	local cur = math.min(n, math.floor(f) + 1)
+	for i, h in ipairs(sp.Heads) do
+		local k = i == cur and bump(f - (i - 1)) or 0
+		self:_surge(st.Heads[i], 1 + sp.By * k)
+		if k > 0 then
+			self.Off[h.Joint] = A(rad(-sp.Lift * smooth(k * 1.5)), 0, 0)
+		end
+	end
+	-- colours blend across each handover so the flame never jumps
+	local col = sp.Heads[cur].Color:Lerp(sp.Heads[math.min(n, cur + 1)].Color, smooth((f - (cur - 1) - 0.8) / 0.2))
+	if st.Light then
+		st.Light.Color = st.LightColor:Lerp(col, ease(s.spB, 4))
+	end
+	if st.Flame then
+		st.Flame.Color = ColorSequence.new(col)
+	end
+	s.Still = ease(s.spB, 4) * 0.4
+end
+
+-- a pegasus's Comet Dive: wings fold (Pose), it climbs, then dives forward in an arc (Dist studs ahead, Drop below
+-- its hover) and pulls up back into place; Surge emitters (its comet trail) blaze through the dive. Pair with Finish.
+function Specials.Dive(self, sp, s)
+	self.DiveSurge = self.DiveSurge or self:_emitters(sp.Surge.Emitters)
+	local x = s.spX
+	if x < 0 then
+		self:_surge(self.DiveSurge, 1)
+		return
+	end
+	local a = smooth(x) * TAU -- once round an ellipse: up, forward and down, back and up
+	local y = (1 - math.cos(a)) * 0.5 * -sp.Drop + sin(a) * sp.Rise
+	local z = -sin(a * 0.5) * sp.Dist
+	local pitch = -math.cos(a) * sp.Pitch * bump(x)
+	self.Off.Body = CFrame.new(0, y, z) * A(rad(pitch), 0, 0)
+	local fold = ease(s.spB, 3)
+	for j, r in pairs(sp.Pose or NONE) do
+		self.Off[j] = A(rad(r.X * fold), rad(r.Y * fold), rad(r.Z * fold))
+	end
+	self:_surge(self.DiveSurge, 1 + sp.Surge.By * fold)
+	s.Still = fold
+end
+
+-- a skywhale's Moonrise: the Moons (authored invisible) rise out of its ring (Rise studs), circle it once (Radius
+-- studs) and sink back in and vanish
+function Specials.Moonrise(self, sp, s)
+	local st = self.MoonState
+	if not st then
+		st = {}
+		for _, n in ipairs(sp.Moons) do
+			table.insert(st, {self.Model:FindFirstChild(n)})
+		end
+		self.MoonState = st
+	end
+	local x = s.spX
+	local up = x >= 0 and smooth(x / 0.2) * (1 - smooth((x - 0.8) / 0.2)) or 0
+	local n = #st
+	for i, q in ipairs(st) do
+		q[1].Transparency = 1 - up
+		if up > 0 then
+			local a = (i - 1) / n * TAU + smooth((x - 0.15) / 0.7) * TAU
+			self.Off[sp.Moons[i]] = CFrame.new(math.cos(a) * sp.Radius * up, sp.Rise * up + sin(a * 2) * 0.1, sin(a) * sp.Radius * up)
+		end
+	end
+	s.Still = up * 0.5
+end
+
+-- Secret mechanic (a star spider's Weave): the Stars (props jointed to the Root) fly out to the Shape points
+-- (pet space; the owner stands at about (3.6, 0, -1.6)), Threads (beams between them) spin up, the constellation
+-- hangs there, then the threads unravel and the stars fly home
+function Specials.Weave(self, sp, s)
+	local st = self.WeaveState
+	if not st then
+		st = {Threads = {}}
+		for i, n in ipairs(sp.Stars) do
+			st[i] = sp.Shape[i] - self.M[n].C0.Position
+		end
+		for _, n in ipairs(sp.Threads) do
+			local b = self.Fx[n]
+			table.insert(st.Threads, {b, b.Width0, b.Width1})
+			b.Enabled = false
+			self.Lines[b] = nil -- the weave owns these, not the LOD toggle
+		end
+		self.WeaveState = st
+	end
+	local x = s.spX
+	if x < 0 then
+		if st.Active then
+			st.Active = false
+			for _, q in ipairs(st.Threads) do
+				q[1].Enabled = false
+			end
+		end
+		return
+	end
+	st.Active = true
+	local n = #sp.Stars
+	for i, name in ipairs(sp.Stars) do
+		-- each star leaves a moment after the one before, and returns in the same order
+		local d = (i - 1) / n * 0.08
+		local out = smooth((x - d) / 0.18) * (1 - smooth((x - 0.78 - d) / 0.14))
+		self.Off[name] = CFrame.new(st[i] * out)
+	end
+	local woven = smooth((x - 0.25) / 0.12) * (1 - smooth((x - 0.66) / 0.12))
+	for i, q in ipairs(st.Threads) do
+		-- threads draw in one after another
+		local k = math.clamp(woven * #st.Threads - (i - 1) * 0.5, 0, 1)
+		q[1].Enabled = k > 0 and self.Lod == 0
+		q[1].Width0, q[1].Width1 = q[2] * k, q[3] * k
+	end
+	s.Still = 0.5 * woven
+end
+
+-- a jellyfish's Pulse Dash: the bell squeezes (Pose joints curl in), then it shoots forward Dist studs, tipping
+-- Tip degrees, and drifts back to its place while the Pose joints stream out behind; the light ring is a burst.
+-- Pair with Finish = true.
+function Specials.Dash(self, sp, s)
+	local x = s.spX
+	if sp.Show then -- beams that draw in only for the move (a koi's portal rings)
+		local st = self.DashState
+		if not st then
+			st = {}
+			for _, n in ipairs(sp.Show) do
+				local b = self.Fx[n]
+				table.insert(st, {b, b.Width0, b.Width1})
+				self.Lines[b] = nil -- the move owns these, not the LOD toggle
+				b.Enabled = false
+			end
+			self.DashState = st
+		end
+		local vis = x >= 0 and smooth(x / 0.15) * (1 - smooth((x - 0.55) / 0.15)) or 0
+		for _, q in ipairs(st) do
+			q[1].Enabled = vis > 0.02 and self.Lod == 0
+			q[1].Width0, q[1].Width1 = q[2] * vis, q[3] * vis
+		end
+	end
+	if x < 0 then
+		return
+	end
+	local squeeze = bump(x / 0.3)
+	local shoot = smooth((x - 0.2) / 0.12) * (1 - smooth((x - 0.4) / 0.6))
+	self.Off.Body = CFrame.new(0, -0.15 * squeeze + sp.Rise * shoot, -sp.Dist * shoot) * A(rad(-sp.Tip * shoot), 0, 0)
+	local k = squeeze - shoot * 0.6
+	for j, r in pairs(sp.Pose or NONE) do
+		self.Off[j] = A(rad(r.X * k), rad(r.Y * k), rad(r.Z * k))
+	end
+	s.Still = math.max(squeeze, shoot)
+end
+
 ----------------------------------------------------------------------------------------------------------------
 
 -- speed: studs/s the pet is travelling; turn: -1..1 how hard it is turning (right positive);
@@ -734,6 +996,9 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 	-- the way down (same pose, so nothing pops) and winds down three times as fast, unless it must Finish.
 	local sp = self.Special
 	if c.Special then
+		if sp.Next < 0 then
+			sp.Next = t + randRange(c.Special.Every, self.Rng)
+		end
 		if sp.X < 0 then
 			if mv < 0.15 and t >= sp.Next then
 				sp.X, sp.Out = 0, false
@@ -943,16 +1208,17 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 	end
 
 	-- orbiting pieces: circle their joint (TiltX 90 stands the circle up like a halo), pull in tighter while running.
-	-- Face = point along the path (escort fish) instead of tumbling by Spin
+	-- Face = point along the path (escort fish) instead of tumbling by Spin. Height raises the circle (studs), Long
+	-- stretches it front-to-back into an oval so it clears a long body
 	local o = c.Orbit
 	if o then
 		local n = #o.Parts
 		for i, name in ipairs(o.Parts) do
 			local ang = (t * o.Rate + (i - 1) / n) * TAU
 			local r = o.Radius * (1 - 0.2 * mv)
-			local y = sin(t * 1.3 + i * 2) * o.Bob + s.Lift * 0.6
+			local y = sin(t * 1.3 + i * 2) * o.Bob + s.Lift * 0.6 + (o.Height or 0)
 			local turnTo = o.Face and A(0, math.pi - ang, 0) or A(0, t * o.Spin + i, 0)
-			self:_set(name, A(rad(o.TiltX or 0), 0, rad(o.Tilt)) * CFrame.new(math.cos(ang) * r, y, sin(ang) * r) * turnTo)
+			self:_set(name, A(rad(o.TiltX or 0), 0, rad(o.Tilt)) * CFrame.new(math.cos(ang) * r, y, sin(ang) * r * (o.Long or 1)) * turnTo)
 		end
 	end
 

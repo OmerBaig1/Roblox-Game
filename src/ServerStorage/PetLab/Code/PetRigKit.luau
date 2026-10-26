@@ -178,6 +178,14 @@ Kit.AURAS = {
 	MainframeBeetle = {Mote = C3(90, 255, 120), Move = "Streak"}, -- data rain
 	CrystalHeartGolem = {Mote = C3(200, 240, 255), Mote2 = C3(255, 150, 230), Move = "Inward", Big = 1.2}, -- glints drawn to the heart
 	FinalBoss = {Mote = C3(255, 60, 60), Move = "Crackle", Big = 1.2}, -- overload sparks
+	QuantumCoreWyrm = {Mote = C3(150, 240, 255), Mote2 = C3(190, 120, 255), Move = "Streak"}, -- light pulled along the rings
+	EclipseNightmare = {Mote = C3(150, 80, 255), Mote2 = C3(40, 20, 70), Move = "Rise", Texture = "fire"}, -- shadow flames
+	StarforgePegasus = {Mote = C3(255, 220, 120), Mote2 = C3(120, 190, 255), Move = "Streak"}, -- gold and star-fire sparks
+	RingedSkywhale = {Mote = C3(255, 200, 180), Mote2 = C3(200, 180, 255), Move = "Drift", Big = 1.3}, -- cosmic dust
+	SoulbinderChimera = {Mote = C3(170, 90, 255), Mote2 = C3(60, 230, 210), Move = "Rise", Texture = "fire"}, -- soul flames
+	SupernovaSeraph = {Mote = C3(255, 250, 230), Mote2 = C3(255, 200, 90), Move = "Fall", Big = 1.2}, -- drifting light feathers
+	VoidCat = {Mote = C3(200, 170, 255), Mote2 = C3(30, 10, 60), Move = "Inward"}, -- light falling into the void
+	StarloomWeaver = {Mote = C3(255, 240, 190), Mote2 = C3(140, 170, 255), Move = "Drift"}, -- stardust
 }
 
 local MOVES = {
