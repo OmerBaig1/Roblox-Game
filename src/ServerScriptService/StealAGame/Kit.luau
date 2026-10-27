@@ -60,6 +60,9 @@ end
 pcall(function() PhysicsService:RegisterCollisionGroup("Guards") end)
 pcall(function() PhysicsService:RegisterCollisionGroup("Decor") end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Guards", "Decor", false) end)
+-- Every shopkeeper idles on the same line down the hall; a chasing giant used to crash into each one it passed
+-- (players walk through them), which slowed it enough for under-speed players to escape
+pcall(function() PhysicsService:CollisionGroupSetCollidable("Guards", "Guards", false) end)
 -- Players pass through shopkeepers (catching is by distance), so bumping one never knocks its body apart
 pcall(function() PhysicsService:RegisterCollisionGroup("Players") end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Guards", "Players", false) end)

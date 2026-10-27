@@ -11,6 +11,7 @@
 		Hover = 1.6,               -- optional, fliers: body raised above the Root
 	})
 	Kit.rig(pet, {Id = "coalpup", Mode = "Bound", Joints = {{"Neck", "Body", "Head", Vector3}, ...}, Props = {"Shard1"}})
+	Finished pets go in ReplicatedStorage.PetAssets; PetLabDev copies them into the lab gallery at playtest start.
 	Joint positions are in pet space (studs from the Root, +X right, -Z forward); nil puts the joint at Part1's centre.
 ]]
 local Kit = {}
@@ -135,7 +136,6 @@ function Kit.rig(pet, spec)
 	pet:SetAttribute("PetId", spec.Id)
 	pet:SetAttribute("Tier", spec.Tier)
 	pet:SetAttribute("Mode", spec.Mode)
-	pet.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	return pet
 end
 

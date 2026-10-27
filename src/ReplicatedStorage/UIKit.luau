@@ -27,16 +27,25 @@ UI.ROBUX = "\u{E002}"
 ------------------------------------------------------------------
 -- Max = seconds before the sound fades out (trims long tails)
 local SFX = {
-	click   = {Ids = {"rbxassetid://8816939097", "rbxassetid://102702078778790", "rbxasset://sounds/clickfast.wav"}, Volume = 0.4, Pitch = 1},
-	pop     = {Ids = {"rbxassetid://119393948345399", "rbxassetid://102702078778790", "rbxasset://sounds/clickfast.wav"}, Volume = 0.35, Pitch = 1, Max = 0.3},
-	press   = {Ids = {"rbxassetid://117649901456711", "rbxassetid://88442833509532", "rbxasset://sounds/clickfast.wav"}, Volume = 0.35, Pitch = 1},
-	open    = {Ids = {"rbxassetid://127438224839678", "rbxassetid://17582213219", "rbxasset://sounds/clickfast.wav"}, Volume = 0.22, Pitch = 1.1, Max = 0.5},
-	close   = {Ids = {"rbxassetid://127438224839678", "rbxassetid://17582213219", "rbxasset://sounds/clickfast.wav"}, Volume = 0.2, Pitch = 0.8, Max = 0.45},
+	-- Interface sounds: Google's Material Design UI set (CC BY 4.0), uploaded to Roblox under the original file names.
+	-- One soft, clean family: taps for buttons, rising notes to open menus, a falling note to close.
+	click   = {Ids = {"rbxassetid://122966251252708", "rbxassetid://8816939097", "rbxasset://sounds/clickfast.wav"}, Volume = 0.5, Pitch = 1}, -- ui_tap-variant-02
+	pop     = {Ids = {"rbxassetid://114030580225727", "rbxassetid://3623733749", "rbxasset://sounds/clickfast.wav"}, Volume = 0.5, Pitch = 1, Max = 0.4}, -- ui_tap-variant-03
+	press   = {Ids = {"rbxassetid://123087446204451", "rbxassetid://3623733749", "rbxasset://sounds/clickfast.wav"}, Volume = 0.5, Pitch = 1}, -- ui_tap-variant-04
+	tap     = {Ids = {"rbxassetid://118050128378427", "rbxassetid://3623733749", "rbxasset://sounds/clickfast.wav"}, Volume = 0.45, Pitch = 1, Max = 0.4}, -- ui_tap-variant-01
+	open    = {Ids = {"rbxassetid://79351880562463", "rbxassetid://3623740277", "rbxasset://sounds/clickfast.wav"}, Volume = 0.5, Pitch = 1, Max = 0.8}, -- navigation_forward-selection-minimal
+	menuopen = {Ids = {"rbxassetid://127898241244912", "rbxassetid://3623740277", "rbxasset://sounds/clickfast.wav"}, Volume = 0.5, Pitch = 1, Max = 0.9}, -- navigation_forward-selection
+	close   = {Ids = {"rbxassetid://108038441910574", "rbxassetid://73147193690974", "rbxasset://sounds/clickfast.wav"}, Volume = 0.35, Pitch = 1, Max = 0.6}, -- navigation_backward-selection-minimal
+	page    = {Ids = {"rbxassetid://86797626996300", "rbxassetid://92044948572397", "rbxasset://sounds/clickfast.wav"}, Volume = 0.45, Pitch = 1, Max = 0.8}, -- navigation_transition-right
+	coin    = {Ids = {"rbxassetid://98466697920863", "rbxassetid://131222240980061", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.45, Pitch = 1, Max = 1}, -- notification_simple-01
+	deny    = {Ids = {"rbxassetid://88258639627967", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1, Max = 0.6}, -- state-change_confirm-down
 	toggle  = {Ids = {"rbxassetid://9119717523", "rbxasset://sounds/switch.wav", "rbxasset://sounds/clickfast.wav"}, Volume = 0.35, Pitch = 1},
-	lock    = {Ids = {"rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.35, Pitch = 0.7, Max = 0.45},
-	unlock  = {Ids = {"rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.35, Pitch = 1.25, Max = 0.4},
-	reward  = {Ids = {"rbxassetid://135165335432475", "rbxassetid://122399158411452", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.35, Pitch = 1},
-	claim   = {Ids = {"rbxassetid://106145041472451", "rbxassetid://89593894732695", "rbxassetid://135165335432475", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1},
+	-- the tutorial's text appearing: the soft tap, high and quiet, cut short so ticks never ring into each other
+	type    = {Ids = {"rbxassetid://118050128378427", "rbxassetid://3623733749", "rbxasset://sounds/clickfast.wav"}, Volume = 0.16, Pitch = 1.45, Max = 0.09},
+	lock    = {Ids = {"rbxassetid://88258639627967", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1, Max = 0.6},
+	unlock  = {Ids = {"rbxassetid://127898241244912", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.45, Pitch = 1, Max = 0.9},
+	reward  = {Ids = {"rbxassetid://117728785646872", "rbxassetid://135165335432475", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.5, Pitch = 1}, -- hero_simple-celebration-03
+	claim   = {Ids = {"rbxassetid://85218505327576", "rbxassetid://106145041472451", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.5, Pitch = 1}, -- hero_simple-celebration-01
 	sparkle = {Ids = {"rbxassetid://135257162986933", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.22, Pitch = 1.2, Max = 1.2},
 	buy     = {Ids = {"rbxassetid://134810204798705", "rbxassetid://91206735719300", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1, Max = 1.2},
 	swing   = {Ids = {"rbxassetid://123796710194563", "rbxassetid://7655466603", "rbxasset://sounds/swordslash.wav"}, Volume = 0.4, Pitch = 1.15, Max = 0.5},
@@ -49,17 +58,24 @@ local SFX = {
 	slap    = {Ids = {"rbxassetid://511340819", "rbxassetid://8556065163", "rbxassetid://140165921656547", "rbxasset://sounds/action_jump_land.mp3"}, Volume = 0.6, Pitch = 1},
 }
 -- Every menu button has its own voice: {sound, pitch}. Unnamed buttons just click.
+-- false = silent: the menu it opens plays its own sound at the same moment, so a click never stacks two sounds
 local BUTTON_SFX = {
-	SHOP = {"pop", 1.15}, INDEX = {"pop", 0.9}, DAILY = {"click", 1.25}, GIFT = {"pop", 1.4},
-	INFO = {"click", 1.4}, DOWNLOADS = {"click", 0.95}, INSTALLED = {"pop", 1.05}, PETS = {"pop", 1.25},
+	SHOP = false, INDEX = false, DAILY = false, GIFT = false, INFO = false, DOWNLOADS = false, INSTALLED = false, PETS = false,
 }
 local sfxReady = {}
-do
+-- only a playing client loads sounds (requiring this in Studio's edit mode or on the server must not leave a
+-- UISounds folder behind in the place)
+if game:GetService("RunService"):IsClient() and game:GetService("RunService"):IsRunning() then
 	local ContentProvider = game:GetService("ContentProvider")
 	local SoundService = game:GetService("SoundService")
 	local folder = Instance.new("Folder")
 	folder.Name = "UISounds"
 	folder.Parent = SoundService
+	-- every menu sound plays through one group, so they can be turned down or muted together
+	local group = SoundService:FindFirstChild("UI") or Instance.new("SoundGroup")
+	group.Name = "UI"
+	group.Parent = SoundService
+	UI.SoundGroup = group
 	for name, def in pairs(SFX) do
 		task.spawn(function()
 			for _, id in ipairs(def.Ids) do
@@ -68,6 +84,7 @@ do
 				s.SoundId = id
 				s.Volume = def.Volume
 				s.PlaybackSpeed = def.Pitch
+				s.SoundGroup = group
 				s.Parent = folder
 				pcall(function()
 					ContentProvider:PreloadAsync({s})
@@ -82,10 +99,15 @@ do
 	end
 end
 local lastButtonSfx = 0
+local lastPlayed = {}
 function UI.sfx(name, pitch)
 	local s = sfxReady[name]
 	local def = SFX[name]
 	if not s then return end
+	-- rapid clicks restart a sound instead of stacking it, and never more than once per 50 ms
+	local now = os.clock()
+	if now - (lastPlayed[name] or 0) < 0.05 then return end
+	lastPlayed[name] = now
 	s.Volume = def.Volume
 	s.PlaybackSpeed = def.Pitch * (pitch or 1)
 	s.TimePosition = 0
@@ -104,7 +126,6 @@ end
 -- A claimed reward: a bright chime with a little sparkle on top
 function UI.claimSfx()
 	UI.sfx("claim")
-	task.delay(0.08, UI.sfx, "sparkle")
 end
 
 function UI.new(class, props, children)
@@ -240,7 +261,7 @@ function UI.sparkles(frame, rate)
 					BackgroundTransparency = 1, Text = "\u{2726}", Font = UI.FONT, TextScaled = true,
 					TextColor3 = math.random() < 0.5 and UI.WHITE or Color3.fromRGB(255, 240, 150),
 					Size = UDim2.fromOffset(size, size), AnchorPoint = Vector2.new(0.5, 0.5),
-					Position = UDim2.fromScale(math.random(10, 90) / 100, math.random(10, 90) / 100),
+					Position = UDim2.fromScale(math.random(16, 84) / 100, math.random(16, 84) / 100), -- kept clear of the border
 					TextTransparency = 1, ZIndex = frame.ZIndex + 3, Parent = frame,
 				})
 				local tin = TweenService:Create(star, TweenInfo.new(0.35), {TextTransparency = 0, Rotation = 45})
@@ -259,22 +280,27 @@ end
 -- Hover grows a little, clicking squishes it
 function UI.bounce(button)
 	local scale = button:FindFirstChildOfClass("UIScale") or new("UIScale", {Parent = button})
+	local hovering = false
 	button.MouseEnter:Connect(function()
-		TweenService:Create(scale, TweenInfo.new(0.12), {Scale = 1.06}):Play()
+		hovering = true
+		TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quint), {Scale = 1.05}):Play()
 	end)
 	button.MouseLeave:Connect(function()
-		TweenService:Create(scale, TweenInfo.new(0.12), {Scale = 1}):Play()
+		hovering = false
+		TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Quint), {Scale = 1}):Play()
 	end)
 	button.MouseButton1Down:Connect(function()
-		TweenService:Create(scale, TweenInfo.new(0.06), {Scale = 0.94}):Play()
+		TweenService:Create(scale, TweenInfo.new(0.08, Enum.EasingStyle.Sine), {Scale = 0.94}):Play()
 	end)
 	button.MouseButton1Up:Connect(function()
-		TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Back), {Scale = 1.06}):Play()
+		TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back), {Scale = hovering and 1.05 or 1}):Play()
 	end)
 	if not button:GetAttribute("Silent") then
 		button.Activated:Connect(function()
 			local own = BUTTON_SFX[button.Name]
-			if own then
+			if own == false then
+				return
+			elseif own then
 				UI.sfx(own[1], own[2])
 			else
 				UI.sfx(button:GetAttribute("Sfx") or "click")
@@ -290,10 +316,17 @@ function UI.fancyButton(props)
 	local b = new("TextButton", {
 		Name = props.Name, Size = props.Size, Position = props.Position or UDim2.new(), AnchorPoint = props.AnchorPoint or Vector2.zero,
 		LayoutOrder = props.LayoutOrder or 0, BackgroundColor3 = UI.WHITE, Text = "", AutoButtonColor = false, Parent = props.Parent,
-	}, {UI.corner(props.Radius or 18), UI.stroke(UI.BLACK, props.Border or 3.5)})
-	UI.gradient(b, color:Lerp(UI.WHITE, 0.3), color:Lerp(UI.BLACK, 0.2), 90)
-	-- glossy top half
-	new("Frame", {Size = UDim2.new(1, -8, 0.42, 0), Position = UDim2.fromOffset(4, 3), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.78, Parent = b}, {UI.corner((props.Radius or 18) - 4)})
+	}, {UI.corner(props.Radius or 18), UI.stroke(color:Lerp(UI.BLACK, 0.65), props.Border or 3.5)})
+	UI.gradient(b, color:Lerp(UI.WHITE, 0.35), color:Lerp(UI.BLACK, 0.12), 90)
+	local r = props.Radius or 18
+	-- a darker band along the bottom: the button reads as a raised, chunky block
+	new("Frame", {AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0.34, 0), BackgroundColor3 = color:Lerp(UI.BLACK, 0.45), BorderSizePixel = 0, Parent = b},
+		{UI.corner(r), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(1, 0.35)})})
+	-- glossy top half and a thin lit rim just inside the edge
+	new("Frame", {Size = UDim2.new(1, -10, 0.4, 0), Position = UDim2.fromOffset(5, 4), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.72, Parent = b},
+		{UI.corner(r - 5), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(0.2, 1)})})
+	new("Frame", {Position = UDim2.fromOffset(2, 2), Size = UDim2.new(1, -4, 1, -4), BackgroundTransparency = 1, Parent = b},
+		{UI.corner(r - 2), new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.55})})
 	local icon, text
 	if props.Wide then
 		icon = UI.label({Size = UDim2.new(0, b.Size.Y.Offset - 10, 1, -10), Position = UDim2.fromOffset(8, 5), Text = props.Icon or "", Outline = false, Parent = b})
@@ -338,10 +371,31 @@ function UI.panel(gui, opts)
 		p.Visible = false
 		UI.sfx("close")
 	end)
+	table.insert(UI.Windows, panel)
 	return panel
 end
 
+-- did a menu button just make its own sound? (then the window it opens doesn't add a second one)
+function UI.justClicked()
+	return os.clock() - lastButtonSfx < 0.15
+end
+
+-- every menu window in the game (UIKit panels and MenuKit windows): one is open at a time
+UI.Windows = UI.Windows or {}
+function UI.closeOthers(keep)
+	for _, w in ipairs(UI.Windows) do
+		if w ~= keep and w.Frame.Visible then
+			if w.Hide then
+				w.Hide(true)
+			else
+				w.Frame.Visible = false
+			end
+		end
+	end
+end
+
 function UI.open(panel)
+	UI.closeOthers(panel)
 	-- the button that opened it already made its own sound
 	if os.clock() - lastButtonSfx > 0.15 then
 		UI.sfx("open")
@@ -353,16 +407,28 @@ end
 
 -- Big coloured action button (claim / buy). Returns the button and its text label
 function UI.actionButton(props, color)
+	local edge = UI.stroke(color:Lerp(UI.BLACK, 0.55), 2.5)
 	local b = new("TextButton", {
 		Name = props.Name, Size = props.Size, Position = props.Position or UDim2.new(), AnchorPoint = props.AnchorPoint or Vector2.zero,
 		LayoutOrder = props.LayoutOrder or 0, BackgroundColor3 = UI.WHITE, Text = "", AutoButtonColor = false, Parent = props.Parent,
-	}, {UI.corner(props.Radius or 14), UI.stroke(UI.BLACK, 3)})
+	}, {UI.corner(props.Radius or 14), edge})
 	b:SetAttribute("Sfx", "press")
-	local grad = UI.gradient(b, color:Lerp(UI.WHITE, 0.25), color:Lerp(UI.BLACK, 0.2), 90)
+	local grad = UI.gradient(b, color:Lerp(UI.WHITE, 0.25), color:Lerp(UI.BLACK, 0.15), 90)
+	-- a soft light across the top half: a rounded, lit surface instead of a flat one
+	new("Frame", {Name = "Gloss", Position = UDim2.new(0, 6, 0, 3), Size = UDim2.new(1, -12, 0.42, 0), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.8, BorderSizePixel = 0, Parent = b}, {UI.corner(math.max(4, (props.Radius or 14) - 4))})
 	local t = UI.label({Position = UDim2.fromScale(0.06, 0.14), Size = UDim2.fromScale(0.88, 0.72), Text = props.Text or "", Parent = b})
+	local tEdge = t:FindFirstChildOfClass("UIStroke")
+	if tEdge then
+		tEdge.Color = color:Lerp(UI.BLACK, 0.7)
+		tEdge.Thickness = 2
+	end
 	UI.bounce(b)
 	local function setColor(c)
-		grad.Color = ColorSequence.new(c:Lerp(UI.WHITE, 0.25), c:Lerp(UI.BLACK, 0.2))
+		grad.Color = ColorSequence.new(c:Lerp(UI.WHITE, 0.25), c:Lerp(UI.BLACK, 0.15))
+		edge.Color = c:Lerp(UI.BLACK, 0.55)
+		if tEdge then
+			tEdge.Color = c:Lerp(UI.BLACK, 0.7)
+		end
 	end
 	return b, t, setColor
 end

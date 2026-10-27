@@ -22,9 +22,14 @@ local raws = lab:FindFirstChild("RawGenerations")
 if raws then
 	raws.Parent = ServerStorage
 end
--- the client waits for this many descendants before animating a pet, so it never rigs half a model
-for _, m in ipairs(lab.Pets:GetChildren()) do
+-- the gallery shows copies of the game's own models (ReplicatedStorage.PetAssets), so the lab never drifts from the game.
+-- They keep their authored gallery positions. Persistent, because the lab is far from the map and would never stream in.
+-- The client waits for this many descendants before animating a pet, so it never rigs half a model.
+for _, src in ipairs(game:GetService("ReplicatedStorage").PetAssets:GetChildren()) do
+	local m = src:Clone()
+	m.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	m:SetAttribute("Descendants", #m:GetDescendants())
+	m.Parent = lab.Pets
 end
 lab.Parent = workspace
 local origin = lab:GetAttribute("Origin")

@@ -198,7 +198,7 @@ C.OFFLINE_INSTALL_RATE = 0.5    -- ...and while you're offline
 -- real speed = REAL_BASE_SPEED x (points / START_SPEED) ^ REAL_SPEED_POWER
 C.START_SPEED = 1000
 C.REAL_BASE_SPEED = 32
-C.REAL_SPEED_POWER = 0.25
+C.REAL_SPEED_POWER = 0.165      -- tuned so level 50's recommended speed (~7.7B) lands just under MAX_REAL_SPEED
 C.MAX_REAL_SPEED = 450
 C.CARRY_MULTIPLIER = 1          -- speed while carrying a stolen game (1 = no slowdown, so your speed number vs the shopkeeper's decides who wins)
 
@@ -207,12 +207,14 @@ function C.realSpeed(points)
 	return math.min(C.MAX_REAL_SPEED, C.REAL_BASE_SPEED * (points / C.START_SPEED) ^ C.REAL_SPEED_POWER)
 end
 
--- Treadmill: level 0 gives +1 speed point per second, each upgrade multiplies that
+-- Treadmill: level 0 gives +1 speed point per second, each upgrade multiplies that.
+-- Rate grows slower than cost (and slower than the shopkeepers), so every vault level takes real
+-- training: roughly L5 ~10 min, L10 ~25 min, L20 ~1.5 h, L30 ~4 h, L50 ~40 h of active play.
 C.TREAD_BASE_RATE = 1
-C.TREAD_RATE_GROWTH = 1.6
+C.TREAD_RATE_GROWTH = 1.4
 C.TREAD_MAX_LEVEL = 40
-C.TREAD_COST_BASE = 50
-C.TREAD_COST_GROWTH = 1.9
+C.TREAD_COST_BASE = 200
+C.TREAD_COST_GROWTH = 2.0
 
 function C.treadRate(level)
 	return C.TREAD_BASE_RATE * C.TREAD_RATE_GROWTH ^ level
@@ -228,13 +230,14 @@ end
 
 -- Shopkeepers (speed points, same scale as players)
 C.GUARD_START_POINTS = 700
-C.GUARD_POINT_GROWTH = 1.233    -- each level deeper is this much faster (level 50 is about 20 million)
+C.GUARD_POINT_GROWTH = 1.32     -- each level deeper is this much faster
+C.GUARD_ZONE_JUMP = 1.25        -- ...and the first level of every new area is this much faster again (level 50 is about 7 billion)
 C.GUARD_IDLE_REAL_SPEED = 20
 C.GUARD_RETURN_SPEED = 90       -- how fast a shopkeeper walks back to their post after a chase
 C.GUARD_REACTION = 0.6
 C.GUARD_GIVE_UP = 120
 C.GUARD_LATE_LEVEL = 25         -- past this level shopkeepers get an extra speed-up
-C.GUARD_LATE_GROWTH = 1.045
+C.GUARD_LATE_GROWTH = 1.02
 -- Shopkeepers are giants: this many times a player's size (level 1 up to level 50). Max fits under the level signs.
 C.GUARD_SCALE_MIN = 4.2
 C.GUARD_SCALE_MAX = 5.6
@@ -243,7 +246,8 @@ function C.guardScale(level)
 end
 function C.guardPoints(level)
 	local late = math.max(0, level - C.GUARD_LATE_LEVEL)
-	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (level - 1) * C.GUARD_LATE_GROWTH ^ late
+	local zone = math.floor((level - 1) / 5)
+	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (level - 1) * C.GUARD_ZONE_JUMP ^ zone * C.GUARD_LATE_GROWTH ^ late
 end
 
 -- The speed shown on each level's hanging sign: a little faster than its shopkeeper,

@@ -1117,7 +1117,7 @@ for level = 1, C.NUM_LEVELS do
 			CheckPos = root.Position, CheckTime = os.clock(),
 		}
 		g.RealSpeed = C.realSpeed(g.Points)
-		g.MustBeat = C.realSpeed(C.recommendedSpeed(level))
+		g.MustBeat = C.recommendedSpeed(level) -- speed points, the exact number on the level's sign
 		g.IdleText = guardLabelText(g)
 		-- float the name above the tallest hat/helmet piece (a Toy Soldier's shako and plume covered it)
 		local top = head and head.Size.Y / 2 or 2
@@ -1264,10 +1264,13 @@ local function updateGuard(g, now)
 			return
 		end
 		local tRoot = getRoot(t)
-		-- slower than the level's recommended speed: the shopkeeper always out-runs you
+		-- slower than the level's recommended speed: the shopkeeper always out-runs you.
+		-- Judged on speed points, not WalkSpeed: WalkSpeed is a float32 (a player exactly at the
+		-- recommended speed read a hair under it) and is capped at MAX_REAL_SPEED.
 		local tHum = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
 		local speed = g.RealSpeed
-		if tHum and tHum.WalkSpeed < g.MustBeat then
+		local points = (t:GetAttribute("SpeedPoints") or C.START_SPEED) * (t:GetAttribute("SpeedMultiplier") or 1)
+		if tHum and points < g.MustBeat then
 			speed = math.max(speed, tHum.WalkSpeed * 1.25)
 		end
 		hum.WalkSpeed = speed

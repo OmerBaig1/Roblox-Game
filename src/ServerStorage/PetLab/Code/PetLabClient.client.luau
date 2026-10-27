@@ -4,7 +4,8 @@
 	  P  - jump to the Pet Lab, press again to go back
 	  L  - the next lab pet (roster order) follows you anywhere; after the last one the follower goes away
 	  K  - put the selected pet on the turntable
-	Every pet in PetLab.Pets idles in place on its gallery row, with the same distance LOD the game will use.
+	Every pet in PetLab.Pets (copies of ReplicatedStorage.PetAssets) idles in place on its gallery row, with the same
+	distance LOD and outline budget the game uses.
 ]]
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -16,8 +17,10 @@ end
 local player = Players.LocalPlayer
 local lab = workspace:WaitForChild("PetLab")
 local code = lab:WaitForChild("Code")
-local PetAnimator = require(code:WaitForChild("PetAnimator"))
-local Configs = require(code:WaitForChild("PetConfigs"))
+local PetSystem = game:GetService("ReplicatedStorage"):WaitForChild("PetSystem")
+local PetAnimator = require(PetSystem:WaitForChild("PetAnimator"))
+local Configs = require(PetSystem:WaitForChild("PetConfigs"))
+local PetFx = require(PetSystem:WaitForChild("PetFx"))
 local O = lab:GetAttribute("Origin")
 
 -- hint in the corner so you know the keys
@@ -137,8 +140,23 @@ local function camDist(m)
 	return (camera.CFrame.Position - m.PrimaryPart.Position).Magnitude
 end
 
+local nextOutlines = 0
 RunService.RenderStepped:Connect(function(dt)
 	local t = os.clock()
+	if t >= nextOutlines then
+		nextOutlines = t + 0.25
+		local models, mine = {}, {}
+		for _, g in ipairs(gallery) do
+			table.insert(models, g.Model)
+		end
+		for _, m in pairs({follower or false, shown or false}) do
+			if m then
+				table.insert(models, m)
+				mine[m] = true
+			end
+		end
+		PetFx.outlines(models, camera.CFrame.Position, mine)
+	end
 	for _, g in ipairs(gallery) do
 		g.Anim:Step(dt, t, 0, 0, camDist(g.Model))
 	end

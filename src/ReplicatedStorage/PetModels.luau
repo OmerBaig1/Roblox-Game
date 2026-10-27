@@ -3,9 +3,9 @@
 	Builds every pet (and egg) out of soft rounded shapes: chibi proportions, big shiny eyes and rosy cheeks.
 	The look comes from the pet's fields in PetData (body type, colours, ears, tail, wings, horns...).
 
-	PetModels.build(pet)        -> Model facing -Z, standing on y = 0, PrimaryPart "Root" (anchored, the rest welded)
-	PetModels.addEffects(m, pet) -> sparkles / glow / fire for pets out in the world (better rarities get more)
-	PetModels.egg(egg)           -> an egg Model
+	PetModels.build(pet)        -> a copy of the pet's premium model (ReplicatedStorage.PetAssets), Root at the origin
+	PetModels.egg(egg)           -> a copy of the egg's premium model (ReplicatedStorage.EggAssets, built by PetLab EggForge)
+	The chibi builder below (BODY, addEffects) is no longer used; it goes in Phase 6 of docs/pets/INTEGRATION.md.
 ]]
 
 local PetData = require(script.Parent:WaitForChild("PetData"))
@@ -724,7 +724,33 @@ end
 ------------------------------------------------------------------
 local MATS = {Foil = Enum.Material.Foil, Glass = Enum.Material.Glass}
 
+local assets = script.Parent:WaitForChild("PetAssets")
+local warned = {}
 function M.build(pet)
+	local src = assets:FindFirstChild(pet.Model or "")
+	if not src then
+		if not warned[pet.Key] then
+			warned[pet.Key] = true
+			warn("PetModels: no model in PetAssets for " .. tostring(pet.Key))
+		end
+		local p = Instance.new("Part")
+		p.Name = "Root"
+		p.Shape = Enum.PartType.Ball
+		p.Size = Vector3.new(2, 2, 2)
+		p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch = true, false, false, false
+		local m = Instance.new("Model")
+		p.Parent = m
+		m.PrimaryPart = p
+		m:SetAttribute("PetKey", pet.Key)
+		return m
+	end
+	local m = src:Clone()
+	m:PivotTo(CFrame.identity)
+	m:SetAttribute("PetKey", pet.Key)
+	return m
+end
+
+function M.buildChibi(pet)
 	local b = newBuilder(pet.N, nil)
 	-- whole-pet materials (gold, gummy glass); faces and eyes keep their own
 	if pet.Mat == "Foil" then
@@ -807,7 +833,7 @@ function M.addEffects(model, pet)
 end
 
 -- EGGS: a shiny oval shell with its own pattern
-function M.egg(egg)
+local function eggBasic(egg)
 	local b = newBuilder(egg.Name, egg.Mat and Enum.Material[egg.Mat] or nil)
 	local center, radii = Vector3.new(0, 1.4, 0), Vector3.new(2.2, 2.8, 2.2)
 	b.E(radii, CFrame.new(center), egg.Color, {Name = "Shell"})
@@ -866,6 +892,18 @@ function M.egg(egg)
 	-- a soft shine
 	b.E(Vector3.new(0.45, 0.75, 0.2), CFrame.new(center + Vector3.new(-0.55, 0.55, -0.85)) * A(0, 0.5, 0.3), WHITE, {T = 0.45})
 	return b.Model
+end
+
+-- the egg's premium model, standing on y = 0; the simple procedural egg only if its asset is missing
+local eggAssets = script.Parent:WaitForChild("EggAssets")
+function M.egg(egg)
+	local src = eggAssets:FindFirstChild(egg.Name)
+	if not src then
+		return eggBasic(egg)
+	end
+	local m = src:Clone()
+	m:PivotTo(CFrame.identity)
+	return m
 end
 
 return M

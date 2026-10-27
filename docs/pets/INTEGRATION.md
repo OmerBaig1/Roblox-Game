@@ -26,6 +26,34 @@ working (`N`, `R`, `Egg`, `Key`, `Boost`, `RARITIES`, `EQUIP_MAX`, `MAX_PETS`, `
   `ServerStorage.UnitTest.Cases.PetMigration_Test` (18 tests, all pass). Nothing live requires them yet.
   Open question for the owner: old Secrets from eggs 1-5 become the Crystal Heart Golem (boost 28-71% -> 112%), per the
   rule below. Next: Phase 1.
+- Oct 26 2026: the owner said wiping everyone's pets is fine (the game isn't published yet). Phase 3's migration is
+  no longer needed and the Secret question is moot. Old keys will simply be dropped by `Pets.load`.
+- Oct 26 2026: **Phase 1 done.** `PetAnimator` and `PetConfigs` moved to `ReplicatedStorage.PetSystem`. The 60 models are in
+  `ReplicatedStorage.PetAssets` (streaming overrides removed). `PetLabDev` clones them into the lab gallery at playtest
+  start (Persistent there). New `PetSystem.PetFx.outlines` keeps at most 24 Outlines lit (own pets first, then nearest);
+  the lab uses it. LOD stays inside `PetAnimator:Step`. Backups: `ServerStorage.Backups.Before_Oct26_PremiumPets`.
+  Tests 20/20 (new `PetFx_Test`). Playtest: 60 gallery pets, all animate in the lab, 24 outlines lit. Next: Phase 2.
+- Oct 26 2026: **Phase 2 done (Phase 3 dropped).** `PetData` is now the 8-egg catalog (the old `PetSystem.Catalog`
+  moved into it). `PetMigration` and its tests are deleted. The server rolls with `PetData.roll`. The shop's "up to" uses
+  `egg.Best`, and the info page shows each pool pet with its share of the tier odds. Part of Phase 4 had to come
+  forward so nothing crashes: `PetModels.build` clones `PetAssets` (placeholder plus one warn if missing), the old
+  builder is kept as `buildChibi` until Phase 6, and the followers no longer call `addEffects`. Followers are still
+  static, PET_SCALE 0.75, with no hover by Mode (Phase 4). Backups are in `Before_Oct26_PremiumPets`. Tests 5/5
+  (new `PetData_Test`). Playtest: shop shows 8 eggs, info page OK, 3 followers spawn as premium models, no errors.
+  20k rolls of egg 8 match the shown odds. No purchase tested (Studio saves to the live DataStore).
+- Oct 26 2026: **Phase 3.5 (owner request): egg shop and hatching overhaul.**
+  - Eggs: `ServerStorage.PetLab.Code.EggForge` builds the 8 eggs into `ReplicatedStorage.EggAssets` with CSG. Each has
+    a hollow shell, a narrower top, a zigzag seam split into Top and Bottom pieces, hidden seam cracks, a light inside,
+    and themed ornaments that grow more elaborate egg by egg. `PetModels.egg` clones them; the old procedural egg is
+    the fallback.
+  - Shop: `PetsUI.Hatchery` with `ShopKit` replaces the old shop. It has a showcase with a 3D stand, the pets each egg
+    can hatch with their odds, a row of every egg with drawn chevrons, and buttons that grey out with a "need $X" toast
+    when you can't afford them. One UIScale fits it to the screen.
+  - Hatching: each egg's own sequence in `PetsUI.HatchStyles`, played on `PetSystem.EggRig` with a 2D `Particles` layer.
+  - World hatchery: nests got rims lit in each egg's colour.
+  - Backups are in `Before_Oct26_EggShop`. In Studio only, `PlayerGui.HatchUI.HatchPreview` plays a hatch with made-up results.
+  - Tested: every egg's single hatch, 10-egg grids, Skip, close-up, spam, and the not-enough-cash path; 50+ fps in a
+    10-egg hatch. Not tested: a real purchase, and real phone screens.
 
 ## Phase 1: shared runtime
 

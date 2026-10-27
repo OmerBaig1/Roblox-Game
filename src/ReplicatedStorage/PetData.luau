@@ -1,12 +1,10 @@
 --[[
 	PetData
-	Every egg and every pet. Shared by the server (hatching, boosts) and the client (shop, hatching, pets).
-	Pets make your games install faster: each equipped pet adds its Boost (%) to your install speed.
-	Every egg can hatch every rarity; pricier eggs have better odds and far stronger pets.
-
-	Pet look fields (read by PetModels): B = body (quad, bird, fish, octo, blob, ghost, bug),
-	C = {main, belly, accent} colours, then optional: Ears, Tail, Snout, Eyes, and extras like Wings,
-	Horn, Mane, Stripes, Spots, Shell, Hump, Neck, Heads, Tails9, Halo, Crown, Antenna, Fire, Glow, Mat.
+	Every egg and every pet: 8 eggs, 60 premium pets (docs/pets/ROSTER.md). Shared by the server (hatching, boosts)
+	and the client (shop, hatching, pets). Each equipped pet adds its Boost (%) to your install speed.
+	Each pet's Id is its save key (Key = Id). R = rarity tier 1-7, Model = its model in ReplicatedStorage.PetAssets,
+	Mode = its follow style in PetSystem.PetAnimator. An egg's Pets is a pool: several pets can share a tier, and an
+	egg can have no pet of some tier (no Secrets in the first three). Eggs keep Color/Spot/Pattern for PetModels.egg().
 ]]
 
 local D = {}
@@ -14,9 +12,9 @@ local function rgb(r, g, b)
 	return Color3.fromRGB(r, g, b)
 end
 
-D.EQUIP_MAX = 3          -- pets you can have out at once
-D.MAX_PETS = 250         -- pets you can own
-D.HATCH_MANY = 10        -- the "Buy 10" button
+D.EQUIP_MAX = 3
+D.MAX_PETS = 250
+D.HATCH_MANY = 10
 
 D.RARITIES = {
 	{Name = "Common",    Color = rgb(200, 200, 205), Mult = 1},
@@ -27,174 +25,146 @@ D.RARITIES = {
 	{Name = "Mythic",    Color = rgb(255, 60, 100),  Mult = 8},
 	{Name = "Secret",    Color = rgb(30, 255, 225),  Mult = 14},
 }
--- base odds (%) for the first egg; better eggs shift them toward the rarer pets
 local BASE_ODDS = {50, 27, 13, 6.5, 2.6, 0.75, 0.15}
 
--- {Name, price, shell colour, spot colour, pattern, material, pets (Common .. Secret)}
-local W, BK = rgb(255, 255, 255), rgb(30, 25, 30)
+-- prices are the old prices of eggs 1, 3, 5 ... 15, so the economy curve doesn't move.
+-- Tagline is the line under its name in the shop.
 D.EGGS = {
-	{Name = "Meadow Egg", Price = 500, Color = rgb(150, 230, 120), Spot = rgb(255, 250, 200), Pattern = "spots", Pets = {
-		{N = "Kitty", B = "quad", C = {rgb(255, 180, 110), rgb(255, 240, 220), rgb(255, 140, 160)}, Ears = "cat", Tail = "cat", Stripes = rgb(225, 130, 70)},
-		{N = "Puppy", B = "quad", C = {rgb(205, 150, 95), rgb(255, 235, 210), rgb(120, 80, 50)}, Ears = "dog", Tail = "short", Snout = "long"},
-		{N = "Bunny", B = "quad", C = {rgb(250, 250, 255), rgb(255, 225, 235), rgb(255, 150, 190)}, Ears = "bunny", Tail = "puff"},
-		{N = "Hamster", B = "quad", C = {rgb(240, 175, 90), rgb(255, 245, 225), rgb(255, 160, 170)}, Ears = "round", Tail = "none"},
-		{N = "Chick", B = "bird", C = {rgb(255, 225, 70), rgb(255, 245, 160), rgb(255, 150, 40)}, Tail = "none"},
-		{N = "Piglet", B = "quad", C = {rgb(255, 175, 195), rgb(255, 215, 225), rgb(240, 120, 150)}, Ears = "cat", Tail = "short", Snout = "pig"},
-		{N = "Lucky Cat", B = "quad", C = {rgb(255, 255, 255), rgb(255, 245, 235), rgb(230, 40, 50)}, Ears = "cat", Tail = "cat", Crown = true, Spots = rgb(255, 170, 60)},
-	}},
-	{Name = "Farm Egg", Price = 5000, Color = rgb(240, 200, 120), Spot = rgb(170, 110, 60), Pattern = "spots", Pets = {
-		{N = "Calf", B = "quad", C = {W, rgb(255, 230, 235), rgb(255, 160, 170)}, Ears = "round", Horns = "cow", Tail = "short", Snout = "cow", Spots = BK},
-		{N = "Lamb", B = "quad", C = {rgb(250, 250, 245), rgb(70, 60, 60), rgb(255, 170, 180)}, Ears = "dog", Tail = "puff", Fluff = true},
-		{N = "Duckling", B = "bird", C = {rgb(255, 240, 120), rgb(255, 250, 200), rgb(255, 140, 30)}, Beak = "duck"},
-		{N = "Goat", B = "quad", C = {rgb(235, 225, 210), rgb(255, 250, 240), rgb(150, 140, 130)}, Ears = "dog", Horns = "goat", Tail = "short", Snout = "long"},
-		{N = "Pony", B = "quad", C = {rgb(170, 110, 70), rgb(230, 190, 150), rgb(60, 40, 30)}, Ears = "cat", Tail = "horse", Snout = "long", Mane = rgb(60, 40, 30)},
-		{N = "Rooster", B = "bird", C = {rgb(250, 245, 235), rgb(255, 255, 255), rgb(230, 40, 40)}, Comb = true, Tail = "feathers"},
-		{N = "Golden Goose", B = "bird", C = {rgb(255, 210, 60), rgb(255, 240, 150), rgb(255, 150, 30)}, Beak = "duck", Mat = "Foil", Crown = true},
-	}},
-	{Name = "Forest Egg", Price = 25000, Color = rgb(70, 150, 70), Spot = rgb(150, 100, 60), Pattern = "leaves", Pets = {
-		{N = "Fox", B = "quad", C = {rgb(240, 120, 40), W, rgb(40, 30, 30)}, Ears = "cat", Tail = "fluffy", Snout = "long"},
-		{N = "Fawn", B = "quad", C = {rgb(190, 120, 70), rgb(250, 230, 200), rgb(60, 40, 30)}, Ears = "dog", Tail = "short", Snout = "long", Spots = W},
-		{N = "Raccoon", B = "quad", C = {rgb(140, 140, 150), rgb(230, 230, 235), rgb(40, 40, 45)}, Ears = "round", Tail = "ringed", Mask = true},
-		{N = "Squirrel", B = "quad", C = {rgb(200, 110, 50), rgb(250, 225, 190), rgb(120, 60, 30)}, Ears = "cat", Tail = "fluffy"},
-		{N = "Owl", B = "bird", C = {rgb(150, 105, 70), rgb(240, 220, 180), rgb(255, 190, 40)}, Tufts = true, Eyes = "big"},
-		{N = "Bear Cub", B = "quad", C = {rgb(120, 75, 45), rgb(210, 170, 120), rgb(60, 35, 20)}, Ears = "round", Tail = "short", Snout = "bear"},
-		{N = "Forest Spirit", B = "ghost", C = {rgb(150, 255, 170), rgb(220, 255, 230), rgb(60, 200, 90)}, Glow = true, Antenna = "leaf"},
-	}},
-	{Name = "Pond Egg", Price = 100000, Color = rgb(80, 190, 230), Spot = rgb(200, 245, 255), Pattern = "waves", Pets = {
-		{N = "Froggy", B = "quad", C = {rgb(110, 210, 80), rgb(220, 250, 180), rgb(255, 130, 150)}, Ears = "none", Tail = "none", Eyes = "top", Squat = true},
-		{N = "Turtle", B = "quad", C = {rgb(130, 200, 110), rgb(230, 240, 180), rgb(90, 130, 60)}, Ears = "none", Tail = "short", Shell = rgb(110, 150, 70)},
-		{N = "Goldfish", B = "fish", C = {rgb(255, 140, 40), rgb(255, 210, 140), rgb(255, 90, 30)}, Fins = "fancy"},
-		{N = "Otter", B = "quad", C = {rgb(140, 95, 60), rgb(230, 200, 160), rgb(60, 40, 30)}, Ears = "round", Tail = "long", Snout = "bear"},
-		{N = "Swan", B = "bird", C = {W, rgb(255, 255, 255), rgb(255, 130, 40)}, Neck = true, Beak = "duck"},
-		{N = "Axolotl", B = "quad", C = {rgb(255, 180, 210), rgb(255, 225, 235), rgb(255, 90, 150)}, Ears = "none", Tail = "long", Gills = true},
-		{N = "Koi Dragon", B = "quad", C = {W, rgb(255, 240, 230), rgb(255, 80, 40)}, Ears = "none", Horns = "dragon", Tail = "long", Snout = "long", Wings = "fin", Spots = rgb(255, 80, 40), Whiskers = true},
-	}},
-	{Name = "Jungle Egg", Price = 500000, Color = rgb(50, 170, 90), Spot = rgb(255, 210, 60), Pattern = "stripes", Pets = {
-		{N = "Monkey", B = "quad", C = {rgb(140, 90, 55), rgb(240, 205, 165), rgb(90, 55, 30)}, Ears = "round", Tail = "curl", Face = true},
-		{N = "Parrot", B = "bird", C = {rgb(230, 40, 40), rgb(255, 220, 60), rgb(40, 120, 255)}, Tail = "feathers", Beak = "hook"},
-		{N = "Toucan", B = "bird", C = {rgb(35, 35, 40), rgb(255, 250, 230), rgb(255, 150, 30)}, Beak = "big"},
-		{N = "Panda", B = "quad", C = {W, rgb(255, 255, 255), rgb(30, 30, 35)}, Ears = "round", Tail = "short", Patches = true, Snout = "bear"},
-		{N = "Tiger", B = "quad", C = {rgb(255, 150, 40), W, rgb(30, 25, 25)}, Ears = "round", Tail = "cat", Stripes = rgb(30, 25, 25)},
-		{N = "Gorilla", B = "quad", C = {rgb(60, 60, 70), rgb(120, 115, 125), rgb(30, 30, 35)}, Ears = "round", Tail = "none", Face = true, Big = true},
-		{N = "Golden Tiger", B = "quad", C = {rgb(255, 210, 60), rgb(255, 250, 210), rgb(200, 110, 20)}, Ears = "round", Tail = "cat", Stripes = rgb(220, 120, 20), Mat = "Foil", Crown = true},
-	}},
-	{Name = "Savanna Egg", Price = 2500000, Color = rgb(240, 180, 80), Spot = rgb(150, 90, 40), Pattern = "spots", Pets = {
-		{N = "Lion Cub", B = "quad", C = {rgb(240, 180, 90), rgb(255, 235, 200), rgb(170, 100, 40)}, Ears = "round", Tail = "tuft"},
-		{N = "Zebra", B = "quad", C = {W, rgb(255, 255, 255), rgb(30, 30, 35)}, Ears = "cat", Tail = "horse", Snout = "long", Stripes = rgb(30, 30, 35), Mane = rgb(30, 30, 35)},
-		{N = "Giraffe", B = "quad", C = {rgb(250, 200, 90), rgb(255, 240, 200), rgb(160, 100, 40)}, Ears = "cat", Horns = "giraffe", Tail = "tuft", Neck = true, Spots = rgb(170, 100, 40)},
-		{N = "Elephant", B = "quad", C = {rgb(160, 165, 180), rgb(200, 205, 215), rgb(255, 170, 190)}, Ears = "elephant", Tail = "short", Snout = "trunk", Big = true},
-		{N = "Hippo", B = "quad", C = {rgb(170, 140, 190), rgb(230, 190, 210), rgb(255, 150, 180)}, Ears = "round", Tail = "short", Snout = "hippo", Big = true},
-		{N = "Rhino", B = "quad", C = {rgb(150, 150, 160), rgb(200, 200, 205), rgb(240, 235, 220)}, Ears = "cat", Tail = "short", Snout = "bear", Horn = "nose", Big = true},
-		{N = "King Lion", B = "quad", C = {rgb(255, 200, 80), rgb(255, 240, 200), rgb(200, 90, 20)}, Ears = "round", Tail = "tuft", Mane = rgb(200, 90, 20), Crown = true},
-	}},
-	{Name = "Ocean Egg", Price = 15000000, Color = rgb(40, 120, 230), Spot = rgb(120, 230, 255), Pattern = "waves", Pets = {
-		{N = "Clownfish", B = "fish", C = {rgb(255, 120, 30), W, rgb(30, 30, 30)}, Stripes = W},
-		{N = "Crab", B = "bug", C = {rgb(240, 70, 50), rgb(255, 160, 120), rgb(255, 255, 255)}, Claws = true, Stalks = true},
-		{N = "Dolphin", B = "fish", C = {rgb(110, 170, 230), rgb(220, 240, 255), rgb(70, 120, 200)}, Snout = "long", Fins = "dolphin"},
-		{N = "Octopus", B = "octo", C = {rgb(230, 100, 180), rgb(255, 190, 225), rgb(170, 60, 140)}},
-		{N = "Shark", B = "fish", C = {rgb(110, 130, 160), rgb(235, 240, 245), rgb(70, 85, 110)}, Fins = "shark", Teeth = true},
-		{N = "Whale", B = "fish", C = {rgb(60, 90, 200), rgb(210, 225, 255), rgb(40, 60, 150)}, Fins = "whale", Big = true, Spout = true},
-		{N = "Kraken", B = "octo", C = {rgb(120, 40, 150), rgb(200, 120, 230), rgb(60, 255, 200)}, Big = true, Glow = true, Crown = true},
-	}},
-	{Name = "Swamp Egg", Price = 100000000, Color = rgb(90, 120, 60), Spot = rgb(180, 220, 90), Pattern = "drips", Pets = {
-		{N = "Toad", B = "quad", C = {rgb(140, 150, 70), rgb(220, 220, 150), rgb(110, 80, 50)}, Ears = "none", Tail = "none", Eyes = "top", Squat = true, Spots = rgb(100, 110, 50)},
-		{N = "Firefly", B = "bug", C = {rgb(50, 50, 60), rgb(255, 255, 120), rgb(255, 230, 60)}, BugWings = true, Glow = true},
-		{N = "Lizard", B = "quad", C = {rgb(120, 200, 80), rgb(220, 240, 160), rgb(60, 130, 40)}, Ears = "none", Tail = "long", Squat = true},
-		{N = "Chameleon", B = "quad", C = {rgb(80, 210, 170), rgb(220, 255, 200), rgb(255, 120, 200)}, Ears = "none", Tail = "curl", Eyes = "big", Crest = true},
-		{N = "Crocodile", B = "quad", C = {rgb(80, 140, 60), rgb(210, 220, 150), rgb(50, 90, 40)}, Ears = "none", Tail = "long", Snout = "croc", Squat = true, Spikes = rgb(50, 90, 40)},
-		{N = "Bog Monster", B = "blob", C = {rgb(90, 110, 50), rgb(160, 190, 80), rgb(60, 70, 30)}, Antenna = "leaf", Drips = true},
-		{N = "Swamp Hydra", B = "quad", C = {rgb(60, 130, 90), rgb(180, 220, 150), rgb(255, 220, 60)}, Ears = "none", Tail = "long", Heads = 3, Horns = "dragon", Spikes = rgb(255, 220, 60)},
-	}},
-	{Name = "Arctic Egg", Price = 1e9, Color = rgb(220, 240, 255), Spot = rgb(130, 200, 255), Pattern = "snow", Pets = {
-		{N = "Penguin", B = "bird", C = {rgb(35, 40, 55), W, rgb(255, 170, 40)}, Belly = true, Tail = "none"},
-		{N = "Seal Pup", B = "fish", C = {rgb(235, 240, 245), W, rgb(40, 40, 45)}, Whiskers = true, Fins = "flipper"},
-		{N = "Arctic Fox", B = "quad", C = {W, rgb(255, 255, 255), rgb(130, 190, 255)}, Ears = "cat", Tail = "fluffy", Snout = "long"},
-		{N = "Snowy Owl", B = "bird", C = {W, rgb(255, 255, 255), rgb(255, 200, 40)}, Tufts = true, Eyes = "big", Spots = rgb(60, 60, 70)},
-		{N = "Polar Bear", B = "quad", C = {rgb(245, 248, 255), W, rgb(40, 40, 50)}, Ears = "round", Tail = "short", Snout = "bear", Big = true},
-		{N = "Yeti", B = "quad", C = {rgb(230, 240, 255), rgb(150, 200, 255), rgb(90, 150, 230)}, Ears = "none", Tail = "none", Horns = "goat", Fluff = true, Face = true, Big = true},
-		{N = "Ice Dragon", B = "quad", C = {rgb(150, 220, 255), rgb(230, 250, 255), rgb(60, 140, 255)}, Ears = "none", Horns = "dragon", Tail = "long", Snout = "long", Wings = "dragon", Spikes = W, Mat = "Glass"},
-	}},
-	{Name = "Desert Egg", Price = 3e9, Color = rgb(250, 210, 130), Spot = rgb(210, 140, 60), Pattern = "zigzag", Pets = {
-		{N = "Camel", B = "quad", C = {rgb(215, 170, 110), rgb(245, 220, 180), rgb(120, 80, 40)}, Ears = "round", Tail = "short", Snout = "long", Hump = true, Neck = true},
-		{N = "Meerkat", B = "quad", C = {rgb(210, 170, 120), rgb(245, 225, 190), rgb(60, 45, 35)}, Ears = "round", Tail = "long", Mask = true},
-		{N = "Fennec Fox", B = "quad", C = {rgb(245, 200, 140), W, rgb(255, 160, 150)}, Ears = "fennec", Tail = "fluffy", Snout = "long"},
-		{N = "Scorpion", B = "bug", C = {rgb(60, 40, 30), rgb(120, 80, 50), rgb(255, 80, 40)}, Claws = true, Stinger = true},
-		{N = "Cobra", B = "quad", C = {rgb(200, 170, 60), rgb(255, 240, 170), rgb(90, 70, 30)}, Ears = "none", Tail = "long", Hood = true, Squat = true},
-		{N = "Sphinx Cat", B = "quad", C = {rgb(240, 200, 150), rgb(255, 230, 200), rgb(40, 110, 230)}, Ears = "cat", Tail = "cat", Crown = true, Headdress = true},
-		{N = "Golden Scarab", B = "bug", C = {rgb(255, 200, 50), rgb(255, 240, 150), rgb(60, 220, 160)}, Horn = "bug", Mat = "Foil"},
-	}},
-	{Name = "Candy Egg", Price = 8e9, Color = rgb(255, 150, 210), Spot = rgb(130, 220, 255), Pattern = "sprinkles", Pets = {
-		{N = "Gummy Bear", B = "quad", C = {rgb(255, 80, 90), rgb(255, 150, 150), rgb(255, 40, 60)}, Ears = "round", Tail = "short", Mat = "Glass"},
-		{N = "Jelly Slime", B = "blob", C = {rgb(120, 220, 255), rgb(200, 245, 255), rgb(255, 120, 200)}, Mat = "Glass"},
-		{N = "Cotton Sheep", B = "quad", C = {rgb(255, 190, 230), rgb(255, 240, 250), rgb(150, 220, 255)}, Ears = "dog", Tail = "puff", Fluff = true},
-		{N = "Choco Bunny", B = "quad", C = {rgb(120, 70, 40), rgb(200, 150, 100), rgb(255, 200, 230)}, Ears = "bunny", Tail = "puff"},
-		{N = "Lollipop Bird", B = "bird", C = {rgb(255, 100, 180), rgb(255, 240, 120), rgb(120, 220, 255)}, Tail = "feathers", Swirl = true},
-		{N = "Sprinkle Unicorn", B = "quad", C = {W, rgb(255, 230, 245), rgb(255, 120, 220)}, Ears = "cat", Tail = "horse", Snout = "long", Horn = "unicorn", Mane = rgb(150, 200, 255), Spots = rgb(255, 120, 220)},
-		{N = "Candy Dragon", B = "quad", C = {rgb(255, 150, 220), rgb(255, 240, 200), rgb(130, 230, 255)}, Ears = "none", Horns = "dragon", Tail = "long", Snout = "long", Wings = "dragon", Spikes = rgb(130, 230, 255)},
-	}},
-	{Name = "Spooky Egg", Price = 2e10, Color = rgb(90, 50, 130), Spot = rgb(255, 140, 40), Pattern = "zigzag", Pets = {
-		{N = "Bat", B = "bird", C = {rgb(70, 55, 90), rgb(130, 110, 150), rgb(255, 80, 120)}, Ears = "cat", Wings = "bat", Beak = "none", Fangs = true},
-		{N = "Ghosty", B = "ghost", C = {W, rgb(255, 255, 255), rgb(150, 220, 255)}},
-		{N = "Black Cat", B = "quad", C = {rgb(35, 30, 45), rgb(60, 55, 75), rgb(255, 220, 40)}, Ears = "cat", Tail = "cat", Eyes = "glow"},
-		{N = "Pumpkin Slime", B = "blob", C = {rgb(255, 140, 30), rgb(255, 190, 90), rgb(60, 140, 40)}, Pumpkin = true, Eyes = "glow"},
-		{N = "Bone Pup", B = "quad", C = {rgb(240, 235, 220), rgb(250, 245, 235), rgb(40, 30, 40)}, Ears = "dog", Tail = "short", Snout = "long", Bones = true, Eyes = "glow"},
-		{N = "Werewolf", B = "quad", C = {rgb(90, 80, 90), rgb(160, 150, 160), rgb(255, 230, 80)}, Ears = "cat", Tail = "fluffy", Snout = "long", Fangs = true, Eyes = "glow", Fluff = true, Big = true},
-		{N = "Shadow Reaper", B = "ghost", C = {rgb(30, 20, 45), rgb(60, 40, 90), rgb(170, 80, 255)}, Hood = true, Scythe = true, Eyes = "glow", Glow = true},
-	}},
-	{Name = "Volcano Egg", Price = 5e10, Color = rgb(70, 30, 25), Spot = rgb(255, 110, 30), Pattern = "cracks", Mat = "CrackedLava", Pets = {
-		{N = "Lava Slime", B = "blob", C = {rgb(255, 100, 30), rgb(255, 200, 80), rgb(120, 30, 10)}, Glow = true},
-		{N = "Salamander", B = "quad", C = {rgb(255, 80, 40), rgb(255, 210, 90), rgb(120, 30, 20)}, Ears = "none", Tail = "long", Squat = true, Spots = rgb(255, 210, 60), Fire = true},
-		{N = "Magma Turtle", B = "quad", C = {rgb(90, 50, 40), rgb(200, 120, 80), rgb(255, 110, 30)}, Ears = "none", Tail = "short", Shell = rgb(60, 30, 25), Glow = true},
-		{N = "Ember Fox", B = "quad", C = {rgb(255, 90, 30), rgb(255, 220, 120), rgb(255, 200, 40)}, Ears = "cat", Tail = "fluffy", Snout = "long", Fire = true},
-		{N = "Phoenix", B = "bird", C = {rgb(255, 120, 30), rgb(255, 220, 80), rgb(255, 60, 30)}, Tail = "phoenix", Wings = "feather", Fire = true, Crest = true},
-		{N = "Inferno Dragon", B = "quad", C = {rgb(200, 30, 30), rgb(255, 180, 60), rgb(255, 120, 20)}, Ears = "none", Horns = "dragon", Tail = "long", Snout = "long", Wings = "dragon", Spikes = rgb(255, 200, 60), Fire = true},
-		{N = "Magma Titan", B = "blob", C = {rgb(60, 25, 20), rgb(255, 120, 30), rgb(255, 220, 80)}, Big = true, Horns = "dragon", Fire = true, Glow = true, Crown = true},
-	}},
-	{Name = "Mythic Egg", Price = 1.25e11, Color = rgb(200, 120, 255), Spot = rgb(255, 230, 120), Pattern = "stars", Pets = {
-		{N = "Griffin", B = "quad", C = {rgb(220, 170, 90), W, rgb(255, 180, 40)}, Ears = "none", Tail = "tuft", Snout = "beak", Wings = "feather", Tufts = true},
-		{N = "Pegasus", B = "quad", C = {W, rgb(240, 245, 255), rgb(150, 200, 255)}, Ears = "cat", Tail = "horse", Snout = "long", Wings = "feather", Mane = rgb(150, 200, 255)},
-		{N = "Unicorn", B = "quad", C = {W, rgb(255, 240, 250), rgb(255, 200, 60)}, Ears = "cat", Tail = "horse", Snout = "long", Horn = "unicorn", Mane = rgb(255, 130, 220)},
-		{N = "Cerberus", B = "quad", C = {rgb(60, 50, 60), rgb(110, 90, 100), rgb(255, 80, 40)}, Ears = "cat", Tail = "long", Snout = "long", Heads = 3, Eyes = "glow", Fire = true},
-		{N = "Kitsune", B = "quad", C = {W, rgb(255, 245, 240), rgb(255, 60, 80)}, Ears = "cat", Tail = "nine", Snout = "long", Markings = rgb(255, 60, 80), Glow = true},
-		{N = "Hydra", B = "quad", C = {rgb(40, 120, 160), rgb(160, 230, 230), rgb(255, 210, 60)}, Ears = "none", Tail = "long", Heads = 3, Horns = "dragon", Wings = "dragon", Spikes = rgb(255, 210, 60)},
-		{N = "Thunderbird", B = "bird", C = {rgb(40, 60, 160), rgb(130, 200, 255), rgb(255, 240, 80)}, Wings = "feather", Tail = "phoenix", Crest = true, Glow = true, Spark = true},
-	}},
-	{Name = "Cosmic Egg", Price = 1e12, Color = rgb(30, 20, 70), Spot = rgb(255, 255, 255), Pattern = "galaxy", Pets = {
-		{N = "Space Cat", B = "quad", C = {rgb(120, 90, 230), rgb(200, 180, 255), rgb(255, 255, 255)}, Ears = "cat", Tail = "cat", Helmet = true},
-		{N = "Alien", B = "blob", C = {rgb(120, 255, 120), rgb(200, 255, 200), rgb(40, 40, 60)}, Antenna = "ball", Eyes = "alien"},
-		{N = "Star Bunny", B = "quad", C = {rgb(255, 240, 150), rgb(255, 255, 220), rgb(255, 160, 220)}, Ears = "bunny", Tail = "puff", Glow = true, Halo = true},
-		{N = "Moon Wolf", B = "quad", C = {rgb(150, 160, 220), rgb(230, 235, 255), rgb(255, 245, 170)}, Ears = "cat", Tail = "fluffy", Snout = "long", Markings = rgb(255, 245, 170), Glow = true},
-		{N = "Nebula Whale", B = "fish", C = {rgb(90, 40, 170), rgb(255, 150, 230), rgb(120, 230, 255)}, Fins = "whale", Big = true, Spots = W, Glow = true},
-		{N = "Galaxy Dragon", B = "quad", C = {rgb(40, 20, 90), rgb(160, 110, 255), rgb(255, 120, 230)}, Ears = "none", Horns = "dragon", Tail = "long", Snout = "long", Wings = "dragon", Spikes = rgb(120, 230, 255), Spots = W, Glow = true},
-		{N = "Infinity Phoenix", B = "bird", C = {rgb(255, 255, 255), rgb(255, 230, 140), rgb(120, 230, 255)}, Wings = "feather", Tail = "phoenix", Crest = true, Halo = true, Fire = true, Glow = true, Rainbow = true},
-	}},
+	{Name = "Ember Egg", Tagline = "Still warm from the heart of the volcano", Price = 500, Color = rgb(70, 40, 35), Spot = rgb(255, 110, 40), Pattern = "cracks", Mat = "CrackedLava"},
+	{Name = "Tide Egg", Tagline = "Washed ashore, pearl and all", Price = 25000, Color = rgb(40, 120, 200), Spot = rgb(140, 230, 255), Pattern = "waves"},
+	{Name = "Grove Egg", Tagline = "Grown, not laid, in the oldest wood", Price = 500000, Color = rgb(70, 150, 70), Spot = rgb(200, 240, 140), Pattern = "leaves"},
+	{Name = "Frost Egg", Tagline = "Frozen solid for a thousand winters", Price = 15e6, Color = rgb(215, 240, 255), Spot = rgb(120, 200, 255), Pattern = "snow"},
+	{Name = "Arcade Egg", Tagline = "Insert coin. Hatch to continue.", Price = 1e9, Color = rgb(120, 60, 200), Spot = rgb(255, 230, 80), Pattern = "sprinkles"},
+	{Name = "Circuit Egg", Tagline = "Encrypted. Something inside is booting up.", Price = 8e9, Color = rgb(30, 50, 90), Spot = rgb(60, 230, 255), Pattern = "stripes"},
+	{Name = "Phantom Egg", Tagline = "It was here before the lights went out", Price = 5e10, Color = rgb(60, 30, 90), Spot = rgb(170, 120, 255), Pattern = "zigzag"},
+	{Name = "Celestial Egg", Tagline = "Fell from a star that isn't there any more", Price = 1e12, Color = rgb(20, 20, 60), Spot = rgb(255, 240, 200), Pattern = "galaxy"},
 }
 
--- Fill in every pet's egg, rarity, boost and a unique key "egg-slot"
+local POOLS = {
+	[1] = {
+		{No = 1, Id = "coalpup", N = "Coalpup", R = 1, Model = "Coalpup", Mode = "Bound"},
+		{No = 2, Id = "flicker_moth", N = "Flicker Moth", R = 1, Model = "FlickerMoth", Mode = "Hover"},
+		{No = 3, Id = "magma_toad", N = "Magma Toad", R = 2, Model = "MagmaToad", Mode = "Hop"},
+		{No = 4, Id = "pyre_salamander", N = "Pyre Salamander", R = 3, Model = "PyreSalamander", Mode = "Slither"},
+		{No = 5, Id = "cinder_lynx", N = "Cinder Lynx", R = 4, Model = "CinderLynx", Mode = "Bound"},
+		{No = 6, Id = "obsidian_drake", N = "Obsidian Drake", R = 5, Model = "ObsidianDrake", Mode = "Hover"},
+		{No = 7, Id = "solflare_qilin", N = "Solflare Qilin", R = 6, Model = "SolflareQilin", Mode = "Bound"},
+	},
+	[2] = {
+		{No = 8, Id = "bubblefin", N = "Bubblefin", R = 1, Model = "Bubblefin", Mode = "Glide"},
+		{No = 9, Id = "coral_crab", N = "Coral Crab", R = 1, Model = "CoralCrab", Mode = "Scuttle"},
+		{No = 10, Id = "lantern_eel", N = "Lantern Eel", R = 2, Model = "LanternEel", Mode = "Slither"},
+		{No = 11, Id = "surf_otter", N = "Surf Otter", R = 3, Model = "SurfOtter", Mode = "Glide"},
+		{No = 12, Id = "reefguard_manta", N = "Reefguard Manta", R = 4, Model = "ReefguardManta", Mode = "Glide"},
+		{No = 13, Id = "maelstrom_serpent", N = "Maelstrom Serpent", R = 5, Model = "MaelstromSerpent", Mode = "Slither"},
+		{No = 14, Id = "coralcrown_leviathan", N = "Coralcrown Leviathan", R = 6, Model = "CoralcrownLeviathan", Mode = "Glide"},
+	},
+	[3] = {
+		{No = 15, Id = "mosscap_bunny", N = "Mosscap Bunny", R = 1, Model = "MosscapBunny", Mode = "Hop"},
+		{No = 16, Id = "bramblehog", N = "Bramblehog", R = 2, Model = "Bramblehog", Mode = "Roll"},
+		{No = 17, Id = "petal_sprite", N = "Petal Sprite", R = 2, Model = "PetalSprite", Mode = "Hover"},
+		{No = 18, Id = "glimmerwood_fawn", N = "Glimmerwood Fawn", R = 3, Model = "GlimmerwoodFawn", Mode = "Bound"},
+		{No = 19, Id = "runebark_owl", N = "Runebark Owl", R = 4, Model = "RunebarkOwl", Mode = "Hover"},
+		{No = 20, Id = "elderhorn_spirit", N = "Elderhorn Spirit", R = 5, Model = "ElderhornSpirit", Mode = "Bound"},
+		{No = 21, Id = "worldtree_tortoise", N = "Worldtree Tortoise", R = 6, Model = "WorldtreeTortoise", Mode = "Waddle"},
+	},
+	[4] = {
+		{No = 22, Id = "snowpuff_seal", N = "Snowpuff Seal", R = 1, Model = "SnowpuffSeal", Mode = "Waddle"},
+		{No = 23, Id = "icicle_bat", N = "Icicle Bat", R = 2, Model = "IcicleBat", Mode = "Hover"},
+		{No = 24, Id = "rimeback_ram", N = "Rimeback Ram", R = 3, Model = "RimebackRam", Mode = "Bound"},
+		{No = 25, Id = "prism_wyrmling", N = "Prism Wyrmling", R = 4, Model = "PrismWyrmling", Mode = "Hover"},
+		{No = 26, Id = "aurora_mammoth", N = "Aurora Mammoth", R = 5, Model = "AuroraMammoth", Mode = "Bound"},
+		{No = 27, Id = "hailstorm_griffin", N = "Hailstorm Griffin", R = 6, Model = "HailstormGriffin", Mode = "Hover"},
+		{No = 28, Id = "crystal_heart_golem", N = "Crystal Heart Golem", R = 7, Model = "CrystalHeartGolem", Mode = "Glide"},
+	},
+	[5] = {
+		{No = 29, Id = "pixel_pup", N = "Pixel Pup", R = 1, Model = "PixelPup", Mode = "Bound"},
+		{No = 30, Id = "coin_hopper", N = "Coin Hopper", R = 2, Model = "CoinHopper", Mode = "Roll"},
+		{No = 31, Id = "joystick_critter", N = "Joystick Critter", R = 3, Model = "JoystickCritter", Mode = "Hop"},
+		{No = 32, Id = "cartridge_crab", N = "Cartridge Crab", R = 3, Model = "CartridgeCrab", Mode = "Scuttle"},
+		{No = 33, Id = "claw_machine_octo", N = "Claw Machine Octo", R = 4, Model = "ClawMachineOcto", Mode = "Glide"},
+		{No = 34, Id = "high_score_dragon", N = "High Score Dragon", R = 5, Model = "HighScoreDragon", Mode = "Slither"},
+		{No = 35, Id = "glitch_phantom", N = "Glitch Phantom", R = 6, Model = "GlitchPhantom", Mode = "Glide"},
+		{No = 36, Id = "final_boss", N = "The Final Boss", R = 7, Model = "FinalBoss", Mode = "Bound"},
+	},
+	[6] = {
+		{No = 37, Id = "bolt_bug", N = "Bolt Bug", R = 1, Model = "BoltBug", Mode = "Scuttle"},
+		{No = 38, Id = "drone_pup", N = "Drone Pup", R = 2, Model = "DronePup", Mode = "Hover"},
+		{No = 39, Id = "synth_slime", N = "Synth Slime", R = 2, Model = "SynthSlime", Mode = "Hop"},
+		{No = 40, Id = "mech_raptor", N = "Mech Raptor", R = 3, Model = "MechRaptor", Mode = "Bound"},
+		{No = 41, Id = "chrome_panther", N = "Chrome Panther", R = 4, Model = "ChromePanther", Mode = "Bound"},
+		{No = 42, Id = "hyperdrive_hawk", N = "Hyperdrive Hawk", R = 5, Model = "HyperdriveHawk", Mode = "Hover"},
+		{No = 43, Id = "mainframe_beetle", N = "Mainframe Beetle", R = 6, Model = "MainframeBeetle", Mode = "Scuttle"},
+		{No = 44, Id = "quantum_core_wyrm", N = "Quantum Core Wyrm", R = 7, Model = "QuantumCoreWyrm", Mode = "Slither"},
+	},
+	[7] = {
+		{No = 45, Id = "wisp_kit", N = "Wisp Kit", R = 1, Model = "WispKit", Mode = "Glide"},
+		{No = 46, Id = "lantern_imp", N = "Lantern Imp", R = 2, Model = "LanternImp", Mode = "Hover"},
+		{No = 47, Id = "bone_raven", N = "Bone Raven", R = 3, Model = "BoneRaven", Mode = "Hover"},
+		{No = 48, Id = "haunted_armor_hound", N = "Haunted Armor Hound", R = 4, Model = "HauntedArmorHound", Mode = "Bound"},
+		{No = 49, Id = "specter_jelly", N = "Specter Jelly", R = 4, Model = "SpecterJelly", Mode = "Glide"},
+		{No = 50, Id = "eclipse_nightmare", N = "Eclipse Nightmare", R = 5, Model = "EclipseNightmare", Mode = "Bound"},
+		{No = 51, Id = "soulbinder_chimera", N = "Soulbinder Chimera", R = 6, Model = "SoulbinderChimera", Mode = "Bound"},
+		{No = 52, Id = "void_cat", N = "The Void Cat", R = 7, Model = "VoidCat", Mode = "Bound"},
+	},
+	[8] = {
+		{No = 53, Id = "starling_chick", N = "Starling Chick", R = 1, Model = "StarlingChick", Mode = "Hover"},
+		{No = 54, Id = "satellite_snail", N = "Satellite Snail", R = 2, Model = "SatelliteSnail", Mode = "Glide"},
+		{No = 55, Id = "constellation_cub", N = "Constellation Cub", R = 3, Model = "ConstellationCub", Mode = "Bound"},
+		{No = 56, Id = "celestial_koi", N = "Celestial Koi", R = 4, Model = "CelestialKoi", Mode = "Glide"},
+		{No = 57, Id = "starforge_pegasus", N = "Starforge Pegasus", R = 5, Model = "StarforgePegasus", Mode = "Hover"},
+		{No = 58, Id = "ringed_skywhale", N = "Ringed Skywhale", R = 5, Model = "RingedSkywhale", Mode = "Glide"},
+		{No = 59, Id = "supernova_seraph", N = "Supernova Seraph", R = 6, Model = "SupernovaSeraph", Mode = "Hover"},
+		{No = 60, Id = "starloom_weaver", N = "Starloom Weaver", R = 7, Model = "StarloomWeaver", Mode = "Scuttle"},
+	},
+}
+
+-- every pet's egg, key and boost; every egg's odds by tier (tiers it has no pet of get 0, the rest renormalise)
 D.PETS = {}
 for e, egg in ipairs(D.EGGS) do
 	egg.Index = e
+	egg.Pets = POOLS[e]
+	egg.Tiers = {} -- [tier] = the pets of that tier, in roster order
+	for _, pet in ipairs(egg.Pets) do
+		pet.Key = pet.Id
+		pet.Egg = e
+		-- install speed bonus (%): egg 8 matches the old egg 15, so boosts keep the same curve
+		pet.Boost = math.floor(2 * 1.26 ^ ((e - 1) * 2) * D.RARITIES[pet.R].Mult + 0.5)
+		egg.Tiers[pet.R] = egg.Tiers[pet.R] or {}
+		table.insert(egg.Tiers[pet.R], pet)
+		D.PETS[pet.Id] = pet
+	end
 	egg.Odds = {}
-	local shift = 1 + 0.045 * (e - 1)
+	local shift = 1 + 0.09 * (e - 1)
 	local total = 0
 	for r, base in ipairs(BASE_ODDS) do
-		egg.Odds[r] = base * shift ^ (r - 1)
+		egg.Odds[r] = egg.Tiers[r] and base * shift ^ (r - 1) or 0
 		total += egg.Odds[r]
 	end
 	for r = 1, #BASE_ODDS do
 		egg.Odds[r] = egg.Odds[r] / total * 100
 	end
-	for r, pet in ipairs(egg.Pets) do
-		pet.Key = e .. "-" .. r
-		pet.Egg = e
-		pet.R = r
-		-- install speed bonus (%): grows with the egg, and a lot with rarity
-		pet.Boost = math.floor(2 * 1.26 ^ (e - 1) * D.RARITIES[r].Mult + 0.5)
-		D.PETS[pet.Key] = pet
-	end
+	-- its rarest pet, for "up to +X%" on the shop card
+	egg.Best = egg.Pets[#egg.Pets]
 end
 
--- Odds shown as text, e.g. 0.15% or 12.3%
+-- one hatch from an egg: a tier by the odds (u1 in [0, 1)), then one of that tier's pets uniformly (u2 in [0, 1))
+function D.roll(egg, u1, u2)
+	local x = u1 * 100
+	local tier
+	for r, chance in ipairs(egg.Odds) do
+		if chance > 0 then
+			tier = r
+			x -= chance
+			if x <= 0 then
+				break
+			end
+		end
+	end
+	local pool = egg.Tiers[tier]
+	return pool[math.min(#pool, math.floor(u2 * #pool) + 1)]
+end
+
 function D.oddsText(p)
 	if p < 1 then
 		return string.format("%.2f%%", p)

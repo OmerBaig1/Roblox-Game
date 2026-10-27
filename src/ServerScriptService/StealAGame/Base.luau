@@ -456,6 +456,22 @@ local function buildFloor(plot, f)
 
 	buildWalls(model, plot, f)
 
+	-- The floor below has 14-stud walls but floors are FLOOR_H apart: close that strip up to this slab
+	-- (outer half of the wall only, so signs on the inside face stay visible), or thieves can climb
+	-- these stairs and slip over the wall into the locked floor below
+	do
+		local fillH = C.FLOOR_H - 15
+		local fy = floorY(f - 1) + 15 + fillH / 2
+		part(model, {Name = "WallFill", Size = Vector3.new(W, fillH, 0.5), CFrame = at(0, fy, BACK - 0.25), Color = L.Wall, Material = L.WallMat})
+		for _, side in ipairs({-1, 1}) do
+			part(model, {Name = "WallFill", Size = Vector3.new(0.5, fillH, D), CFrame = at(side * (W / 2 - 0.25), fy, MID), Color = L.Wall, Material = L.WallMat})
+		end
+		if f == 2 then
+			-- above the entrance arch
+			part(model, {Name = "WallFill", Size = Vector3.new(W, C.FLOOR_H - 17.6, 0.5), CFrame = at(0, (17.6 + C.FLOOR_H) / 2, FRONT), Color = L.Trim, Material = L.TrimMat})
+		end
+	end
+
 	-- Stairs from floor f-1 up to floor f, on the outside of one side wall
 	local s = stairSide(f)
 	local sx = s * (W / 2 + 4.5)

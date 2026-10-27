@@ -101,17 +101,6 @@ function Pets.remove(player)
 	state[player] = nil
 end
 
-local function roll(egg)
-	local x = math.random() * 100
-	for r, chance in ipairs(egg.Odds) do
-		x -= chance
-		if x <= 0 then
-			return r
-		end
-	end
-	return 1
-end
-
 -- equip the strongest pets you own
 local function equipBest(st)
 	local sorted = table.clone(st.List)
@@ -146,8 +135,7 @@ local function onRequest(player, action, a, b)
 		cash.Value -= cost
 		local results = {}
 		for _ = 1, count do
-			local r = roll(egg)
-			local key = egg.Index .. "-" .. r
+			local key = PetData.roll(egg, math.random(), math.random()).Key
 			local id = st.Next
 			st.Next += 1
 			table.insert(st.List, {I = id, K = key})
@@ -233,8 +221,13 @@ local function buildHatchery(lobby, cf)
 	big.Name = "GiantEgg"
 	big:ScaleTo(3)
 	big:PivotTo(at(0, 3.4, 0))
+	-- every player's game turns it slowly (PetsUI). It streams in as one piece, and its home spot is stored so a client
+	-- never takes a half-turned or half-streamed egg as its starting point.
+	big.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+	big:SetAttribute("Spin", 0.32)
+	big:SetAttribute("Bob", 0.35)
+	big:SetAttribute("Base", big:GetPivot())
 	big.Parent = model
-	big:SetAttribute("Spin", true) -- every player's game turns it slowly
 	part(model, {Name = "Dome", Shape = Enum.PartType.Ball, Size = Vector3.new(15, 15, 15), CFrame = at(0, 6.5, 0), Color = rgb(200, 240, 255), Material = M.Glass, Transparency = 0.75, CanCollide = false})
 	local glow = Instance.new("PointLight")
 	glow.Color = rgb(255, 200, 255)
@@ -247,9 +240,17 @@ local function buildHatchery(lobby, cf)
 		local ang = math.rad(-150 + (i - 1) * 300 / (n - 1)) + math.pi / 2
 		local x, z = math.cos(ang) * 11, math.sin(ang) * 11
 		part(model, {Name = "MiniNest", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 3, 3), CFrame = at(x, 2, z) * FLAT, Color = rgb(170, 120, 70), Material = M.WoodPlanks})
+		-- a rim lit in the egg's colour, like its stand in the shop (kept below the nest's top so only the edge shows)
+		part(model, {Name = "NestGlow", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.12, 3.14, 3.14), CFrame = at(x, 2.3, z) * FLAT, Color = egg.Spot, Material = M.Neon, CanCollide = false})
 		local e = PetModels.egg(egg)
+		e.Name = "NestEgg"
 		e:ScaleTo(0.7)
-		e:PivotTo(at(x, 2.4, z))
+		e:PivotTo(at(x, 2.4, z) * CFrame.Angles(0, ang + math.pi / 2, 0))
+		e.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+		-- each nest egg turns at its own gentle speed, alternating direction
+		e:SetAttribute("Spin", (0.42 + (i % 3) * 0.08) * (i % 2 == 0 and 1 or -1))
+		e:SetAttribute("Bob", 0.08)
+		e:SetAttribute("Base", e:GetPivot())
 		e.Parent = model
 	end
 	-- big arch sign over the entrance
