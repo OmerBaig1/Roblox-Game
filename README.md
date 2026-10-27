@@ -1,67 +1,61 @@
 # Steal a Game
 
-A Roblox game in the style of "Steal a ..." games, set in a long arcade hallway with multiple areas. Steal arcade games without getting caught by the shopkeepers, get them home to your base, and earn money while they install. Use your treadmill to build speed and outrun the guards, and watch out, because other players can steal from you too.
+A Roblox "Steal a ..." game set in a long arcade hallway. Steal arcade games from the shopkeepers, bring them back to your base, and earn money from them. Other players can steal from you too.
 
 ## How it works
 
-- Run down 'The Game Vault' and steal a game to earn money.
-- Once you steal one, a guard chases you. If he's faster than you, he catches you.
-- Use the treadmill to build up speed and outrun him.
-- Upgrade the treadmill to become faster
-- You can also steal other players' games, and stolen games earn you money.
+- Run into The Game Vault and grab a game.
+- A guard chases you. If he's faster than you, he catches you and you lose the game.
+- Train on your treadmill to get faster, and upgrade it to train faster.
+- Bring games home to earn money. You can also steal from other players.
 
 ## Features
 
-### Stealing and chasing
-- **Game Vault hallway** with multiple levels. Deeper levels have rarer games and faster shopkeepers.
-- **Shopkeeper guards** at every level chase you after you grab a game, and you lose it if they catch you. You can escape by leaving the vault or outlasting them until they give up.
-- **Steal from other players' bases**, with the owner getting an alert while it happens.
-- **Slap tool** to make thieves drop what they stole.
-- **Base lock** to protect your games for a while (the timer pauses while you're being chased).
-- **Carry up to 2 games** at once. Carrying stolen games slows you down.
-- **Stock rotation:** every level swaps to new random games on a timer.
+### Stealing
+- **Game Vault** with multiple levels. Deeper levels have rarer games and faster guards.
+- **Guards** chase you after you grab a game. Escape the vault or outlast them.
+- **Steal from other players**. The owner gets an alert.
+- **Slap tool** makes thieves drop what they stole.
+- **Base lock** protects your games for a short time.
+- **Carry up to 2 games** at once, but they slow you down.
+- **Stock rotation:** each level gets new games on a timer.
 
-### Games and income
-- **Hidden income:** every copy earns a random amount, and you don't find out until it finishes installing.
-- **Rarity tiers** that are revealed when a game reaches your base. Rarer games get flashier auras and particle effects.
-- **Install times** that scale with rarity and income. Games keep installing while you're offline, at half speed.
-- **Celebration effects** when a game finishes installing.
-- **Game boxes** with generated front covers, back covers, and spines.
-- **Sell games** from your cases, and a **podium** that shows your top 3 earners.
+### Games and money
+- Each game's income and rarity are hidden until it reaches your base.
+- Games take time to install. Rarer games take longer. Installing continues at half speed while you're offline.
+- **Sell games** you don't want. A **podium** shows your top 3 earners.
 
 ### Your base
-- **Cases** for your games, upgradable with more cases, new floors with stairs, and larger base tiers.
-- **Cash pad** that collects the income your games earn.
-- **Treadmill** for training speed, with upgrade levels and visual tiers. This is how you outrun the guards.
+- **Cases** hold your games. Buy more cases, extra floors, and bigger bases.
+- **Cash pad** collects your money.
+- **Treadmill** to train speed.
 
-### Progression and rewards
-- **Game Index** that tracks every game you've found, with cash and speed rewards for claiming them.
-- **Area completion rewards** for finding every game in an area.
-- **Daily login rewards** with a streak.
-- **Lucky Spin** wheel with a cooldown.
-- **Playtime gifts** that unlock the longer you stay in a session, including a mystery game.
-- **Trail Shop** with a shopkeeper who explains the game and sells trails, including animated and particle ones.
-- **Live Downloads / Installed lists** showing what's installing and what's earning.
+### Rewards
+- **Game Index** tracks every game you've found, with rewards for claiming them.
+- **Area rewards** for finding every game in an area.
+- **Daily rewards**, a **Lucky Spin**, and **playtime gifts**.
+- **Trail Shop** sells trails that make you faster.
+- **Pet Hatchery** to hatch pets from eggs.
 
-### Monetization and saving
-- Game passes (double money, double speed), plus optional Robux products such as a starter pack, cash packs, extra spins, and instant installs.
-- **Saving** of cash, speed, upgrades, games with their install progress, trails, and Index progress, with autosave.
+### Shop and saving
+- Game passes (2x money, 2x speed) and Robux items like a starter pack, cash, spins, and instant installs.
+- Your progress saves automatically.
 
 ## Story so far
 
-Development started on October 22, 2026. The game began as a conveyor-style project where you collected games as they passed by. Over time it grew into what it is now: a long arcade hallway with multiple levels, a guard who chases you, treadmills, and stealing other players' games for money.
+Development started on October 22, 2026. It began as a conveyor game where you collected games as they passed by, and grew into an arcade hallway with guards, treadmills, and stealing from other players.
 
-The hardest part has been understanding how everything fits together, since the game puts its own twist on the "steal a ___" formula and the pieces all depend on each other. Right now the focus is on bug fixes, quality-of-life updates, smoothing out rough spots, and making the game more interesting to play.
+The hardest part has been fitting all the pieces together. Right now the focus is on bug fixes, quality-of-life updates, and making the game more fun.
 
 ## Repo layout
 
-- `Steal a Game.rbxl`: the full game file (map, models, UI, scripts), updated at each snapshot
-- `src/`: the game's scripts as readable files, extracted with [Rojo](https://github.com/rojo-rbx/rojo)
+- `Steal a Game.rbxl`: the full game file
+- `src/`: the game's scripts, extracted with [Rojo](https://github.com/rojo-rbx/rojo)
 
 ## Devlog
 
-- **Oct 24, 2026:** Started tracking the project on GitHub. Added the first snapshot and extracted the scripts.
+- **Oct 24, 2026:** Started tracking the project on GitHub.
 
 ## Credits
 
-Built by Omer Baig and Usman Tanveer. Code was written with Claude's assistance, then tested and directed by us in Roblox Studio. Additional playtesting by Armaan Yousuf, Maaz Hasnat, and Omar Saraj.
+Built by Omer Baig and Usman Tanveer. Code was written with Claude's help, then tested and directed by us in Roblox Studio. Playtesting by Armaan Yousuf, Maaz Hasnat, and Omar Saraj.
