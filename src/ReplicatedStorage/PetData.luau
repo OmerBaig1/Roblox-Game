@@ -12,7 +12,7 @@ local function rgb(r, g, b)
 	return Color3.fromRGB(r, g, b)
 end
 
-D.EQUIP_MAX = 3
+D.EQUIP_MAX = 2 -- pet slots: PetsEquipped is one id per slot, 0 = empty
 D.MAX_PETS = 250
 D.HATCH_MANY = 10
 

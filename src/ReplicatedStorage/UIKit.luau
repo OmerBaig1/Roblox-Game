@@ -40,6 +40,8 @@ local SFX = {
 	coin    = {Ids = {"rbxassetid://98466697920863", "rbxassetid://131222240980061", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.45, Pitch = 1, Max = 1}, -- notification_simple-01
 	deny    = {Ids = {"rbxassetid://88258639627967", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1, Max = 0.6}, -- state-change_confirm-down
 	toggle  = {Ids = {"rbxassetid://9119717523", "rbxasset://sounds/switch.wav", "rbxasset://sounds/clickfast.wav"}, Volume = 0.35, Pitch = 1},
+	-- picking a game up out of your case: the menu-open note, a little higher and cut short so it's its own sound
+	pickup  = {Ids = {"rbxassetid://127898241244912", "rbxassetid://3623740277", "rbxasset://sounds/clickfast.wav"}, Volume = 0.4, Pitch = 1.15, Max = 0.5}, -- navigation_forward-selection
 	-- the tutorial's text appearing: the soft tap, high and quiet, cut short so ticks never ring into each other
 	type    = {Ids = {"rbxassetid://118050128378427", "rbxassetid://3623733749", "rbxasset://sounds/clickfast.wav"}, Volume = 0.16, Pitch = 1.45, Max = 0.09},
 	lock    = {Ids = {"rbxassetid://88258639627967", "rbxasset://sounds/electronicpingshort.wav"}, Volume = 0.4, Pitch = 1, Max = 0.6},
@@ -434,110 +436,11 @@ function UI.actionButton(props, color)
 end
 
 ------------------------------------------------------------------
--- REWARD POP-UPS (queued so they never overlap)
+-- REWARD POP-UPS: every reward reveal lives in RewardFx (queued, with an accent per kind of reward). Required here
+-- rather than at the top because RewardFx requires this module.
 ------------------------------------------------------------------
-local queue = {}
-local showing = false
-
-local function showNext(gui)
-	if showing or #queue == 0 then return end
-	showing = true
-	local opts = table.remove(queue, 1)
-	local color = opts.Color or UI.GOLD
-	local holder = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromOffset(820, 340), BackgroundTransparency = 1, ZIndex = 50, Parent = gui})
-	local scale = new("UIScale", {Scale = 0.2, Parent = holder})
-	-- glow + spinning rays behind
-	local glow = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(240, 240), BackgroundColor3 = color:Lerp(UI.WHITE, 0.4), BackgroundTransparency = 0.35, ZIndex = 50, Parent = holder}, {UI.corner(1, true)})
-	new("UIGradient", {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0.6)}), Parent = glow})
-	local burst = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(420, 420), BackgroundTransparency = 1, ZIndex = 50, Parent = holder})
-	for i = 0, 7 do
-		new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 34, 1, 0), Rotation = i * 22.5, BackgroundColor3 = color:Lerp(UI.WHITE, 0.6), BackgroundTransparency = 0.45, BorderSizePixel = 0, ZIndex = 50, Parent = burst}, {UI.corner(1, true)})
-	end
-	local icon
-	if opts.Icon then
-		icon = UI.label({AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(150, 150), Text = opts.Icon, Outline = false, ZIndex = 52, Parent = holder})
-	end
-	local ph, phScale
-	if opts.Poster then
-		ph = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.34), Size = UDim2.fromOffset(128, 160), BackgroundTransparency = 1, ZIndex = 52, Parent = holder}, {UI.corner(12), UI.stroke(UI.BLACK, 5)})
-		phScale = new("UIScale", {Scale = opts.Reveal and 0 or 1, Parent = ph})
-		opts.Poster.Parent = ph
-		if icon then
-			icon.Visible = opts.Reveal == true
-		end
-	end
-	local title = UI.label({AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.64), Size = UDim2.new(1, 0, 0, 84), Text = opts.Title or "", Outline = 5, ZIndex = 53, Parent = holder})
-	local titleGrad = UI.gradient(title, color:Lerp(UI.WHITE, 0.55), color, 90)
-	local sub = UI.label({AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.9), Size = UDim2.new(1, 0, 0, 38), Text = opts.Reveal and "" or (opts.Sub or ""), Outline = 3.5, ZIndex = 53, Parent = holder})
-	local spin = true
-	local spinSpeed = 1.2
-	task.spawn(function()
-		while spin and burst.Parent do
-			burst.Rotation += spinSpeed
-			task.wait()
-		end
-	end)
-	TweenService:Create(scale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
-	local extra = 0
-	if opts.Reveal and ph and icon then
-		-- MYSTERY REVEAL: the ? shakes harder and harder, a white flash, then the game pops out
-		extra = 1.4
-		task.spawn(function()
-			task.wait(0.45)
-			for k = 1, 8 do
-				local a = (k % 2 == 0 and 1 or -1) * (6 + k * 2)
-				TweenService:Create(icon, TweenInfo.new(0.07), {Rotation = a, Size = UDim2.fromOffset(150 + k * 6, 150 + k * 6)}):Play()
-				spinSpeed = 1.2 + k * 0.8
-				task.wait(0.08)
-			end
-			local flash = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(60, 60), BackgroundColor3 = UI.WHITE, ZIndex = 54, Parent = holder}, {UI.corner(1, true)})
-			TweenService:Create(flash, TweenInfo.new(0.45, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(520, 520), BackgroundTransparency = 1}):Play()
-			task.delay(0.5, flash.Destroy, flash)
-			icon.Visible = false
-			ph.Rotation = -25
-			TweenService:Create(phScale, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1.25}):Play()
-			TweenService:Create(ph, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Rotation = 0}):Play()
-			UI.claimSfx()
-			spinSpeed = 3
-			local rc = opts.RevealColor or color
-			title.Text = opts.RevealTitle or title.Text
-			titleGrad.Color = ColorSequence.new(rc:Lerp(UI.WHITE, 0.55), rc)
-			sub.Text = opts.Sub or ""
-			for _, ray in ipairs(burst:GetChildren()) do
-				ray.BackgroundColor3 = rc:Lerp(UI.WHITE, 0.5)
-			end
-			glow.BackgroundColor3 = rc:Lerp(UI.WHITE, 0.4)
-			-- confetti of little stars bursting out
-			for _ = 1, 14 do
-				local star = UI.label({AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(26, 26), Text = "\u{2726}", TextColor3 = math.random() < 0.5 and UI.WHITE or rc:Lerp(UI.WHITE, 0.3), Outline = false, ZIndex = 55, Parent = holder})
-				local ang = math.random() * math.pi * 2
-				local dist = math.random(140, 260)
-				TweenService:Create(star, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, math.cos(ang) * dist, 0.36, math.sin(ang) * dist), Rotation = math.random(-180, 180), TextTransparency = 1}):Play()
-				task.delay(0.85, star.Destroy, star)
-			end
-			task.wait(0.5)
-			TweenService:Create(phScale, TweenInfo.new(0.25, Enum.EasingStyle.Sine), {Scale = 1.1}):Play()
-		end)
-	end
-	task.delay((opts.Duration or 2.6) + extra, function()
-		local info = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-		TweenService:Create(scale, info, {Scale = 0}):Play()
-		task.wait(0.4)
-		spin = false
-		holder:Destroy()
-		showing = false
-		showNext(gui)
-	end)
-end
-
-function UI.popup(gui, opts)
-	if opts.Reveal then
-		UI.sfx("pop") -- the big chime waits for the reveal
-	else
-		UI.claimSfx()
-	end
-	table.insert(queue, opts)
-	showNext(gui)
+function UI.popup(_gui, opts)
+	require(script.Parent:WaitForChild("RewardFx")).reward(opts)
 end
 
 return UI

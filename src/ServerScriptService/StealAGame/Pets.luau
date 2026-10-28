@@ -13,7 +13,8 @@ local PetData = require(ReplicatedStorage:WaitForChild("PetData"))
 local PetModels = require(ReplicatedStorage:WaitForChild("PetModels"))
 
 local Pets = {}
-local state = {} -- [player] = {List = {{I = id, K = key}}, Eq = {id...}, Next = n, Seen = bool, Manual = bool}
+-- Eq is one entry per pet slot (PetData.EQUIP_MAX of them): a pet id, or 0 for an empty slot
+local state = {} -- [player] = {List = {{I = id, K = key}}, Eq = {id or 0, ...}, Next = n, Seen = bool, Manual = bool}
 local deps
 
 local function find(st, id)
@@ -24,8 +25,8 @@ local function find(st, id)
 	end
 end
 
-local function isEquipped(st, id)
-	return table.find(st.Eq, id) ~= nil
+local function emptySlot(st)
+	return table.find(st.Eq, 0)
 end
 
 local function boostOf(st)
@@ -64,7 +65,7 @@ function Pets.installMult(player)
 end
 
 function Pets.load(player, saved)
-	local st = {List = {}, Eq = {}, Next = 1, Seen = false}
+	local st = {List = {}, Eq = table.create(PetData.EQUIP_MAX, 0), Next = 1, Seen = false}
 	if type(saved) == "table" then
 		st.Next = math.max(1, math.floor(tonumber(saved.Next) or 1))
 		st.Seen = saved.Seen == true
@@ -78,11 +79,12 @@ function Pets.load(player, saved)
 				end
 			end
 		end
+		-- slots keep their places; older saves had 3 pets out, the third is put back in the bag
 		if type(saved.Eq) == "table" then
-			for _, id in ipairs(saved.Eq) do
-				id = tonumber(id)
-				if id and find(st, id) and not table.find(st.Eq, id) and #st.Eq < PetData.EQUIP_MAX then
-					table.insert(st.Eq, id)
+			for slot = 1, PetData.EQUIP_MAX do
+				local id = tonumber(saved.Eq[slot])
+				if id and find(st, id) and not table.find(st.Eq, id) then
+					st.Eq[slot] = id
 				end
 			end
 		end
@@ -107,9 +109,8 @@ local function equipBest(st)
 	table.sort(sorted, function(a, b)
 		return PetData.PETS[a.K].Boost > PetData.PETS[b.K].Boost
 	end)
-	st.Eq = {}
-	for i = 1, math.min(PetData.EQUIP_MAX, #sorted) do
-		table.insert(st.Eq, sorted[i].I)
+	for slot = 1, PetData.EQUIP_MAX do
+		st.Eq[slot] = sorted[slot] and sorted[slot].I or 0
 	end
 end
 
@@ -146,8 +147,9 @@ local function onRequest(player, action, a, b)
 			equipBest(st)
 		else
 			for _, res in ipairs(results) do
-				if #st.Eq < PetData.EQUIP_MAX then
-					table.insert(st.Eq, res.I)
+				local slot = emptySlot(st)
+				if slot then
+					st.Eq[slot] = res.I
 				end
 			end
 		end
@@ -162,14 +164,32 @@ local function onRequest(player, action, a, b)
 		local at = table.find(st.Eq, id)
 		if action == "unequip" then
 			if at then
-				table.remove(st.Eq, at)
+				st.Eq[at] = 0
 			end
 		elseif not at then
-			if #st.Eq >= PetData.EQUIP_MAX then
-				return false, "You can only have " .. PetData.EQUIP_MAX .. " pets out. Unequip one first."
+			local slot = emptySlot(st)
+			if not slot then
+				return false, "Both pet slots are full. Pick a slot to swap into."
 			end
-			table.insert(st.Eq, id)
+			st.Eq[slot] = id
 		end
+		push(player)
+		return true
+	elseif action == "slot" then
+		-- put pet id (0 = nobody) in a slot; a pet already in the other slot swaps places with what was here
+		local slot, id = tonumber(a), tonumber(b) or 0
+		if not slot or not st.Eq[slot] then
+			return false, "That slot doesn't exist"
+		end
+		if id ~= 0 and not find(st, id) then
+			return false, "You don't have that pet"
+		end
+		st.Manual = true
+		local from = id ~= 0 and table.find(st.Eq, id)
+		if from then
+			st.Eq[from] = st.Eq[slot]
+		end
+		st.Eq[slot] = id
 		push(player)
 		return true
 	elseif action == "best" then
@@ -186,7 +206,7 @@ local function onRequest(player, action, a, b)
 		table.remove(st.List, i)
 		local at = table.find(st.Eq, id)
 		if at then
-			table.remove(st.Eq, at)
+			st.Eq[at] = 0
 		end
 		push(player)
 		return true

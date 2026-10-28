@@ -35,7 +35,7 @@ A Roblox "Steal a ..." game set in a long arcade hallway. Steal arcade games fro
 - **Area rewards** for finding every game in an area.
 - **Daily rewards**, a **Lucky Spin**, and **playtime gifts**.
 - **Trail Shop** sells trails that make you faster.
-- **Pet Hatchery** to hatch pets from eggs.
+- **Pet Hatchery** to hatch pets from 8 eggs. There are 60 pets, and the ones you equip follow you and make your games install faster.
 
 ### Shop and saving
 - Game passes (2x money, 2x speed) and Robux items like a starter pack, cash, spins, and instant installs.

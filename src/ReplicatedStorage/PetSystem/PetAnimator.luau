@@ -57,6 +57,22 @@ local function randRange(r, rng)
 	return r[1] + rng:NextNumber() * (r[2] - r[1])
 end
 
+-- how fast the gait cycles run for a travel speed: 0..1 up to a normal walk (16 studs/s), then it keeps rising
+-- with each doubling of speed up to 3 (at 64+ studs/s), so pets in this game (players run ~200 studs/s) visibly
+-- run instead of sliding. Capped so cycles never outrun the frame rate and strobe.
+local function pace(speed)
+	local walk = speed / 16
+	return math.clamp(walk, 0, 1) + math.clamp(math.log(math.max(walk, 1), 2), 0, 2)
+end
+PetAnimator.pace = pace
+
+-- 0 at a walk, rising to 1 at a full run (64+ studs/s): how strongly a pet's Run style plays
+local function run(speed)
+	return math.clamp(pace(speed) - 1, 0, 2) / 2
+end
+local ROLL_MAX = 30 -- studs/s: faster rolling spins past what 60 fps can show and looks frozen or backwards
+local MOVE_WOBBLE = 0.75 -- a Moving wobble (wings, legs, fins) cycles 1 + this * pace times faster while travelling
+
 function PetAnimator.new(model, cfg)
 	local self = setmetatable({}, PetAnimator)
 	self.Model = model
@@ -100,6 +116,8 @@ function PetAnimator.new(model, cfg)
 		end
 	end
 	self.Pulses = {}
+	self.WobPh = {} -- each wobble's cycle position, built up per frame so its rate can change without a jump
+	self.WobCf = {} -- this frame's wobble pose per joint; several wobbles on one joint combine
 	self.Off = {} -- this frame's pose offsets from the special, by joint name
 	self.Done = {} -- joints a block posed this frame
 	self.Loose = {} -- joints no block drives that are holding a special's offset
@@ -191,7 +209,7 @@ end
 -- quadrupeds: a bounding hop whose rate rises with speed, pitch with the stride, lean into turns
 function Modes.Bound(self, c, s)
 	local m, mv = c.Move, s.mv
-	self.Gait += s.dt * m.HopRate * (0.7 + 0.5 * math.clamp(s.speed / 16, 0, 1))
+	self.Gait += s.dt * m.HopRate * (0.7 + 0.5 * pace(s.speed))
 	local g = self.Gait * TAU
 	local half = math.floor(self.Gait * 2) -- |sin| touches the ground twice per cycle
 	if half ~= self.Half then
@@ -267,7 +285,7 @@ function Modes.Roll(self, c, s)
 	self.CurlA += ((s.speed > 1.5 and 1 or 0) - self.CurlA) * (1 - math.exp(-s.dt * 6))
 	local k = smooth(self.CurlA)
 	if s.speed > 1.5 then
-		self.RollA += s.speed * s.dt / r.Radius
+		self.RollA += math.min(s.speed, ROLL_MAX) * s.dt / r.Radius
 	else
 		local rest = math.floor(self.RollA / TAU + 0.5) * TAU
 		self.RollA += (rest - self.RollA) * (1 - math.exp(-s.dt * 5))
@@ -292,7 +310,7 @@ end
 -- (a seal's belly-slide)
 function Modes.Waddle(self, c, s)
 	local w, mv = c.Waddle, s.mv
-	self.Gait += s.dt * w.Rate * (0.6 + 0.6 * math.clamp(s.speed / 16, 0, 1))
+	self.Gait += s.dt * w.Rate * (0.6 + 0.6 * pace(s.speed))
 	local g = self.Gait * TAU
 	s.Gait = g
 	s.Lift = math.abs(sin(g)) * w.Bob * mv
@@ -305,7 +323,7 @@ end
 -- travelling, so a crab goes sideways
 function Modes.Scuttle(self, c, s)
 	local sc, mv = c.Scuttle, s.mv
-	self.Gait += s.dt * sc.StepRate * (0.6 + 0.8 * math.clamp(s.speed / 16, 0, 1))
+	self.Gait += s.dt * sc.StepRate * (0.6 + 0.8 * pace(s.speed))
 	local g = self.Gait * TAU
 	s.Gait = g
 	s.Lift = math.abs(sin(g)) * sc.Bounce * mv
@@ -346,13 +364,176 @@ end
 -- above their Root add a slow Bob.
 function Modes.Slither(self, c, s)
 	local sl, mv = c.Slither, s.mv
-	self.Wave += s.dt * TAU * (sl.Rate + sl.MoveRate * mv * (0.6 + 0.6 * math.clamp(s.speed / 16, 0, 1)))
+	self.Wave += s.dt * TAU * (sl.Rate + sl.MoveRate * mv * (0.6 + 0.6 * pace(s.speed)))
 	local yaw = sin(self.Wave) * sl.Yaw * (sl.Idle * s.idle + mv)
 	s.Lift = sl.Bob and sin(s.p * sl.BobRate * TAU) * sl.Bob or 0
 	s.Pitch = 0
 	s.HeadYaw = -yaw * 0.8 -- the head keeps looking ahead while the body swings
 	return CFrame.new(sin(self.Wave + 1) * sl.Sway * mv, s.Lift + breathe(c, s), 0) * A(0, rad(yaw), rad(-s.turn * c.Body.Lean * mv))
 end
+
+----------------------------------------------------------------------------------------------------------------
+-- Runs: each pet's running style (Run = {style, Amp = size multiplier, Rate = speed multiplier} in PetConfigs),
+-- layered on its Mode only above a walk and growing to full at a run. Most legs are baked into the Body mesh, so
+-- the whole body carries the gait. Pose(g, x, k, f) gets the stride angle g, stride progress x (0..1), the
+-- strength k (run * Amp, for distances and angles) and f (0..1, for moves that must play whole, like a full
+-- roll or flip), and returns the body's offset in the Root's space. Rate = strides per second at a walk.
+-- +Y up, +Z behind; pitch + is nose up, roll + leans left.
+----------------------------------------------------------------------------------------------------------------
+local Runs = {}
+PetAnimator.Runs = Runs
+
+local function hump(x, len) -- bump over the first len of the stride, 0 for the rest
+	return bump(x / len)
+end
+local function snap(v) -- a sine pushed toward its ends: quick moves that hold
+	return math.clamp(v * 2.5, -1, 1)
+end
+
+-- rocking horse: two lifts a stride, nose and tail dip in turn, leaning in
+Runs.Gallop = {Rate = 1.6, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g)) * 0.5 * k, 0) * A(rad(sin(g * 2) * 14 * k - 8 * k), 0, 0)
+end}
+-- big cats: a long leap nose-up, land nose-down, crouch before the next
+Runs.Pounce = {Rate = 1.1, Pose = function(g, x, k)
+	local air = x < 0.65
+	local u = air and x / 0.65 or 0
+	local y = air and bump(u) * 0.9 or -bump((x - 0.65) / 0.35) * 0.15
+	return CFrame.new(0, y * k, 0) * A(rad((air and math.cos(u * math.pi) * 15 or -6) * k), 0, 0)
+end}
+-- low to the ground and stretched out, a smooth stalking sprint
+Runs.Slink = {Rate = 1.4, Pose = function(g, x, k)
+	return CFrame.new(sin(g) * 0.1 * k, (-0.25 + math.abs(sin(g)) * 0.08) * k, 0) * A(rad(-6 * k), rad(sin(g) * 5 * k), rad(sin(g) * 4 * k))
+end}
+-- pups: quick little double bounce, rocking side to side
+Runs.Trot = {Rate = 2.2, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g * 2)) * 0.2 * k, 0) * A(rad(-4 * k), 0, rad(sin(g) * 6 * k))
+end}
+-- playful: bounces while zigzagging, swinging its head left then right every other bounce
+Runs.Romp = {Rate = 1.8, Pose = function(g, x, k)
+	return CFrame.new(sin(g * 0.5) * 0.25 * k, math.abs(sin(g)) * 0.45 * k, 0) * A(0, rad(sin(g * 0.5) * 20 * k), rad(-sin(g * 0.5) * 8 * k))
+end}
+-- springs straight up on stiff legs and stays level
+Runs.Pronk = {Rate = 1.6, Pose = function(g, x, k)
+	return CFrame.new(0, hump(x, 0.55) * 0.8 * k, 0) * A(rad(-3 * k), 0, 0)
+end}
+-- head held high, springy high steps
+Runs.Prance = {Rate = 1.5, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g)) * 0.55 * k, 0) * A(rad((8 + sin(g * 2) * 6) * k), 0, 0)
+end}
+-- long slow loping strides, deep pitch
+Runs.Lope = {Rate = 1, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g)) * 0.4 * k, 0) * A(rad((sin(g * 2) * 20 - 6) * k), 0, 0)
+end}
+-- head down, low and fast like a battering ram
+Runs.Charge = {Rate = 2.6, Pose = function(g, x, k)
+	return CFrame.new(0, (-0.1 + math.abs(sin(g * 2)) * 0.1) * k, 0) * A(rad(-16 * k), 0, rad(sin(g) * 3 * k))
+end}
+-- heavy: rolls its weight from side to side with each thud
+Runs.Stomp = {Rate = 1, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g)) * 0.15 * k, 0) * A(0, rad(sin(g) * 6 * k), rad(sin(g) * 10 * k))
+end}
+-- gallops on thin air, a little above the ground
+Runs.Skyrun = {Rate = 1.4, Pose = function(g, x, k)
+	return CFrame.new(0, (0.8 + math.abs(sin(g)) * 0.3) * k, 0) * A(rad((sin(g * 2) * 12 - 10) * k), 0, 0)
+end}
+-- spirits: rise off the ground and drift along, barely moving
+Runs.Drift = {Rate = 0.5, Pose = function(g, x, k)
+	return CFrame.new(0, (0.6 + sin(g) * 0.1) * k, 0) * A(rad(-5 * k), 0, rad(sin(g) * 4 * k))
+end}
+-- falls behind, then blinks forward to catch up (teleport steps)
+Runs.Blink = {Rate = 1.5, Pose = function(g, x, k)
+	return CFrame.new(0, 0, x * 1.2 * k)
+end}
+-- lurches ahead in a quick burst, then holds while the rest catches up
+Runs.Lurch = {Rate = 1.6, Pose = function(g, x, k)
+	local ahead = x < 0.3 and smooth(x / 0.3) or 1 - smooth((x - 0.3) / 0.7)
+	return CFrame.new(0, hump(x, 0.3) * 0.15 * k, -ahead * 0.6 * k) * A(rad(-ahead * 6 * k), 0, 0)
+end}
+-- crabs: sideways shuffle
+Runs.Sidestep = {Rate = 1.8, Pose = function(g, x, k)
+	return CFrame.new(sin(g) * 0.35 * k, math.abs(sin(g * 2)) * 0.1 * k, 0) * A(0, 0, rad(sin(g) * 8 * k))
+end}
+-- tiny frantic skitter, never still
+Runs.Scurry = {Rate = 3, Pose = function(g, x, k)
+	local j = sin(g * 3.1) * 0.6 + sin(g * 5.3) * 0.4
+	return CFrame.new(j * 0.12 * k, math.abs(sin(g * 2)) * 0.1 * k, 0) * A(0, rad(sin(g * 2.3) * 12 * k), 0)
+end}
+-- zigzags left and right, turning into each zig
+Runs.Zigzag = {Rate = 1.3, Pose = function(g, x, k)
+	return CFrame.new(sin(g) * 0.6 * k, 0, 0) * A(0, rad(-math.cos(g) * 25 * k), rad(math.cos(g) * 10 * k))
+end}
+-- erratic darts: snaps to a new spot and hovers there
+Runs.Dart = {Rate = 1.2, Pose = function(g, x, k)
+	return CFrame.new(snap(sin(g)) * 0.5 * k, snap(math.cos(g * 1.3)) * 0.3 * k, 0) * A(0, rad(snap(math.cos(g)) * 15 * k), 0)
+end}
+-- dives nose-first, then pulls up
+Runs.Dive = {Rate = 0.7, Pose = function(g, x, k)
+	return CFrame.new(0, -bump(x) * 1.2 * k, 0) * A(rad(-math.cos(x * math.pi) * 30 * k), 0, 0)
+end}
+-- long rolling waves, nose following the path
+Runs.Swoop = {Rate = 0.6, Pose = function(g, x, k)
+	return CFrame.new(0, sin(g) * 0.7 * k, 0) * A(rad((math.cos(g) * 18 - 6) * k), 0, rad(sin(g) * 10 * k))
+end}
+-- wide lazy S-turns, banking deep into each
+Runs.Soar = {Rate = 0.4, Pose = function(g, x, k)
+	return CFrame.new(sin(g) * 0.8 * k, sin(g * 2) * 0.15 * k, 0) * A(rad(-8 * k), rad(math.cos(g) * 10 * k), rad(-math.cos(g) * 25 * k))
+end}
+-- a full barrel roll every stride
+Runs.Barrel = {Rate = 0.45, Pose = function(g, x, k, f)
+	return CFrame.new(0, sin(g) * 0.2 * k, 0) * A(rad(-10 * k), 0, (x < 0.35 and smooth(x / 0.35) * TAU or 0) * f)
+end}
+-- a loop-the-loop every stride
+Runs.Loop = {Rate = 0.35, Pose = function(g, x, k, f)
+	local u = x < 0.4 and smooth(x / 0.4) or 0
+	return CFrame.new(0, (1 - math.cos(u * TAU)) * 0.6 * f, -sin(u * TAU) * 0.6 * f) * A(u * TAU * f, 0, 0)
+end}
+-- jerky flaps: jumps up with each beat
+Runs.Flutter = {Rate = 2.4, Pose = function(g, x, k)
+	return CFrame.new(0, math.abs(sin(g)) * 0.4 * k, 0) * A(rad(sin(g * 2) * 8 * k), 0, 0)
+end}
+-- drones: snaps side to side, tilting hard, nose down
+Runs.Strafe = {Rate = 0.6, Pose = function(g, x, k)
+	return CFrame.new(snap(sin(g)) * 0.6 * k, 0, 0) * A(rad(-12 * k), 0, rad(-snap(sin(g)) * 18 * k))
+end}
+-- a pirouette every stride
+Runs.Twirl = {Rate = 0.5, Pose = function(g, x, k, f)
+	return CFrame.new(0, sin(g) * 0.2 * k, 0) * A(0, (x < 0.4 and smooth(x / 0.4) * TAU or 0) * f, 0)
+end}
+-- spirals round its path, rolling with it
+Runs.Corkscrew = {Rate = 0.7, Pose = function(g, x, k)
+	return CFrame.new(math.cos(g) * 0.5 * k, sin(g) * 0.5 * k, 0) * A(0, 0, rad(sin(g) * 30 * k))
+end}
+-- circles round its path without turning (wisps)
+Runs.Swirl = {Rate = 0.8, Pose = function(g, x, k)
+	return CFrame.new(math.cos(g) * 0.6 * k, sin(g) * 0.6 * k, 0)
+end}
+-- leaps up out of the water and dives back in
+Runs.Porpoise = {Rate = 0.7, Pose = function(g, x, k)
+	return CFrame.new(0, bump(x) * 1 * k, 0) * A(rad(math.cos(x * math.pi) * 30 * k), 0, 0)
+end}
+-- jellyfish and octopi: a jet of thrust, then coast
+Runs.Pulse = {Rate = 1, Pose = function(g, x, k)
+	local push = x < 0.25 and smooth(x / 0.25) or 1 - smooth((x - 0.25) / 0.75)
+	return CFrame.new(0, push * 0.2 * k, -push * 0.6 * k) * A(rad(-push * 15 * k), 0, 0)
+end}
+-- fish: quick tail-driven swish
+Runs.Swish = {Rate = 2.2, Pose = function(g, x, k)
+	return CFrame.new(sin(g + 1) * 0.12 * k, 0, 0) * A(0, rad(sin(g) * 18 * k), 0)
+end}
+-- corrupted: jumps between random spots, a few times a stride
+Runs.Static = {Rate = 1.5, Pose = function(g, x, k)
+	local n = math.floor(g / TAU * 5) * 0.37
+	return CFrame.new(math.noise(n, 1.7) * 0.8 * k, math.noise(n, 5.3) * 0.5 * k, 0) * A(0, rad(math.noise(n, 9.1) * 30 * k), 0)
+end}
+-- surfing: nose up, carving side to side
+Runs.Surf = {Rate = 0.5, Pose = function(g, x, k)
+	return CFrame.new(sin(g) * 0.5 * k, 0, 0) * A(rad(8 * k), rad(-sin(g) * 12 * k), rad(sin(g) * 18 * k))
+end}
+-- wobbles like jelly
+Runs.Jiggle = {Rate = 2, Pose = function(g, x, k)
+	return A(rad(sin(g * 3) * 6 * k), 0, rad(sin(g * 2) * 8 * k))
+end}
 
 ----------------------------------------------------------------------------------------------------------------
 -- Specials: signature moves. Called every frame with s.spX (0..1 progress, -1 when not playing) and s.spB (its
@@ -1020,6 +1201,16 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 	s.spX, s.spB = spX, bump(spX)
 
 	local body = Modes[c.Mode or "Bound"](self, c, s)
+	local rs = c.Run
+	if rs then
+		local style = Runs[rs[1]]
+		self.RunPh = (self.RunPh or 0) + dt * style.Rate * (rs.Rate or 1) * (0.6 + 0.4 * pace(speed))
+		local r = run(speed) * mv
+		if r > 0.001 then
+			local x = self.RunPh % 1
+			body = style.Pose(x * TAU, x, r * (rs.Amp or 1), smooth(r * 3)) * body
+		end
+	end
 	if s.Land then
 		self.LandAt = t
 		local lf = c.LandFx and self.Fx[c.LandFx[1]]
@@ -1153,7 +1344,10 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 	-- wobbles: any joint that sways (Rot, degrees) or shifts (Pos, studs) on a wave. Pulse = one push per cycle
 	-- then rest; Every = random-interval pulses (Emit fires an emitter as it starts); Land = jiggle after landings;
 	-- Sweep = fixed offset while moving
-	for _, wb in ipairs(c.Wobble or EMPTY) do
+	local wobRate = 1 + MOVE_WOBBLE * mv * pace(s.speed)
+	local wobCf = self.WobCf
+	table.clear(wobCf)
+	for wi, wb in ipairs(c.Wobble or EMPTY) do
 		local k
 		if wb.Every then
 			local x, pl
@@ -1170,13 +1364,19 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 			local ph = p * wb.Rate
 			local dir = (math.floor(ph) % 8) * math.pi / 4
 			local kk = bump(ph - math.floor(ph)) * ((wb.Idle or 1) * idle + (wb.Moving or 0) * mv)
-			self:_set(wb.Joint, A(rad(math.cos(dir) * wb.Rot.X * kk), 0, rad(sin(dir) * wb.Rot.X * kk)))
+			local cf = A(rad(math.cos(dir) * wb.Rot.X * kk), 0, rad(sin(dir) * wb.Rot.X * kk))
+			wobCf[wb.Joint] = wobCf[wb.Joint] and wobCf[wb.Joint] * cf or cf
 			continue
-		elseif wb.Pulse then
-			local ph = p * wb.Rate + (wb.Phase or 0)
-			k = bump((ph - math.floor(ph)) / wb.Pulse)
 		else
-			k = sin((p * wb.Rate + (wb.Phase or 0)) * TAU)
+			-- idle wobbles keep their rate; the ones that also play while moving speed up with travel
+			local wp = self.WobPh
+			wp[wi] = (wp[wi] or p * wb.Rate) + dt * wb.Rate * (wb.Moving and wobRate or 1)
+			local ph = wp[wi] + (wb.Phase or 0)
+			if wb.Pulse then
+				k = bump((ph - math.floor(ph)) / wb.Pulse)
+			else
+				k = sin(ph * TAU)
+			end
 		end
 		k *= ((wb.Idle or 1) * idle + (wb.Moving or 0) * mv) * calm
 		if wb.Land then
@@ -1185,7 +1385,11 @@ function PetAnimator:Step(dt, t, speed, turn, camDist)
 		end
 		local r, sw = wb.Rot or ZERO, wb.Sweep or ZERO
 		-- SweepPos = fixed shift while moving (a cloud trailing behind)
-		self:_set(wb.Joint, CFrame.new((wb.Pos or ZERO) * k + (wb.SweepPos or ZERO) * mv) * A(rad(r.X * k + sw.X * mv), rad(r.Y * k + sw.Y * mv), rad(r.Z * k + sw.Z * mv)))
+		local cf = CFrame.new((wb.Pos or ZERO) * k + (wb.SweepPos or ZERO) * mv) * A(rad(r.X * k + sw.X * mv), rad(r.Y * k + sw.Y * mv), rad(r.Z * k + sw.Z * mv))
+		wobCf[wb.Joint] = wobCf[wb.Joint] and wobCf[wb.Joint] * cf or cf
+	end
+	for joint, cf in pairs(wobCf) do
+		self:_set(joint, cf)
 	end
 
 	-- rotors: spin continuously, faster while moving

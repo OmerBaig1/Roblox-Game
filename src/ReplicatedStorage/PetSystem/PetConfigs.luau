@@ -7,7 +7,7 @@
 ]]
 local V = Vector3.new
 
-return {
+local Configs = {
 	Coalpup = {
 		Id = "coalpup",
 		No = 1,
@@ -267,6 +267,7 @@ return {
 		Head = {LookYaw = 25, LookPitch = 6, LookRate = 0.15, Tilt = {Angle = 22, Every = {4, 8}, Time = 1.5}},
 		Wobble = {
 			{Joint = "TailF", Rot = V(6, 0, 0), Rate = 0.3, Moving = 0.6},
+			{Joint = "Talons", Rot = V(6, 0, 0), Rate = 0.35, Moving = 0.3, Sweep = V(-35, 0, 0)}, -- talons tuck back in flight
 		},
 		Orbit = {Parts = {"Rune1", "Rune2", "Rune3"}, Radius = 2.8, Rate = 0.1, Bob = 0.15, Tilt = 10, Spin = 0.5, Long = 1.4},
 		-- signature move: Owl Turn. The head swivels a full 180 to look back at you, the runes flash, then it turns back
@@ -403,6 +404,8 @@ return {
 		Tail = {Sway = 12, SwayRate = 0.5, Stream = 18},
 		Wobble = {
 			{Joint = "Cloud", Pos = V(0, 0.08, 0), Rate = 0.3, Moving = 1, SweepPos = V(0, -0.3, 1.4)}, -- the cloud trails behind in flight
+			{Joint = "Talons", Rot = V(8, 0, 0), Rate = 0.4, Moving = 0.4, Sweep = V(-30, 0, 0)}, -- talons dangle, tuck back in flight
+			{Joint = "Legs", Rot = V(8, 0, 0), Rate = 0.4, Phase = 0.5, Moving = 0.4, Sweep = V(-35, 0, 0)},
 		},
 		Orbit = {Parts = {"Hailstone1", "Hailstone2", "Hailstone3"}, Radius = 2.9, Rate = 0.16, Bob = 0.25, Tilt = 14, Spin = 2, Long = 1.3},
 		-- transformation: Blizzard. Its wings frost over and blaze, the cloud swells, hail and lightning burst out
@@ -470,6 +473,8 @@ return {
 		Wobble = {
 			{Joint = "Stick", Rot = V(16, 0, 0), Steer = true, Rate = 1.2, Moving = 0.4}, -- steered round 8 directions
 			{Joint = "Buttons", Pos = V(0, -0.05, 0), Pulse = 0.2, Rate = 1.7, Moving = 0.5}, -- buttons press
+			{Joint = "Legs", Rot = V(12, 0, 0), Rate = 1.4, Idle = 0, Moving = 1, Land = 0.5}, -- feet kick while hopping
+			{Joint = "Head", Rot = V(8, 0, 6), Rate = 0.5, Idle = 0.4, Moving = 0, Land = 1}, -- the head bobbles after each landing
 		},
 		Orbit = {Parts = {"PixelHeart"}, Radius = 1.6, Rate = 0.2, Bob = 0.2, Tilt = 10, Spin = 1.5},
 		MoveFx = {"NeonTrail"},
@@ -487,6 +492,7 @@ return {
 			{Joint = "ClawL", Rot = V(0, 14, 0), Pulse = 0.25, Rate = 0.8, Moving = 0.5, Sweep = V(30, 0, 0)}, -- claws click
 			{Joint = "ClawR", Rot = V(0, -14, 0), Pulse = 0.25, Rate = 0.8, Phase = 0.5, Moving = 0.5, Sweep = V(30, 0, 0)},
 			{Joint = "Eyes", Rot = V(0, 18, 0), Rate = 0.3},
+			{Joint = "Legs", Rot = V(0, 10, 6), Rate = 1.3, Idle = 0, Moving = 1}, -- the legs (one mesh) scurry while moving
 		},
 		Orbit = {Parts = {"Pixel"}, Radius = 1.7, Rate = 0.25, Bob = 0.15, Tilt = 10, Spin = 2, Long = 1.3},
 		MoveFx = {"PixelTrail"},
@@ -524,6 +530,7 @@ return {
 			{Joint = "Digit2", Rot = V(90, 0, 0), Pulse = 0.12, Rate = 0.5},
 			{Joint = "Digit3", Rot = V(90, 0, 0), Pulse = 0.12, Rate = 1},
 			{Joint = "Digit4", Rot = V(90, 0, 0), Pulse = 0.12, Rate = 2}, -- the last digit ticks fastest, like a counter
+			{Joint = "Legs", Rot = V(35, 0, 0), Rate = 1.4, Idle = 0.3, Moving = 1}, -- little legs paddle the air
 		},
 		-- signature move: New High Score. A pixel firework of digits and a quick loop-de-loop
 		Special = {Kind = "Roll", Axis = "X", Every = {9, 13}, Duration = 1.6, Rise = 0.9, Finish = true, Bursts = {{"OneUp", 0.1, 45}, {"OneUp", 0.55, 30}}},
@@ -560,6 +567,7 @@ return {
 			{Joint = "ArmL", Rot = V(6, 0, 4), Rate = 0.35, Moving = 1.5},
 			{Joint = "ArmR", Rot = V(6, 0, -4), Rate = 0.35, Phase = 0.5, Moving = 1.5},
 			{Joint = "Core", Pos = V(0, 0, -0.05), Pulse = 0.3, Rate = 0.9, Moving = 1}, -- the core pulses
+			{Joint = "Legs", Rot = V(0, 7, 0), Rate = 0.7, Idle = 0, Moving = 1}, -- the hips swing in a heavy march
 		},
 		-- Secret mechanic: Phase 2. The armour rattles, bursts off and circles the exposed core on its energy arcs,
 		-- then flies home and locks back on
@@ -578,6 +586,7 @@ return {
 		Head = {LookYaw = 15, LookPitch = 5, LookRate = 0.3},
 		Wobble = {
 			{Joint = "Antenna", Rot = V(10, 0, 14), Every = {1.5, 4}, Time = 0.35}, -- the spark-plug antenna twitches
+			{Joint = "Legs", Rot = V(0, 12, 6), Rate = 1.6, Idle = 0, Moving = 1}, -- the legs (one mesh) scurry while moving
 		},
 	},
 	DronePup = {
@@ -631,10 +640,11 @@ return {
 		Body = {Breathe = 0.03, BreatheRate = 0.7, Lean = 12},
 		Move = {HopHeight = 0.3, HopRate = 2.8, Pitch = 6},
 		Head = {LookYaw = 20, LookPitch = 5, LookRate = 0.2, Down = 10},
-		Ears = {TwitchAngle = 20, TwitchEvery = {2, 5}, Back = 25},
 		Tail = {Sway = 20, SwayRate = 1.2, Stream = 25, Wag = {Angle = 25, Rate = 3, Every = {3, 6}, Time = 0.8}}, -- tail lash
 		Wobble = {
 			{Joint = "ScanArm", Rot = V(0, 40, 0), Rate = 0.6}, -- the scan sweeps side to side
+			-- one Ears joint (the Ears block needs EarL/EarR): twitches at rest, flattens back while running
+			{Joint = "Ears", Rot = V(15, 0, 0), Every = {2, 5}, Time = 0.22, Sweep = V(25, 0, 0)},
 		},
 		Orbit = {Parts = {"HoloCube1", "HoloCube2"}, Radius = 2.6, Rate = 0.2, Bob = 0.15, Tilt = 12, Spin = 2, Long = 1.4},
 		-- signature move: Holo Scan. The visor projects a fan of scanning beams that sweeps the ground
@@ -654,6 +664,7 @@ return {
 		Head = {LookYaw = 18, LookPitch = 6, LookRate = 0.25},
 		Wobble = {
 			{Joint = "TailFan", Rot = V(6, 8, 0), Rate = 0.5, Moving = 1},
+			{Joint = "Jets", Pos = V(0, 0.03, 0), Rate = 2.5, Idle = 0.3, Moving = 1, Sweep = V(-10, 0, 0)}, -- jets rumble and angle down under thrust
 		},
 		Orbit = {Parts = {"EnergyOrb1", "EnergyOrb2"}, Radius = 1.9, Rate = 0.3, Bob = 0.2, Tilt = 15, Spin = 0, Long = 1.3},
 		-- signature move: Boost. Energy blades extend, the afterburners flare and it throws a quick loop
@@ -672,6 +683,8 @@ return {
 		Head = {LookYaw = 10, LookPitch = 8, LookRate = 0.15}, -- the horn tilts
 		Wobble = {
 			{Joint = "StatusLights", Pos = V(0, 0.015, 0), Pulse = 0.5, Rate = 1.6}, -- status lights blink
+			{Joint = "Legs", Rot = V(0, 8, 5), Rate = 1, Idle = 0, Moving = 1}, -- the legs (one mesh) scurry while moving
+			{Joint = "Wings", Rot = V(4, 0, 0), Pos = V(0, 0.04, 0), Rate = 3, Idle = 0, Moving = 1}, -- wings buzz under the shell
 		},
 		Orbit = {Parts = {"DataCube1", "DataCube2", "DataCube3"}, Radius = 3, Rate = 0.12, Bob = 0.2, Tilt = 10, Spin = 1.5, Long = 1.3, Height = 1.1},
 		-- transformation: Overclock. The shell halves swing open, wings unfold and buzz, data streams spiral up
@@ -711,7 +724,7 @@ return {
 		Head = {LookYaw = 20, LookPitch = 8, LookRate = 0.3, Tilt = {Angle = 16, Every = {3, 6}, Time = 1.2}},
 		Wobble = {
 			{Joint = "Tail", Rot = V(0, 25, 10), Rate = 0.35, Moving = 1.2, Sweep = V(25, 0, 0)},
-			{Joint = "Ears", Rot = V(-12, 0, 0), Every = {2, 5}, Time = 0.3}, -- ear flick
+			{Joint = "Ears", Rot = V(-12, 0, 0), Every = {2, 5}, Time = 0.3, Sweep = V(20, 0, 0)}, -- ear flick; swept back while moving
 		},
 	},
 	LanternImp = {
@@ -798,6 +811,7 @@ return {
 		Wobble = {
 			{Joint = "Mane", Rot = V(6, 4, 6), Rate = 0.4, Moving = 1.5, Sweep = V(18, 0, 0)},
 			{Joint = "Hooves", Pos = V(0, 0.05, 0), Every = {4, 8}, Time = 0.5, Emit = {"HoofFire", 10}}, -- stamps
+			{Joint = "Hooves", Rot = V(14, 0, 0), Rate = 0.9, Idle = 0, Moving = 1}, -- the hooves (one mesh) rock in a gallop
 		},
 		Spin = {Joint = "Halo", Rate = 0.06, Bob = 0.04},
 		-- signature move: Eclipse. It rears, the halo flares into a full corona and darkness rolls out around it
@@ -1016,3 +1030,78 @@ return {
 		MoveFx = {"HoofFireF", "HoofFireB"},
 	},
 }
+
+-- how each pet runs (PetAnimator.Runs): {style, Amp = size, Rate = speed}. Kept in one list so pets that share a
+-- style can be told apart at a glance.
+local RUNS = {
+	-- four-legged
+	Coalpup = {"Trot"},
+	PixelPup = {"Pronk"},
+	ConstellationCub = {"Romp"},
+	CinderLynx = {"Pounce"},
+	ChromePanther = {"Slink"},
+	VoidCat = {"Blink"},
+	GlimmerwoodFawn = {"Prance"},
+	EclipseNightmare = {"Gallop", Amp = 1.2},
+	SoulbinderChimera = {"Lope"},
+	SolflareQilin = {"Skyrun"},
+	ElderhornSpirit = {"Drift"},
+	HauntedArmorHound = {"Charge"},
+	RimebackRam = {"Charge", Amp = 1.3, Rate = 0.8},
+	MechRaptor = {"Charge", Amp = 0.8, Rate = 1.2},
+	AuroraMammoth = {"Stomp", Amp = 1.3},
+	FinalBoss = {"Stomp", Amp = 1.5, Rate = 0.8},
+	-- crawlers
+	StarloomWeaver = {"Lurch"},
+	CartridgeCrab = {"Sidestep"},
+	CoralCrab = {"Scurry"},
+	BoltBug = {"Zigzag"},
+	MainframeBeetle = {"Stomp", Amp = 0.6, Rate = 1.5},
+	PyreSalamander = {"Lurch", Amp = 0.8, Rate = 1.4},
+	-- fliers
+	BoneRaven = {"Dive"},
+	HailstormGriffin = {"Swoop"},
+	RunebarkOwl = {"Swoop", Amp = 0.7, Rate = 1.3},
+	ObsidianDrake = {"Soar", Amp = 1.2},
+	SupernovaSeraph = {"Soar"},
+	HyperdriveHawk = {"Barrel"},
+	LanternImp = {"Loop"},
+	FlickerMoth = {"Dart"},
+	IcicleBat = {"Flutter"},
+	StarlingChick = {"Flutter", Amp = 0.7, Rate = 1.3},
+	DronePup = {"Strafe"},
+	PetalSprite = {"Twirl"},
+	PrismWyrmling = {"Corkscrew"},
+	StarforgePegasus = {"Skyrun", Amp = 1.2},
+	HighScoreDragon = {"Swoop", Amp = 1.2},
+	-- swimmers and floaters
+	CelestialKoi = {"Porpoise"},
+	LanternEel = {"Porpoise", Amp = 0.7, Rate = 1.4},
+	CoralcrownLeviathan = {"Porpoise", Amp = 1.4, Rate = 0.6},
+	RingedSkywhale = {"Swoop", Amp = 1.3, Rate = 0.6},
+	ReefguardManta = {"Soar", Amp = 0.8, Rate = 1.4},
+	Bubblefin = {"Swish"},
+	SpecterJelly = {"Pulse"},
+	ClawMachineOcto = {"Pulse", Amp = 1.2, Rate = 0.8},
+	WispKit = {"Swirl"},
+	QuantumCoreWyrm = {"Swirl", Amp = 0.8, Rate = 1.3},
+	MaelstromSerpent = {"Corkscrew", Amp = 1.3, Rate = 0.8},
+	GlitchPhantom = {"Static"},
+	SurfOtter = {"Surf"},
+	CrystalHeartGolem = {"Stomp", Amp = 1.1},
+	-- rollers, waddlers, hoppers (their mode already travels; these add on top)
+	Bramblehog = {"Pronk", Amp = 0.4, Rate = 1.5},
+	CoinHopper = {"Pronk", Amp = 0.6, Rate = 1.2},
+	SnowpuffSeal = {"Lurch", Amp = 1.2, Rate = 0.8},
+	WorldtreeTortoise = {"Stomp", Amp = 0.6, Rate = 0.7},
+	SynthSlime = {"Jiggle"},
+	MosscapBunny = {"Swish", Amp = 0.6},
+	JoystickCritter = {"Twirl", Rate = 0.6},
+	MagmaToad = {"Stomp", Amp = 0.8, Rate = 1.6},
+}
+for name, r in pairs(RUNS) do
+	assert(Configs[name], "RUNS names a pet with no config: " .. name)
+	Configs[name].Run = r
+end
+
+return Configs

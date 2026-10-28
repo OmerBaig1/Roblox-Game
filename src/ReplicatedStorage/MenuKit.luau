@@ -452,7 +452,8 @@ function K.sideTabs(props)
 			paint(i)
 		end)
 		b.Activated:Connect(function()
-			if current ~= i then
+			-- Reselect: clicking the current tab runs OnSelect again (the shop scrolls back to that section)
+			if current ~= i or props.Reselect then
 				api.select(i)
 			end
 		end)

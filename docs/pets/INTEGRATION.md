@@ -54,6 +54,64 @@ working (`N`, `R`, `Egg`, `Key`, `Boost`, `RARITIES`, `EQUIP_MAX`, `MAX_PETS`, `
   - Backups are in `Before_Oct26_EggShop`. In Studio only, `PlayerGui.HatchUI.HatchPreview` plays a hatch with made-up results.
   - Tested: every egg's single hatch, 10-egg grids, Skip, close-up, spam, and the not-enough-cash path; 50+ fps in a
     10-egg hatch. Not tested: a real purchase, and real phone screens.
+- Oct 27 2026: **Phase 4 done.** In the PetsUI follow loop, every follower runs its own `PetAnimator`. The loop moves
+  `Root.CFrame` and turns pets the way PetLabClient does. Hovering comes from each pet's Mode, so `FLYERS` is gone.
+  `PET_SCALE` is gone too, so pets are now Lab size, about a third bigger than before. Mythic and Secret slots sit 1 stud
+  further out. Outlines come from `PetFx.outlines`, which keeps your own pets first. The 250-stud cull and the teleport
+  snap stay. Backup: `Before_Oct27_PetFollow`. Cost: about 0.01 ms per pet per frame on average, 0.045 ms for the
+  heaviest (Supernova Seraph). Playtest: 3 followers animate (22 of 26 joints moving), and there are no new errors.
+- Oct 27 2026: **Phase 5 done.** `petView` (Hatchery) and `viewport` (PetsUI) take `Animate`: the model goes in a
+  `WorldModel` and idles with its PetAnimator, and the sway moves `Root.CFrame` instead of calling PivotTo. Three pictures
+  animate: the single-hatch reveal, the batch close-up and the selected My Pets pet. Grid cards and 10-egg grid
+  cells stay still. On a Mythic or Secret reveal, `Special = 0.5` starts the signature move half a second after the pet
+  appears. The tier effects (ring, flash, blackout, SECRET! banner) were already in `TIERS` and are unchanged. Particle
+  bursts from specials don't show in ViewportFrames, which is a Roblox limit. Backup: `Before_Oct27_PetPreviews`. Playtest:
+  the Quantum Core Wyrm and Supernova Seraph reveals animate (11 of 13 joints), the Seraph's move plays, the My Pets
+  Starloom Weaver animates, and there are no new errors. Not tested: the batch close-up by clicking.
+- Oct 27 2026: **Phase 6 done (with limits).**
+  - Stress test: the MCP can't start a 4-player local server, so it was simulated as 3 own followers plus 9 Mythic or
+    Secret pets around the player, each moved and stepped every frame like a follower. The animator code for 12 pets
+    came to about 0.6 ms per frame (0.43 ms for the 9 extras), under the 1.5 ms target. Studio ran at about 15 fps
+    (window in the background), so the GPU numbers from that run don't count.
+  - Outlines: in a Studio playtest, the PetLab gallery (24) and the followers each call `PetFx.outlines` with their own
+    budget, so together they can go over 31. Live servers have no PetLab.
+  - Hatch previews: 1 and 10 for all 8 eggs completed, with no errors.
+  - Rejoin: 70 pets, the same 3 out, boost 1282, and the followers and hatchery eggs come back.
+  - Not tested: Equip Best and delete. Both write the live save from Studio, and their server code is unchanged since
+    Phase 2.
+  - Old code removed: the chibi builder, `buildChibi` and `addEffects` are gone from `PetModels` (910 -> 184 lines).
+    Only `build` and `egg` (with its procedural fallback) remain. Backup: `Before_Oct27_ChibiRemoval`. Unit tests 7/7.
+  - README pet line updated.
+- Oct 27 2026: **Running fix (PetAnimator).** Pets slid instead of running because players move at ~211 studs/s and the
+  animator was tuned around 16. Gait rates topped out at 16 studs/s, and `Wobble` (which drives most wings, legs, fins
+  and tails) ran on a fixed clock, so moving only made its swing bigger, never faster. Now:
+  - New `PetAnimator.pace(speed)`: 0..1 up to 16 studs/s, then +1 per doubling of speed, up to 3. Bound, Waddle,
+    Scuttle and Slither use it.
+  - Wobbles marked `Moving` cycle `1 + 0.75 * mv * pace` times faster. The cycle position builds up frame by frame
+    (`self.WobPh`), so rate changes never jump. Idle-only wobbles are unchanged.
+  - Roll spin is capped at 30 studs/s so it doesn't strobe.
+  - Backup: `Before_Oct27_PetRunPace`. New test `PetAnimator_Test` (tests 9/9).
+  - In game while running: Seraph wings 0.5 -> 1.7 cycles/s, Weaver legs 1.4 -> 4.4, Koi tail 0.5 -> 1.7.
+  - Still open: 14 pets have leg or claw joints and 9 have wing or fin joints that no block drives at all (for example
+    BoltBug Legs, FinalBoss Legs, HighScoreDragon Wings, MainframeBeetle Wings), so those parts never move.
+- Oct 27 2026: **Limb batches (6 pets each, owner's request).** A full scan, standing and running, found 37 pets with a
+  joint that never moves. Most are rigid parts (shells, horns, visors), so only the moving limbs are being animated.
+  Several wobbles on one joint now combine instead of the last one winning (`self.WobCf`). Before this, no pet had two.
+  - Batch 1 done: BoltBug, CartridgeCrab and MainframeBeetle legs scurry. MainframeBeetle wings buzz. FinalBoss hips
+    march. HighScoreDragon legs paddle. EclipseNightmare hooves rock in a gallop. All are `Wobble` entries with
+    `Idle = 0, Moving = 1`; the legs are single merged meshes, so they can't step one at a time. All 60 pets step
+    without errors. Tests 9/9. Backup of PetConfigs: `Before_Oct27_PetRunPace`.
+  - Batch 2 done:
+    - HailstormGriffin talons and legs, and RunebarkOwl talons, dangle and tuck back in flight.
+    - JoystickCritter legs kick while hopping, and its head bobbles on landing (`Land`).
+    - HyperdriveHawk jets rumble and tilt back under thrust. Its blades are left for its special.
+    - ChromePanther had a dead `Ears` block (that block needs EarL/EarR, the model has one `Ears` joint), so it's now a
+      wobble: a twitch, flattened back while running.
+    - WispKit ears sweep back while moving.
+    - Skipped: ElderhornSpirit's "Head" and "Tail" are tiny face bits, and Bramblehog's "Feet" are a hidden speck.
+    - Directions checked from the joint math: tips move toward the tail. All 60 pets step without errors. Tests 9/9.
+  - Batch 3: VoidCat ears; MaelstromSerpent (Seg2, TailFin); ConstellationCub mane; RimebackRam wool; then a
+    rescan for anything left.
 
 ## Phase 1: shared runtime
 

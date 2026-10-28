@@ -19,7 +19,7 @@ C.SELL_MULTIPLIER = 30          -- an installed game sells for (income per secon
 C.UNINSTALLED_SELL = 10         -- a game that isn't installed yet sells for (its level's base income x this)
 C.MAX_HELD = 1                  -- games a player can hold at once
 C.MAX_HELD_PASS = 2             -- ...with the 2x Steal game pass
-C.SAVE_STORE = "StealAGameSave_v2"
+C.SAVE_STORE = "StealAGameSave_v3" -- v3: full reset Oct 28 (v2 still holds everyone's old saves)
 C.AUTOSAVE_TIME = 60
 
 ------------------------------------------------------------------
@@ -133,39 +133,46 @@ C.PRODUCTS = {
 	{Key = "SpeedL", Section = "speed", Id = 0, Name = "Speed Surge", Amount = 1000000, Price = 79},
 	{Key = "SpeedXL", Section = "speed", Id = 0, Name = "Speed Storm", Amount = 10000000, Price = 199},
 	{Key = "SpeedXXL", Section = "speed", Id = 0, Name = "Speed Supernova", Amount = 100000000, Price = 449},
-	-- CASH PACKS: minutes of your base's income (the shop shows the exact amount you'd get)
-	{Key = "Cash5", Section = "cash", Id = 0, Name = "Cash Handful", Minutes = 5, Min = 2500, Price = 9},
-	{Key = "CashS", Section = "cash", Id = 0, Name = "Cash Stack", Minutes = 15, Min = 5000, Price = 25},
-	{Key = "CashL", Section = "cash", Id = 0, Name = "Cash Vault", Minutes = 60, Min = 50000, Price = 79},
-	{Key = "CashXL", Section = "cash", Id = 0, Name = "Cash Mountain", Minutes = 360, Min = 500000, Price = 249},
-	{Key = "CashXXL", Section = "cash", Id = 0, Name = "Cash Planet", Minutes = 1440, Min = 2000000, Price = 699},
+	-- CASH PACKS: minutes of your base's income (the shop shows the exact amount you'd get), never less than Min.
+	-- Sized against what upgrades cost: the next case/floor costs ~5-70 minutes of income at every stage, so even the
+	-- Handful buys an upgrade or two. Costs grow x1.55 per case, so a pack buys only a handful of steps however big
+	-- your base is. Bigger packs give more cash per Robux (3.3 -> 10 minutes per Robux).
+	{Key = "Cash5", Section = "cash", Id = 0, Name = "Cash Handful", Minutes = 30, Min = 5000, Price = 9},
+	{Key = "CashS", Section = "cash", Id = 0, Name = "Cash Stack", Minutes = 120, Min = 25000, Price = 25},
+	{Key = "CashL", Section = "cash", Id = 0, Name = "Cash Vault", Minutes = 480, Min = 150000, Price = 79},
+	{Key = "CashXL", Section = "cash", Id = 0, Name = "Cash Mountain", Minutes = 2160, Min = 1000000, Price = 249},
+	{Key = "CashXXL", Section = "cash", Id = 0, Name = "Cash Planet", Minutes = 7200, Min = 5000000, Price = 699},
 }
 
 ------------------------------------------------------------------
 -- LUCKY SPIN (free once a day, at the booth beside the vault entrance)
 ------------------------------------------------------------------
 C.SPIN_COOLDOWN = 86400
+-- Wheel order (clockwise from the top): warm and cool colours alternate so neighbouring slices never look alike.
+-- Weight is the chance (out of the total, 100); the order doesn't change the odds.
 C.SPIN_REWARDS = {
-	{Text = "Cash",           Kind = "cash",  Minutes = 5,  Min = 1000,  Weight = 28, Color = rgb(90, 220, 90),   Icon = "\u{1F4B5}"},
-	{Text = "+5% Speed",      Kind = "speed", Percent = 5,  Min = 300,   Weight = 24, Color = rgb(80, 170, 255),  Icon = "\u{1F45F}"},
-	{Text = "Speed x1.5",     Kind = "boost", Stat = "Speed", Mult = 1.5, Minutes = 10, Weight = 14, Color = rgb(0, 200, 255), Icon = "\u{26A1}"},
-	{Text = "Big Cash",       Kind = "cash",  Minutes = 25, Min = 6000,  Weight = 12, Color = rgb(255, 210, 60),  Icon = "\u{1F4B0}"},
-	{Text = "Money x2",       Kind = "boost", Stat = "Money", Mult = 2, Minutes = 10, Weight = 9,  Color = rgb(255, 150, 40), Icon = "\u{1F911}"},
-	{Text = "+15% Speed",     Kind = "speed", Percent = 15, Min = 1000,  Weight = 7,  Color = rgb(110, 90, 255),  Icon = "\u{1F680}"},
-	{Text = "Epic Game",      Kind = "game",  Rarity = 4,                Weight = 5,  Color = rgb(170, 70, 255),  Icon = "\u{1F3AE}"},
-	{Text = "Legendary Game", Kind = "game",  Rarity = 5,                Weight = 1,  Color = rgb(255, 170, 0),   Icon = "\u{1F451}"},
+	{Text = "Cash",           Kind = "cash",  Minutes = 5,  Min = 1000,  Weight = 28, Color = rgb(30, 165, 70),   Icon = "\u{1F4B5}"},
+	{Text = "Money x2",       Kind = "boost", Stat = "Money", Mult = 2, Minutes = 10, Weight = 9,  Color = rgb(230, 40, 120), Icon = "\u{1F911}"},
+	{Text = "+5% Speed",      Kind = "speed", Percent = 5,  Min = 300,   Weight = 24, Color = rgb(30, 100, 235),  Icon = "\u{1F45F}"},
+	{Text = "Big Cash",       Kind = "cash",  Minutes = 25, Min = 6000,  Weight = 12, Color = rgb(250, 185, 20),  Icon = "\u{1F4B0}"},
+	{Text = "Epic Game",      Kind = "game",  Rarity = 4,                Weight = 5,  Color = rgb(125, 40, 215),  Icon = "\u{1F3AE}"},
+	{Text = "Speed x1.5",     Kind = "boost", Stat = "Speed", Mult = 1.5, Minutes = 10, Weight = 14, Color = rgb(0, 165, 170), Icon = "\u{26A1}"},
+	{Text = "Legendary Game", Kind = "game",  Rarity = 5,                Weight = 1,  Color = rgb(235, 80, 10),  Icon = "\u{1F451}"},
+	{Text = "+15% Speed",     Kind = "speed", Percent = 15, Min = 1000,  Weight = 7,  Color = rgb(70, 45, 190),  Icon = "\u{1F680}"},
 }
 
 ------------------------------------------------------------------
 -- PLAYTIME REWARDS (every 10 minutes you play, each session)
+-- Text is what the gift card says, so it must match what the reward really gives. A cash gift is worth `Minutes`
+-- of your income (at least `Min`): its card shows the real amount for you instead of this text.
 ------------------------------------------------------------------
 C.PLAYTIME = {
-	{Minute = 10, Text = "+3% Speed",          Kind = "speed", Percent = 3,  Min = 200,  Icon = "\u{1F45F}", Color = rgb(80, 170, 255)},
-	{Minute = 20, Text = "Cash",               Kind = "cash",  Minutes = 8,  Min = 2000, Icon = "\u{1F4B0}", Color = rgb(255, 210, 60)},
-	{Minute = 30, Text = "1.35x Speed 10 min", Kind = "boost", Stat = "Speed", Mult = 1.35, Minutes = 10, Icon = "\u{26A1}", Color = rgb(0, 200, 255)},
-	{Minute = 40, Text = "Big Cash",           Kind = "cash",  Minutes = 20, Min = 6000, Icon = "\u{1F4B5}", Color = rgb(90, 220, 90)},
-	{Minute = 50, Text = "2x Money 10 min",    Kind = "boost", Stat = "Money", Mult = 2, Minutes = 10, Icon = "\u{1F911}", Color = rgb(255, 150, 40)},
-	{Minute = 60, Text = "Mystery Game",       Kind = "game",  Rarity = 4, Mystery = true, Icon = "\u{2753}", Color = rgb(190, 90, 255)},
+	{Minute = 10, Text = "+3% Speed (permanent)",   Kind = "speed", Percent = 3,  Min = 200,  Icon = "\u{1F45F}", Color = rgb(80, 170, 255)},
+	{Minute = 20, Text = "8 minutes of income",     Kind = "cash",  Minutes = 8,  Min = 2000, Icon = "\u{1F4B0}", Color = rgb(255, 210, 60)},
+	{Minute = 30, Text = "2\u{00D7} Speed for 10 minutes", Kind = "boost", Stat = "Speed", Mult = 2, Minutes = 10, Icon = "\u{26A1}", Color = rgb(0, 200, 255)},
+	{Minute = 40, Text = "20 minutes of income",    Kind = "cash",  Minutes = 20, Min = 6000, Icon = "\u{1F4B5}", Color = rgb(90, 220, 90)},
+	{Minute = 50, Text = "2\u{00D7} Money for 10 minutes", Kind = "boost", Stat = "Money", Mult = 2, Minutes = 10, Icon = "\u{1F911}", Color = rgb(255, 150, 40)},
+	{Minute = 60, Text = "1 Epic or Legendary game", Kind = "game",  Rarity = 4, Mystery = true, Icon = "\u{2753}", Color = rgb(190, 90, 255)},
 }
 
 ------------------------------------------------------------------
@@ -189,6 +196,7 @@ C.INSTALL_BASE = 20
 C.INSTALL_GROWTH = 1.09
 C.ONLINE_INSTALL_RATE = 1       -- install seconds gained per real second while you're in the game
 C.OFFLINE_INSTALL_RATE = 0.5    -- ...and while you're offline
+C.OFFLINE_CASH_RATE = 0.5       -- share of your games' income earned while you're offline (time away is capped at 30 days)
 
 ------------------------------------------------------------------
 -- SPEED  (the number on screen is "speed points")
@@ -213,14 +221,28 @@ end
 C.TREAD_BASE_RATE = 1
 C.TREAD_RATE_GROWTH = 1.4
 C.TREAD_MAX_LEVEL = 40
+-- Upgrade prices follow the economy. The price of level T is a stretch of the income a player training at that
+-- level typically has (stealing around vault level T + 3, owning 12 -> 96 cases as they go, with better rarities).
+-- The stretch grows from 20 seconds of income for the first upgrade to 6 hours for the last, so each step costs
+-- about 1.7x the one before. The early levels keep their old doubling prices (200, 400, 800...) where those are
+-- cheaper, so new players level up fast. (The old doubling all the way up asked ~580 hours of income for the last.)
 C.TREAD_COST_BASE = 200
 C.TREAD_COST_GROWTH = 2.0
+C.TREAD_COST_FIRST_MINUTES = 1 / 3
+C.TREAD_COST_LAST_MINUTES = 360
 
 function C.treadRate(level)
 	return C.TREAD_BASE_RATE * C.TREAD_RATE_GROWTH ^ level
 end
 function C.treadCost(level)
-	return math.floor(C.TREAD_COST_BASE * C.TREAD_COST_GROWTH ^ level)
+	local early = C.TREAD_COST_BASE * C.TREAD_COST_GROWTH ^ level
+	local V = math.clamp(level + 3, 1, C.NUM_LEVELS)
+	local income = C.LEVELS[V].IncomeBase * (12 * 8 ^ ((V - 1) / 49)) * (1.5 + 2.5 * (V - 1) / 49)
+	local minutes = C.TREAD_COST_FIRST_MINUTES * (C.TREAD_COST_LAST_MINUTES / C.TREAD_COST_FIRST_MINUTES) ^ (level / (C.TREAD_MAX_LEVEL - 1))
+	local cost = math.min(early, income * 60 * minutes)
+	-- two significant figures, so prices read cleanly
+	local e = 10 ^ (math.floor(math.log10(cost)) - 1)
+	return math.floor(cost / e + 0.5) * e
 end
 -- The exact amount the treadmill gives every second (rounded so the label and the pop-ups always match)
 function C.treadGain(level)
@@ -264,7 +286,13 @@ C.SLAP_HIT_DELAY = 0.12        -- the slap lands as the arm swings across (match
 C.STEAL_LEVEL_GRACE = 2         -- stolen games earn fully up to (deepest vault level you've stolen from + this)
 C.ESCAPE_CONFIRM_TIME = 0.6     -- seconds you must stay out of the vault before the chase ends
 C.FALL_RETURN_Y = -40           -- falling below this height returns any stolen games
-C.FRIEND_CASH_BOOST = 0.1       -- +10% cash for every friend in the same server
+-- Friends in the same server boost your cash: the first friend +10%, every friend after that +2.5% more.
+-- It follows who is here right now, so a friend leaving and rejoining can never stack it twice.
+C.FRIEND_FIRST_BOOST = 0.1
+C.FRIEND_EXTRA_BOOST = 0.025
+function C.friendBoost(n)
+	return n > 0 and C.FRIEND_FIRST_BOOST + C.FRIEND_EXTRA_BOOST * (n - 1) or 0
+end
 C.SLAP_RANGE = 8
 
 ------------------------------------------------------------------
@@ -376,6 +404,7 @@ C.BASE_RING_RADIUS = 297        -- distance from the entrance to the bases
 C.BASE_YARD = 36                -- open front yard between the walkway loop and each base (the treadmill stands here)
 C.LOOP_R = C.BASE_RING_RADIUS - C.PLOT_D / 2 - 7 - C.BASE_YARD -- radius of the walkway loop
 C.TREAD_OFFSET_X = 20           -- treadmill sits in the front yard, this far to the right of the base's centre
+C.TREAD_OFFSET_Z = 12           -- and this far out from the base's open front, leaving room to walk by
 C.BASE_ARC = 150
 C.FENCE_R = 450                 -- leaves room for the biggest bases
 C.ISLAND_R = 640
@@ -405,20 +434,27 @@ C.TRAILS = {
 	{Name = "Infinity",  Rarity = "Infinity",  Speed = 4.0,  Price = 1e12,      Colors = {rgb(255, 255, 255), rgb(255, 215, 80), rgb(255, 255, 255)}, Width = 4.2, Life = 1.8, Light = 1, Particles = rgb(255, 230, 120), Animated = true, Fx = "lightning"},
 }
 
-------------------------------------------------------------------
--- TREADMILL LOOKS (one per 7 upgrade levels)
-------------------------------------------------------------------
-C.TREAD_TIERS = {
-	{Name = "Basic",     Frame = rgb(110, 110, 120), FrameMat = M.Metal,         Accent = rgb(170, 170, 180), AccentMat = M.Metal},
-	{Name = "Sport",     Frame = rgb(40, 90, 200),   FrameMat = M.SmoothPlastic, Accent = rgb(80, 170, 255),  AccentMat = M.Neon},
-	{Name = "Pro",       Frame = rgb(25, 25, 30),    FrameMat = M.DiamondPlate,  Accent = rgb(60, 255, 120),  AccentMat = M.Neon, Light = true},
-	{Name = "Elite",     Frame = rgb(60, 20, 90),    FrameMat = M.SmoothPlastic, Accent = rgb(200, 80, 255),  AccentMat = M.Neon, Light = true, Panels = true},
-	{Name = "Champion",  Frame = rgb(255, 195, 40),  FrameMat = M.Foil,          Accent = rgb(255, 140, 30),  AccentMat = M.Neon, Light = true, Panels = true, Sparkles = true},
-	{Name = "Legendary", Frame = rgb(120, 240, 255), FrameMat = M.Glass,         Accent = rgb(255, 255, 255), AccentMat = M.Neon, Light = true, Panels = true, Sparkles = true, Arch = true},
-	{Name = "Mythic",    Frame = rgb(255, 70, 130),  FrameMat = M.SmoothPlastic, Accent = rgb(255, 210, 240), AccentMat = M.Neon, Light = true, Panels = true, Sparkles = true, Arch = true, Rings = true},
-	{Name = "Cosmic",    Frame = rgb(40, 20, 110),   FrameMat = M.Glass,         Accent = rgb(140, 255, 255), AccentMat = M.Neon, Light = true, Panels = true, Sparkles = true, Arch = true, Rings = true, Fins = true},
+-- TRAILS FOR ROBUX: trail number -> its Developer Product ID (Creator Dashboard > your experience > Monetization >
+-- Developer Products). 0 = not made yet: that trail has no Robux button. The button shows the product's real price
+-- from Roblox, so set the price there. Buying one works exactly like buying it with cash.
+C.TRAIL_PRODUCTS = {
+	[1] = 0,  -- Dust
+	[2] = 0,  -- Bubblegum
+	[3] = 0,  -- Ocean
+	[4] = 0,  -- Sunset
+	[5] = 0,  -- Toxic
+	[6] = 0,  -- Lava
+	[7] = 0,  -- Galaxy
+	[8] = 0,  -- Rainbow
+	[9] = 0,  -- Aurora
+	[10] = 0, -- Lightning
+	[11] = 0, -- Plasma
+	[12] = 0, -- Inferno
+	[13] = 0, -- Frost
+	[14] = 0, -- Void
+	[15] = 0, -- Celestial
+	[16] = 0, -- Infinity
 }
-C.TREAD_LEVELS_PER_TIER = 5     -- a new look every 5 levels (and a little extra every level)
 
 ------------------------------------------------------------------
 -- AREAS: 10 themes x 5 levels = 50 vault levels

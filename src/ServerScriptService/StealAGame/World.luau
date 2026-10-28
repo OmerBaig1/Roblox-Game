@@ -1088,40 +1088,109 @@ function World.build(C, Kit)
 			Kit.cylinder(spin, 27, 1, at(sx * 10.5, 15, 1.2), {Name = "SignPole", Color = WHITE, Material = M.Marble})
 			part(spin, {Name = "PoleTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2, 2, 2), CFrame = at(sx * 10.5, 29.2, 1.2), Color = Kit.GOLD, Material = M.Neon, CanCollide = false})
 		end
-		-- The wheel (its own model, so every player's game can spin it gently)
+		-- The wheel (its own model; every player's game turns it, and spins it to their own prize).
+		-- Each prize is a true pie slice: three thin triangles fanned from the centre. Neighbouring slices share their
+		-- edges exactly and lie on one plane in front of the face, so no two colours ever overlap or flicker.
+		spin.ModelStreamingMode = Enum.ModelStreamingMode.Persistent -- clients keep hold of these parts to turn them
 		local wheel = Instance.new("Model")
 		wheel.Name = "SpinWheel"
 		wheel.Parent = spin
 		local hub = at(0, 15, 0)
+		local n = #C.SPIN_REWARDS
+		local step = math.pi * 2 / n
 		wheel:SetAttribute("Axis", hub.Position)
 		wheel:SetAttribute("Facing", hub.LookVector)
+		wheel:SetAttribute("Slices", n)
 		part(wheel, {Name = "Rim", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.4, 22, 22), CFrame = hub * FACE, Color = Kit.GOLD, Material = M.Metal})
-		part(wheel, {Name = "Face", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.6, 20.2, 20.2), CFrame = hub * CFrame.new(0, 0, -0.05) * FACE, Color = WHITE})
-		local colors = {rgb(255, 80, 80), rgb(255, 170, 40), rgb(255, 230, 60), rgb(90, 220, 90), rgb(70, 170, 255), rgb(150, 90, 255), rgb(255, 120, 200), rgb(40, 210, 200)}
-		for i = 0, 7 do
-			local ang = i * math.pi / 4
-			local slice = part(wheel, {Name = "Slice", Size = Vector3.new(6.6, 8.8, 0.3), CFrame = hub * CFrame.Angles(0, 0, -ang) * CFrame.new(0, 5.2, -0.9), Color = colors[i + 1], CanCollide = false})
-			local reward = C.SPIN_REWARDS[i + 1]
-			if reward then
-				local t = Kit.surfaceText(slice, Enum.NormalId.Front, reward.Icon, WHITE, 20)
-				t.TextStrokeTransparency = 1
-				t.Size = UDim2.fromScale(0.7, 0.42)
-				t.Position = UDim2.fromScale(0.15, 0.08)
+		part(wheel, {Name = "Face", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.6, 20.6, 20.6), CFrame = hub * CFrame.new(0, 0, -0.05) * FACE, Color = rgb(34, 22, 66)})
+		-- a point on the wheel: r studs out at angle a (clockwise from the top), z in front of the face
+		local function onWheel(r, a, z)
+			return (hub * CFrame.Angles(0, 0, -a) * CFrame.new(0, r, z)).Position
+		end
+		-- a flat triangle from two wedges (the usual right-angle split)
+		local function triangle(parent, a, b, c, props)
+			local ab, ac, bc = b - a, c - a, c - b
+			local abd, acd, bcd = ab:Dot(ab), ac:Dot(ac), bc:Dot(bc)
+			if abd > acd and abd > bcd then
+				c, a = a, c
+			elseif acd > bcd and acd > abd then
+				a, b = b, a
 			end
-			part(wheel, {Name = "Spoke", Size = Vector3.new(0.35, 9.8, 0.4), CFrame = hub * CFrame.Angles(0, 0, -(ang + math.pi / 8)) * CFrame.new(0, 5, -0.95), Color = Kit.GOLD, Material = M.Metal, CanCollide = false})
+			ab, ac, bc = b - a, c - a, c - b
+			local right = ac:Cross(ab).Unit
+			local up = bc:Cross(right).Unit
+			local back = bc.Unit
+			local height = math.abs(ab:Dot(up))
+			local w1 = Kit.wedge(parent, props)
+			w1.Size = Vector3.new(0.2, height, math.abs(ab:Dot(back)))
+			w1.CFrame = CFrame.fromMatrix((a + b) / 2, right, up, back)
+			local w2 = Kit.wedge(parent, props)
+			w2.Size = Vector3.new(0.2, height, math.abs(ac:Dot(back)))
+			w2.CFrame = CFrame.fromMatrix((a + c) / 2, -right, up, -back)
 		end
-		for i = 0, 15 do
-			local ang = i * math.pi / 8 + math.pi / 16
-			part(wheel, {Name = "RimBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.8, 0.8, 0.8), CFrame = hub * CFrame.Angles(0, 0, ang) * CFrame.new(0, 10.4, -0.8), Color = i % 2 == 0 and WHITE or rgb(255, 230, 120), Material = M.Neon, CanCollide = false})
+		local R, Z = 9.9, -1.0
+		for i, reward in ipairs(C.SPIN_REWARDS) do
+			local mid = (i - 1) * step
+			local props = {Name = "Slice", Color = reward.Color, Material = M.SmoothPlastic, CanCollide = false, CastShadow = false}
+			for k = 0, 2 do
+				local a0 = mid - step / 2 + k * step / 3
+				triangle(wheel, onWheel(0, 0, Z), onWheel(R, a0, Z), onWheel(R, a0 + step / 3, Z), props)
+			end
+			for _, w in ipairs(wheel:GetChildren()) do
+				if w.Name == "Slice" and not w:GetAttribute("Slice") then
+					w:SetAttribute("Slice", i)
+				end
+			end
+			-- the prize's icon and name, reading outwards along the slice
+			local tag = part(wheel, {Name = "SliceLabel", Size = Vector3.new(3.4, 5.4, 0.05), CFrame = hub * CFrame.Angles(0, 0, -mid) * CFrame.new(0, 6.5, Z - 0.14), Transparency = 1, CanCollide = false, CanQuery = false, CastShadow = false})
+			tag:SetAttribute("Slice", i)
+			local sg = Instance.new("SurfaceGui")
+			sg.Face = Enum.NormalId.Front
+			sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+			sg.PixelsPerStud = 40
+			sg.LightInfluence = 0
+			sg.MaxDistance = 220
+			sg.Parent = tag
+			local icon = Instance.new("TextLabel")
+			icon.BackgroundTransparency = 1
+			icon.Size = UDim2.fromScale(1, 0.5)
+			icon.Position = UDim2.fromScale(0, 0.02)
+			icon.TextScaled = true
+			icon.Text = reward.Icon
+			icon.Parent = sg
+			local name = Instance.new("TextLabel")
+			name.BackgroundTransparency = 1
+			name.Size = UDim2.fromScale(0.9, 0.3)
+			name.Position = UDim2.fromScale(0.05, 0.54)
+			name.Font = Enum.Font.FredokaOne
+			name.TextScaled = true
+			name.TextWrapped = true
+			name.TextColor3 = WHITE
+			name.Text = string.upper(reward.Text)
+			name.Parent = sg
+			local ink = Instance.new("UIStroke")
+			ink.Color = reward.Color:Lerp(Color3.new(), 0.65)
+			ink.Thickness = 3
+			ink.Parent = name
+			-- gold divider on the edge between this slice and the next, with a peg the pointer clicks over
+			local edge = mid + step / 2
+			part(wheel, {Name = "Spoke", Size = Vector3.new(0.24, R - 1.6, 0.12), CFrame = hub * CFrame.Angles(0, 0, -edge) * CFrame.new(0, 1.6 + (R - 1.6) / 2, Z - 0.16), Color = Kit.GOLD, Material = M.Metal, CanCollide = false, CastShadow = false})
+			part(wheel, {Name = "RimBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.85, 0.85, 0.85), CFrame = hub * CFrame.Angles(0, 0, -edge) * CFrame.new(0, 10.65, -0.8), Color = WHITE, Material = M.Neon, CanCollide = false})
+			part(wheel, {Name = "RimBulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.6, 0.6, 0.6), CFrame = hub * CFrame.Angles(0, 0, -mid) * CFrame.new(0, 10.65, -0.8), Color = rgb(255, 225, 120), Material = M.Neon, CanCollide = false})
 		end
-		local hubCap = part(wheel, {Name = "Hub", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 4, 4), CFrame = hub * CFrame.new(0, 0, -1.2) * FACE, Color = Kit.GOLD, Material = M.Metal, CanCollide = false})
+		local hubCap = part(wheel, {Name = "Hub", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 3.6, 3.6), CFrame = hub * CFrame.new(0, 0, Z - 0.3) * FACE, Color = Kit.GOLD, Material = M.Metal, CanCollide = false})
+		part(wheel, {Name = "HubDot", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 1.6, 1.6), CFrame = hub * CFrame.new(0, 0, Z - 0.6) * FACE, Color = rgb(255, 245, 200), Material = M.Neon, CanCollide = false})
 		local glow = Instance.new("PointLight")
 		glow.Color = rgb(255, 230, 150)
 		glow.Range = 20
 		glow.Brightness = 1.2
 		glow.Parent = hubCap
-		-- Red pointer at the top (does not spin)
+		-- Red pointer at the top (does not spin; each player's game flicks it as the pegs pass)
 		Kit.wedge(spin, {Name = "Pointer", Size = Vector3.new(0.8, 2.6, 2.4), CFrame = hub * CFrame.new(0, 12, -1.3) * CFrame.Angles(math.pi / 2, 0, 0), Color = rgb(230, 40, 50)})
+		-- SPIN board on the front of the stage: like the Top 10 board, it's always there and each player's game draws
+		-- it (the SPIN button, the free-spin countdown, extra spins and buying one)
+		part(spin, {Name = "SpinBoardStand", Size = Vector3.new(9.6, 2.6, 1.6), CFrame = at(0, 3.3, -9.2), Color = rgb(70, 45, 140)})
+		part(spin, {Name = "SpinBoard", Size = Vector3.new(10.4, 4, 0.5), CFrame = at(0, 4.9, -9.4) * CFrame.Angles(math.rad(32), 0, 0), Color = rgb(30, 20, 60)})
 		-- Sign across the top
 		local sign = part(spin, {Name = "Sign", Size = Vector3.new(22, 4.4, 0.8), CFrame = at(0, 29.2, 1.2), Color = rgb(40, 25, 90)})
 		local st = Kit.surfaceText(sign, Enum.NormalId.Front, "LUCKY SPIN", Kit.GOLD, 30)
@@ -1144,7 +1213,7 @@ function World.build(C, Kit)
 		sparkle.Parent = hubCap
 		-- Walk up to the front of the stage to spin
 		local anchor = part(spin, {Name = "SpinAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 4, -12), Transparency = 1, CanCollide = false})
-		W.SpinPrompt = Kit.prompt(anchor, "Spin the Wheel", "Lucky Spin", 0, 16)
+		W.SpinPrompt = Kit.prompt(anchor, "Spin!", "Lucky Spin", 0, 16)
 	end
 
 	------------------------------------------------------------------
@@ -1218,7 +1287,20 @@ function World.build(C, Kit)
 		end
 		-- The label floats on its own part, so swapping the character keeps it
 		local labelPart = part(inviteModel, {Name = "InviteLabel", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(pos + Vector3.new(0, standH + 1.5, 0)), Transparency = 1, CanCollide = false, CanQuery = false})
-		Kit.billboard(labelPart, 520, 130, 2.5, '<font color="#ffd23c">\u{1F465} INVITE FRIEND \u{1F465}</font>\n<font color="#78ff5a">Each Friend = 10% Cash Boost</font>', 160)
+		Kit.billboard(labelPart, 520, 130, 2.5, '<font color="#ffd23c">\u{1F465} INVITE FRIEND \u{1F465}</font>\n<font color="#78ff5a">1st Friend +10% Cash</font>', 160)
+		-- the extra-friend bonus, smaller, under the main line
+		local board = labelPart:FindFirstChildWhichIsA("BillboardGui")
+		local main = board and board:FindFirstChildWhichIsA("TextLabel")
+		if main then
+			main.Size = UDim2.fromScale(1, 0.74)
+			local sub = main:Clone()
+			sub.Name = "Sub"
+			sub.Text = "+2.5% each additional friend"
+			sub.TextColor3 = Color3.fromRGB(200, 255, 190)
+			sub.Position = UDim2.fromScale(0.15, 0.76)
+			sub.Size = UDim2.fromScale(0.7, 0.22)
+			sub.Parent = board
+		end
 		-- Cash bills that orbit the character (spun by each player's game)
 		local orbit = Instance.new("Model")
 		orbit.Name = "InviteCash"
