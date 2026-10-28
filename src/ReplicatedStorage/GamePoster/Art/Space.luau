@@ -209,33 +209,51 @@ A["Steal a Brainrut"] = function(k, rng)
 	k.text(0.22, 0.2, 0.3, 0.12, "STEAL!", GOLD, {stroke = true})
 end
 
--- parody of Devil May Cry 5: a smug white-haired demon hunter, a huge sword and hellfire
+-- Devil May Nubs V: the hero seen from behind in a gothic street at dusk, wings of red and teal feathers flaring out
+-- behind him under a blood-pink moon, his sword across his back
 A["Devil May Nubs V"] = function(k, rng)
-	k.sky(rgb(25, 0, 8), rgb(150, 15, 25))
-	k.text(0.5, 0.46, 0.95, 0.9, "V", rgb(255, 40, 50), {t = 0.35, font = Enum.Font.GothamBlack})
-	-- hellfire along the bottom
-	k.ellipse(0.5, 1.02, 1.5, 0.45, rgb(255, 80, 20), {t = 0.25})
-	for i = 0, 6 do
-		local x = 0.04 + i * 0.155
-		k.ellipse(x, 0.96, 0.13, 0.3 + rng:NextNumber(0, 0.18), rgb(255, 130, 30), {t = 0.1})
-		k.ellipse(x, 0.99, 0.07, 0.16, rgb(255, 230, 120))
+	k.sky(rgb(55, 28, 78), rgb(150, 70, 120))
+	k.circle(0.5, 0.32, 0.6, rgb(255, 90, 120), {t = 0.6})
+	k.circle(0.5, 0.32, 0.35, rgb(255, 160, 180), {t = 0.5})
+	-- gothic buildings closing in on both sides, a few windows lit
+	for _, s in ipairs({-1, 1}) do
+		local x = 0.5 + s * 0.43
+		k.rect(x, 0.6, 0.22, 0.9, rgb(28, 22, 40))
+		k.rect(x - s * 0.07, 0.12, 0.05, 0.14, rgb(28, 22, 40))
+		for r = 0, 4 do
+			for c = 0, 1 do
+				k.rect(x - 0.045 + c * 0.09, 0.3 + r * 0.13, 0.035, 0.07, rgb(255, 170, 120), {t = 0.4 + (r + c) % 2 * 0.35, round = 0.3})
+			end
+		end
 	end
-	-- the big sword over his shoulder
-	k.rect(0.66, 0.42, 0.045, 0.8, rgb(205, 210, 220), {rot = 28})
-	k.rect(0.79, 0.1, 0.16, 0.035, rgb(60, 55, 65), {rot = 28})
-	k.circle(0.82, 0.05, 0.05, rgb(200, 30, 40))
-	-- long red coat
-	k.ellipse(0.5, 0.8, 0.4, 0.5, rgb(185, 20, 30))
-	k.rect(0.5, 0.8, 0.06, 0.45, rgb(35, 10, 12))
-	-- face, swept white hair and a smirk
-	k.circle(0.5, 0.46, 0.2, rgb(255, 215, 185))
-	k.ellipse(0.5, 0.37, 0.28, 0.14, rgb(240, 240, 250))
-	k.ellipse(0.4, 0.45, 0.07, 0.17, rgb(240, 240, 250), {rot = 10})
-	k.ellipse(0.6, 0.45, 0.07, 0.17, rgb(240, 240, 250), {rot = -10})
-	k.rect(0.46, 0.46, 0.04, 0.016, B, {rot = 8})
-	k.rect(0.54, 0.46, 0.04, 0.016, B, {rot = -8})
-	k.rect(0.52, 0.53, 0.05, 0.012, rgb(120, 40, 40), {rot = -12})
-	k.text(0.5, 0.09, 0.86, 0.13, "DEVIL MAY NUBS", GOLD, {stroke = true})
+	-- the wings fan out from his shoulders, big enough to fill the sky: long teal feathers outside, red ones inside.
+	-- Each feather is a long rounded blade rotated about the shoulder (angles from straight up).
+	local px, py = 0.5, 0.6
+	local function feather(s, angle, len, wide, top, bottom)
+		local r = math.rad(angle)
+		local cx = px + s * math.sin(r) * len / 2 * 0.775
+		local cy = py - math.cos(r) * len / 2
+		k.rect(cx, cy, wide, len, W, {rot = s * angle, round = 0.5, grad = {top, bottom, 90}})
+	end
+	for _, s in ipairs({-1, 1}) do
+		for i = 0, 6 do
+			feather(s, 22 + i * 12, 0.78 - i * 0.04, 0.05, rgb(140, 255, 240), rgb(15, 110, 125))
+		end
+		for i = 0, 4 do
+			feather(s, 14 + i * 13, 0.5 - i * 0.03, 0.045, rgb(255, 95, 80), rgb(130, 0, 20))
+		end
+	end
+	k.rect(0.5, 0.96, 1.04, 0.1, rgb(25, 18, 30))
+	-- the hero from behind: the sword across his back, a long coat split at the tails, white hair
+	k.rect(0.5, 0.6, 0.018, 0.62, rgb(210, 215, 230), {rot = 18})
+	k.rect(0.59, 0.33, 0.09, 0.025, rgb(60, 55, 70), {rot = 18})
+	k.rect(0.45, 0.9, 0.09, 0.3, rgb(30, 24, 30), {rot = 6})
+	k.rect(0.55, 0.9, 0.09, 0.3, rgb(30, 24, 30), {rot = -6})
+	k.rect(0.5, 0.72, 0.19, 0.38, rgb(40, 32, 42), {round = 0.25})
+	k.rect(0.5, 0.55, 0.22, 0.08, rgb(46, 37, 48), {round = 0.5})
+	k.rect(0.5, 0.68, 0.03, 0.05, rgb(225, 30, 55), {rot = 45})
+	k.circle(0.5, 0.47, 0.09, rgb(236, 236, 246))
+	k.ellipse(0.5, 0.52, 0.06, 0.04, rgb(200, 200, 215))
 end
 
 return A

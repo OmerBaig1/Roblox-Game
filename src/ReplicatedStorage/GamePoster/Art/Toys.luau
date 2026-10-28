@@ -112,21 +112,69 @@ A["Blocko Galaxy Wars"] = function(k, rng)
 	k.rect(0.56, 0.38, 0.2, 0.012, rgb(255, 80, 80), {rot = 35})
 end
 
-A["Fortnut"] = function(k)
-	k.sky(rgb(110, 190, 255), rgb(220, 240, 255))
-	k.ellipse(0.5, 1, 1.2, 0.28, rgb(110, 190, 90))
-	local nut = rgb(200, 150, 90)
-	for row = 0, 3 do
-		for col = 0, 5 - row % 2 do
-			k.ellipse(0.2 + col * 0.12 + (row % 2) * 0.06, 0.82 - row * 0.1, 0.11, 0.09, nut:Lerp(B, (col + row) % 2 * 0.15))
+-- Fortnut: a squad of three posing on a heap of crates and giant nuts as a purple storm rolls in, the storm's hands
+-- reaching up out of the ground
+local function squadHero(k, x, y, s, outfit, skin, hair, gear)
+	local dark = outfit:Lerp(B, 0.35)
+	k.rect(x - 0.03 * s, y + 0.17 * s, 0.04 * s, 0.16 * s, dark, {round = 0.3})
+	k.rect(x + 0.03 * s, y + 0.17 * s, 0.04 * s, 0.16 * s, dark, {round = 0.3})
+	k.rect(x, y + 0.03 * s, 0.11 * s, 0.17 * s, outfit, {round = 0.25})
+	k.rect(x, y + 0.09 * s, 0.11 * s, 0.025 * s, rgb(90, 60, 30))
+	k.rect(x - 0.07 * s, y + 0.02 * s, 0.03 * s, 0.13 * s, skin, {round = 0.5, rot = 12})
+	if gear == "raised" then
+		-- the giant nutcracker held up high
+		k.rect(x + 0.07 * s, y - 0.07 * s, 0.03 * s, 0.14 * s, skin, {round = 0.5, rot = -20})
+		k.rect(x + 0.1 * s, y - 0.2 * s, 0.022 * s, 0.22 * s, rgb(110, 110, 122), {rot = 15})
+		k.rect(x + 0.13 * s, y - 0.31 * s, 0.09 * s, 0.07 * s, W, {round = 0.2, rot = 15, grad = {rgb(255, 225, 110), rgb(200, 140, 30), 90}})
+	elseif gear == "hammer" then
+		k.rect(x + 0.07 * s, y + 0.02 * s, 0.03 * s, 0.13 * s, skin, {round = 0.5, rot = -12})
+		k.rect(x + 0.1 * s, y + 0.02 * s, 0.02 * s, 0.26 * s, rgb(90, 70, 50), {rot = -30})
+		k.rect(x + 0.16 * s, y - 0.1 * s, 0.1 * s, 0.07 * s, W, {round = 0.2, rot = -30, grad = {rgb(215, 225, 240), rgb(110, 120, 140), 90}})
+	else
+		-- a slingshot drawn back
+		k.rect(x + 0.07 * s, y - 0.02 * s, 0.03 * s, 0.12 * s, skin, {round = 0.5, rot = -60})
+		k.rect(x + 0.13 * s, y - 0.06 * s, 0.012 * s, 0.08 * s, rgb(110, 70, 40), {rot = 20})
+		k.rect(x + 0.155 * s, y - 0.06 * s, 0.012 * s, 0.08 * s, rgb(110, 70, 40), {rot = -20})
+	end
+	k.circle(x, y - 0.11 * s, 0.09 * s, skin)
+	k.ellipse(x, y - 0.16 * s, 0.1 * s, 0.06 * s, hair)
+	k.rect(x - 0.018 * s, y - 0.11 * s, 0.012 * s, 0.014 * s, B)
+	k.rect(x + 0.018 * s, y - 0.11 * s, 0.012 * s, 0.014 * s, B)
+	k.rect(x, y - 0.075 * s, 0.03 * s, 0.008 * s, rgb(120, 50, 50))
+end
+A["Fortnut"] = function(k, rng)
+	k.sky(rgb(70, 130, 230), rgb(195, 228, 255))
+	-- the storm rolling in over the top
+	for i = 0, 6 do
+		k.ellipse(i * 0.18, 0.03 + (i % 2) * 0.05, 0.3, 0.22, rgb(115, 55, 175))
+	end
+	for i = 0, 5 do
+		k.ellipse(0.09 + i * 0.18, 0.13, 0.22, 0.12, rgb(170, 100, 220), {t = 0.2})
+	end
+	k.circle(0.5, 0.42, 0.55, rgb(255, 245, 200), {t = 0.55})
+	-- the heap: crates with plank lines, and giant nuts
+	local crate = rgb(170, 110, 60)
+	for i, c in ipairs({{0.18, 0.88, 0.26}, {0.46, 0.86, 0.3}, {0.74, 0.89, 0.28}, {0.32, 0.72, 0.22}, {0.62, 0.73, 0.22}}) do
+		local h = c[3] / 0.775 * 0.8
+		k.rect(c[1], c[2], c[3], h, crate:Lerp(B, i % 2 * 0.12))
+		k.rect(c[1], c[2], c[3], 0.015, crate:Lerp(B, 0.4))
+		k.rect(c[1], c[2], 0.012, h, crate:Lerp(B, 0.4))
+	end
+	for _, n in ipairs({{0.06, 0.74}, {0.92, 0.7}, {0.88, 0.95}}) do
+		k.ellipse(n[1], n[2], 0.12, 0.16, rgb(205, 150, 85))
+		k.ellipse(n[1], n[2] - 0.07, 0.13, 0.06, rgb(120, 80, 45))
+	end
+	-- the squad, the leader in front and above
+	squadHero(k, 0.24, 0.47, 0.85, rgb(70, 92, 145), rgb(150, 100, 70), rgb(30, 25, 30), "sling")
+	squadHero(k, 0.76, 0.48, 0.85, rgb(135, 70, 60), rgb(255, 215, 180), rgb(250, 210, 90), "hammer")
+	squadHero(k, 0.5, 0.4, 1, rgb(60, 112, 72), rgb(230, 175, 130), rgb(120, 70, 35), "raised")
+	-- the storm's hands reaching up out of the ground
+	for _, x in ipairs({0.08, 0.3, 0.62, 0.95}) do
+		k.rect(x, 0.97, 0.04, 0.1, rgb(150, 170, 130))
+		for f = -1, 1 do
+			k.rect(x + f * 0.014, 0.91, 0.01, 0.04, rgb(150, 170, 130))
 		end
 	end
-	for _, x in ipairs({0.2, 0.44, 0.68}) do
-		k.ellipse(x, 0.43, 0.1, 0.1, nut)
-	end
-	k.rect(0.5, 0.65, 0.12, 0.16, rgb(90, 55, 30), {round = 0.5})
-	k.rect(0.44, 0.22, 0.012, 0.22, rgb(110, 75, 45))
-	k.rect(0.5, 0.15, 0.1, 0.07, rgb(230, 50, 50))
 end
 
 A["Bayblade Burst"] = function(k)
@@ -181,20 +229,57 @@ A["Katamari Dramacy"] = function(k, rng)
 	k.ellipse(0.68, 0.23, 0.06, 0.04, B)
 end
 
+-- Five Nights at Teddy's: a worn old animatronic bear leaning out of the dark of a night-shift office, one glassy
+-- eye catching the light; a desk fan and a child's crayon drawing on the wall behind
 A["Five Nights at Teddy's"] = function(k, rng)
-	k.sky(rgb(15, 15, 40), rgb(40, 30, 80))
-	k.stars(10, rng, 0.35)
-	for i = 0, 4 do
-		P.moon(k, 0.15 + i * 0.17, 0.12, 0.08, rgb(20, 18, 48))
+	k.sky(rgb(14, 11, 14), rgb(30, 22, 22))
+	-- the office: a crayon drawing pinned to the wall, the desk, the fan
+	k.rect(0.17, 0.3, 0.2, 0.24, rgb(150, 140, 120), {rot = -4, t = 0.3})
+	k.circle(0.13, 0.27, 0.05, rgb(70, 110, 200), {t = 0.35})
+	k.rect(0.2, 0.32, 0.04, 0.08, rgb(200, 60, 60), {t = 0.35})
+	k.rect(0.17, 0.39, 0.14, 0.012, rgb(90, 150, 70), {t = 0.35})
+	k.rect(0.17, 0.19, 0.012, 0.03, rgb(140, 140, 145))
+	k.rect(0.3, 0.86, 0.75, 0.05, rgb(42, 35, 30))
+	k.rect(0.3, 0.95, 0.75, 0.14, rgb(22, 18, 16))
+	local fx, fy = 0.17, 0.6
+	k.rect(fx, 0.76, 0.025, 0.14, rgb(45, 45, 50))
+	k.ellipse(fx, 0.84, 0.12, 0.03, rgb(35, 35, 40))
+	k.circle(fx, fy, 0.2, rgb(62, 62, 68))
+	k.circle(fx, fy, 0.175, rgb(20, 18, 20))
+	for i = 0, 2 do
+		k.ellipse(fx, fy, 0.05, 0.22, rgb(72, 72, 78), {rot = i * 60, t = 0.2})
 	end
-	k.rect(0.5, 0.88, 1.04, 0.3, rgb(60, 80, 150))
-	k.ellipse(0.5, 0.74, 0.8, 0.12, rgb(80, 110, 190))
-	teddy(k, 0.45, 0.58, 1, rgb(190, 130, 80))
-	k.rect(0.45, 0.82, 0.8, 0.3, rgb(80, 110, 190))
-	k.ellipse(0.85, 0.46, 0.24, 0.34, rgb(255, 240, 150), {rot = -30, t = 0.15})
-	k.ellipse(0.82, 0.5, 0.14, 0.2, rgb(255, 252, 220), {rot = -30})
-	k.rect(0.73, 0.68, 0.06, 0.12, rgb(80, 80, 90), {rot = -30})
-	k.circle(0.76, 0.62, 0.06, rgb(255, 250, 200))
+	k.circle(fx, fy, 0.04, rgb(85, 85, 90))
+	-- the bear: an enormous head leaning in from the right, lit from the left and lost in shadow on the right
+	local fur = rgb(112, 86, 58)
+	k.circle(0.85, 0.14, 0.24, fur:Lerp(B, 0.4))
+	k.circle(0.85, 0.14, 0.13, rgb(70, 50, 35))
+	k.circle(0.7, 0.62, 0.9, W, {grad = {fur:Lerp(W, 0.12), fur:Lerp(B, 0.75), 0}})
+	-- a battered top hat
+	k.rect(0.76, 0.1, 0.46, 0.05, rgb(14, 12, 14))
+	k.rect(0.78, 0.04, 0.3, 0.1, rgb(14, 12, 14))
+	k.rect(0.78, 0.075, 0.3, 0.02, rgb(60, 20, 25))
+	-- brow, the socket and the eye
+	k.ellipse(0.6, 0.35, 0.34, 0.1, fur:Lerp(B, 0.5), {rot = -8})
+	k.ellipse(0.6, 0.47, 0.25, 0.22, rgb(8, 6, 8))
+	k.circle(0.59, 0.47, 0.13, W, {grad = {rgb(240, 244, 252), rgb(140, 155, 185), 90}})
+	k.circle(0.6, 0.47, 0.065, rgb(105, 125, 170))
+	k.circle(0.6, 0.47, 0.035, rgb(8, 8, 12))
+	k.circle(0.575, 0.445, 0.02, W)
+	-- muzzle and nose, the jaw hanging open a crack over old teeth
+	k.ellipse(0.52, 0.76, 0.42, 0.3, W, {grad = {rgb(152, 122, 90), rgb(68, 50, 34), 0}})
+	k.ellipse(0.47, 0.66, 0.12, 0.07, rgb(14, 10, 10))
+	k.circle(0.45, 0.65, 0.018, rgb(85, 75, 75))
+	k.rect(0.55, 0.92, 0.36, 0.06, rgb(10, 6, 6))
+	for i = 0, 3 do
+		k.rect(0.42 + i * 0.07, 0.9, 0.04, 0.04, rgb(215, 205, 180))
+	end
+	-- wear and tear in the fur
+	for _ = 1, 9 do
+		k.circle(rng:NextNumber(0.45, 0.95), rng:NextNumber(0.3, 0.95), rng:NextNumber(0.01, 0.025), rgb(40, 28, 20), {t = 0.4})
+	end
+	-- the dark swallowing the far side of his face
+	k.ellipse(1.05, 0.6, 0.6, 1.3, B, {t = 0.25})
 end
 
 A["Plushmon Go"] = function(k)

@@ -109,6 +109,9 @@ C.GAMEPASSES = {
 }
 -- Spin the Lucky Wheel again without waiting a day
 C.SPIN_PRODUCT = {Key = "Spin", Id = 0, Name = "Extra Spin", Price = 25}
+-- Reset your base lock to full (C.LOCK_TIME). Click the lock timer on your HUD to buy it.
+-- Create a 9 Robux developer product named "Reset Base Lock" and paste its ID here; 0 = not on sale yet.
+C.LOCK_RESET_PRODUCT = {Key = "LockReset", Id = 0, Name = "Reset Base Lock", Price = 9}
 -- Collect every playtime reward right now
 C.PLAYTIME_SKIP_PRODUCT = {Key = "SkipPlaytime", Id = 0, Name = "Skip All", Price = 150}
 -- Install a game instantly: 9 Robux for every 30 minutes it still needs.

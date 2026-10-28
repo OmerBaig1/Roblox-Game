@@ -117,7 +117,7 @@ do
 		daily[i] = {Kind = d.Kind, Text = d.Text, Rarity = d.Rarity, Amount = d.Amount}
 	end
 	publish("DailyData", daily)
-	publish("RobuxShopData", {Passes = C.GAMEPASSES, Products = C.PRODUCTS, Spin = C.SPIN_PRODUCT, SkipPlaytime = C.PLAYTIME_SKIP_PRODUCT})
+	publish("RobuxShopData", {Passes = C.GAMEPASSES, Products = C.PRODUCTS, Spin = C.SPIN_PRODUCT, SkipPlaytime = C.PLAYTIME_SKIP_PRODUCT, LockReset = C.LOCK_RESET_PRODUCT})
 	local spin = {}
 	for i, r in ipairs(C.SPIN_REWARDS) do
 		spin[i] = {Text = r.Text, Color = r.Color:ToHex(), Icon = r.Icon, Kind = r.Kind, Weight = r.Weight}
@@ -370,111 +370,20 @@ local function addAura(item, rec)
 	end
 end
 
-local HIDDEN_COLOR = Color3.fromRGB(150, 150, 165)
-
--- Every game looks like a boxed console game: front cover, back cover and spines
-local CASE_SIZE = Vector3.new(3.6, 4.6, 0.6)
-
-local function caseColor(rec, hidden)
-	return hidden and Color3.fromRGB(60, 60, 72) or rec.Color:Lerp(Color3.new(0, 0, 0), 0.5)
-end
-
-local function guiFrame(parent, props)
-	local f = Instance.new("Frame")
-	f.BorderSizePixel = 0
-	for k, v in pairs(props) do
-		f[k] = v
-	end
-	f.Parent = parent
-	return f
-end
-
-local function guiText(parent, props)
-	local t = Instance.new("TextLabel")
-	t.BackgroundTransparency = 1
-	t.Font = Enum.Font.FredokaOne
-	t.TextScaled = true
-	t.TextColor3 = Color3.new(1, 1, 1)
-	for k, v in pairs(props) do
-		t[k] = v
-	end
-	t.Parent = parent
-	return t
-end
-
-local function caseGui(item, face)
-	local sg = Instance.new("SurfaceGui")
-	sg.Name = "Poster"
-	sg.Face = face
-	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	sg.PixelsPerStud = 50
-	sg.LightInfluence = 0.25
-	sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	sg.Parent = item
-	return sg
-end
-
+-- Every game is a boxed release for one of six made-up consoles: CasePackaging builds the whole case (its plastic,
+-- the front cover, its own back cover and the spines) and decides its size
+local CasePackaging = require(script.CasePackaging)
 local function addPosters(item, rec, hidden)
-	for _, child in ipairs(item:GetChildren()) do
-		if child:IsA("SurfaceGui") and child.Name == "Poster" then
-			child:Destroy()
-		end
-	end
-	local info = hidden and {Name = rec.Name, Rarity = "???", Color = HIDDEN_COLOR} or rec
-	local band = hidden and Color3.fromRGB(120, 120, 135) or rec.Color
-	local plastic = caseColor(rec, hidden)
-
-	-- FRONT COVER: plastic rim, a coloured banner with the console logo, then the art
-	local front = caseGui(item, Enum.NormalId.Front)
-	guiFrame(front, {Size = UDim2.fromScale(1, 1), BackgroundColor3 = plastic})
-	local top = guiFrame(front, {Position = UDim2.fromScale(0.05, 0.025), Size = UDim2.fromScale(0.9, 0.1), BackgroundColor3 = band})
-	-- dark lettering on light banners so it's always readable
-	local light = (band.R * 0.3 + band.G * 0.59 + band.B * 0.11) > 0.62
-	guiText(top, {Position = UDim2.fromScale(0.04, 0.12), Size = UDim2.fromScale(0.62, 0.76), Text = "GAME BOX", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBlack, TextColor3 = light and Color3.fromRGB(30, 30, 40) or Color3.new(1, 1, 1)})
-	guiText(top, {Position = UDim2.fromScale(0.68, 0.12), Size = UDim2.fromScale(0.28, 0.76), Text = "\u{1F3AE}"})
-	local art = guiFrame(front, {Position = UDim2.fromScale(0.05, 0.135), Size = UDim2.fromScale(0.9, 0.84), BackgroundColor3 = Color3.new(0, 0, 0), ClipsDescendants = true})
-	GamePoster.Create(info).Parent = art
-	-- age rating sticker
-	local rating = guiFrame(front, {Position = UDim2.fromScale(0.07, 0.86), Size = UDim2.fromScale(0.13, 0.1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 20})
-	guiText(rating, {Size = UDim2.fromScale(1, 1), Text = "E", TextColor3 = Color3.new(0, 0, 0), Font = Enum.Font.GothamBlack, ZIndex = 21})
-
-	-- BACK COVER: screenshot, blurb lines, barcode
-	local back = caseGui(item, Enum.NormalId.Back)
-	guiFrame(back, {Size = UDim2.fromScale(1, 1), BackgroundColor3 = plastic})
-	local sheet = guiFrame(back, {Position = UDim2.fromScale(0.05, 0.025), Size = UDim2.fromScale(0.9, 0.95), BackgroundColor3 = Color3.fromRGB(30, 30, 42)})
-	guiFrame(sheet, {Size = UDim2.fromScale(1, 0.1), BackgroundColor3 = band})
-	guiText(sheet, {Position = UDim2.fromScale(0.05, 0.015), Size = UDim2.fromScale(0.9, 0.07), Text = string.upper(rec.Name), Font = Enum.Font.GothamBlack})
-	local shot = guiFrame(sheet, {Position = UDim2.fromScale(0.08, 0.14), Size = UDim2.fromScale(0.84, 0.42), BackgroundColor3 = Color3.new(0, 0, 0), ClipsDescendants = true})
-	local shotArt = GamePoster.Create(info)
-	shotArt.Size = UDim2.fromScale(1, 1.35)
-	shotArt.Position = UDim2.fromScale(0, -0.15)
-	shotArt.Parent = shot
-	for i = 0, 3 do
-		guiFrame(sheet, {Position = UDim2.fromScale(0.08, 0.62 + i * 0.06), Size = UDim2.fromScale(i == 3 and 0.5 or 0.84, 0.025), BackgroundColor3 = Color3.fromRGB(150, 150, 170)})
-	end
-	local code = guiFrame(sheet, {Position = UDim2.fromScale(0.58, 0.85), Size = UDim2.fromScale(0.34, 0.11), BackgroundColor3 = Color3.new(1, 1, 1)})
-	for i = 0, 9 do
-		guiFrame(code, {Position = UDim2.fromScale(0.06 + i * 0.09, 0.1), Size = UDim2.fromScale((i % 3 == 0) and 0.05 or 0.025, 0.8), BackgroundColor3 = Color3.new(0, 0, 0)})
-	end
-	local backRating = guiFrame(sheet, {Position = UDim2.fromScale(0.08, 0.85), Size = UDim2.fromScale(0.14, 0.11), BackgroundColor3 = Color3.new(1, 1, 1)})
-	guiText(backRating, {Size = UDim2.fromScale(1, 1), Text = "E", TextColor3 = Color3.new(0, 0, 0), Font = Enum.Font.GothamBlack})
-
-	-- SPINES: the title printed up the side
-	for _, face in ipairs({Enum.NormalId.Left, Enum.NormalId.Right}) do
-		local spine = caseGui(item, face)
-		guiFrame(spine, {Size = UDim2.fromScale(1, 1), BackgroundColor3 = plastic})
-		guiFrame(spine, {Position = UDim2.fromScale(0, 0.02), Size = UDim2.fromScale(1, 0.1), BackgroundColor3 = band})
-		guiText(spine, {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.56), Size = UDim2.fromOffset(190, 24), Rotation = 90, Text = rec.Name})
-	end
+	CasePackaging.dress(item, rec, hidden)
 end
 
 local function createItem(rec, hidden)
 	local item = Instance.new("Part")
 	item.Name = rec.Name
-	item.Size = CASE_SIZE
+	item.Size = CasePackaging.size(rec.Name)
 	item.Anchored = true
 	item.CanCollide = false
-	item.Color = caseColor(rec, hidden)
+	item.Color = CasePackaging.plastic(rec.Name)
 	item.Material = Enum.Material.SmoothPlastic
 	item.Reflectance = 0.08
 	item:SetAttribute("Hidden", hidden == true)
@@ -504,7 +413,7 @@ end
 local function revealItem(item, rec)
 	if not item:GetAttribute("Hidden") then return end
 	item:SetAttribute("Hidden", false)
-	item.Color = caseColor(rec, false)
+	item.Color = CasePackaging.plastic(rec.Name)
 	addPosters(item, rec, false)
 	local light = item:FindFirstChildOfClass("PointLight")
 	if light then
@@ -718,6 +627,61 @@ local function takeFromSlot(plot, slot)
 end
 
 ------------------------------------------------------------------
+-- BASE LOCK TIMER. It counts down by the server clock: refreshLock charges the time since it last ran (unless the
+-- lock was paused meanwhile), so a pause or resume between the 1s ticks is exact and pausing never adds or loses time.
+-- It pauses while the owner is being chased, or while they carry a game stolen from the Vault - from the moment the
+-- server hands it to them (grabFromVault) until they bring it home (finalizeStolen) or lose it (dropStolen: caught,
+-- slapped, died, dropped, left, fell). Walking into the Vault alone doesn't pause it. Every one of those calls
+-- refreshLock straight away; the 1s tick catches the chases.
+-- The owner's attributes drive their countdown: LockLeft (seconds left at LockStamp), LockStamp (server time) and
+-- LockPaused ("theft", "chase" or false); their screen counts down from those by itself.
+------------------------------------------------------------------
+local function lockPauseReason(plot)
+	local owner = plot.Owner
+	if not owner or plot.LockLeft <= 0 then
+		return false
+	end
+	for _, e in ipairs(heldList(owner)) do
+		if e.Kind == "vault" then
+			return "theft"
+		end
+	end
+	for _, g in pairs(guards) do
+		if g.Target == owner then
+			return "chase"
+		end
+	end
+	return false
+end
+
+local function refreshLock(plot)
+	local now = workspace:GetServerTimeNow()
+	if plot.LockLeft > 0 and not plot.LockPaused then
+		plot.LockLeft = math.max(0, plot.LockLeft - (now - (plot.LockStamp or now)))
+	end
+	plot.LockStamp = now
+	plot.LockPaused = lockPauseReason(plot)
+	if plot.Owner then
+		plot.Owner:SetAttribute("LockLeft", plot.LockLeft)
+		plot.Owner:SetAttribute("LockStamp", now)
+		plot.Owner:SetAttribute("LockPaused", plot.LockPaused)
+	end
+end
+local function refreshLockFor(player)
+	local plot = player and playerPlots[player]
+	if plot then
+		refreshLock(plot)
+	end
+end
+-- a lock starting (the pad) or reset to full (the 9 Robux product); a theft pause carries on
+local function startLock(plot)
+	plot.LockLeft = C.LOCK_TIME
+	plot.LockStamp = nil
+	plot.LockPaused = false
+	refreshLock(plot)
+end
+
+------------------------------------------------------------------
 -- THE VAULT
 ------------------------------------------------------------------
 local grabFromVault
@@ -747,6 +711,7 @@ grabFromVault = function(player, spot)
 	spot.Item, spot.Data, spot.Carried = nil, nil, true
 	table.insert(heldList(player), {Item = item, Data = rec, Kind = "vault", Spot = spot})
 	syncHeld(player)
+	refreshLockFor(player) -- a Vault theft pauses your base lock until you're home
 	notify(player, "You grabbed " .. rec.Name .. "! Get it home!", GOLD)
 end
 
@@ -787,6 +752,7 @@ local function dropStolen(player, onlyLevel)
 	end
 	if dropped then
 		syncHeld(player)
+		refreshLockFor(player)
 	end
 	return dropped
 end
@@ -820,6 +786,7 @@ local function finalizeStolen(player, entry)
 		end
 	end
 	entry.Kind = "own"
+	refreshLockFor(player) -- home with it: the lock runs again
 end
 
 ------------------------------------------------------------------
@@ -1127,8 +1094,7 @@ for i, cf in ipairs(world.PlotCFrames) do
 		local player = Players:GetPlayerFromCharacter(hit.Parent)
 		-- relocking is instant: the unlock button is up on the wall, out of reach of the pad
 		if player and player == plot.Owner and plot.LockLeft <= 0 then
-			plot.LockLeft = C.LOCK_TIME
-			player:SetAttribute("LockLeft", plot.LockLeft) -- the countdown on their screen (kept up by the 1s tick)
+			startLock(plot)
 			plot.Barrier.Transparency = 0.45
 			if plot.UnlockPrompt then
 				plot.UnlockPrompt.MaxActivationDistance = 8
@@ -1142,7 +1108,7 @@ for i, cf in ipairs(world.PlotCFrames) do
 		plot.UnlockPrompt.Triggered:Connect(function(player)
 			if player ~= plot.Owner or plot.LockLeft <= 0 then return end
 			plot.LockLeft = 0
-			player:SetAttribute("LockLeft", 0)
+			refreshLock(plot)
 			plot.UnlockPrompt.MaxActivationDistance = 0
 			for _, b in ipairs(Base.barriers(plot)) do
 				b.Transparency = 1
@@ -1994,6 +1960,29 @@ local function grantTrailReceipt(player, info, idx)
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 
+-- 9 Robux: the buyer's own base lock goes back to full. The receipt is kept in their save like a trail's, so a
+-- receipt Roblox sends again resets nothing twice. No base yet (still joining) = Roblox asks again later.
+-- During a Vault theft the lock is reset but stays paused until they're home with the game.
+local function grantLockReset(player, info)
+	local plot = playerPlots[player]
+	local data = playerData[player]
+	if not plot or not loadedData[player] then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	data.Receipts = data.Receipts or {}
+	if not table.find(data.Receipts, info.PurchaseId) then
+		table.insert(data.Receipts, info.PurchaseId)
+		while #data.Receipts > 100 do
+			table.remove(data.Receipts, 1)
+		end
+		startLock(plot)
+		player:SetAttribute("LockResetAt", plot.LockStamp)
+		notify(player, "Base lock reset to " .. Kit.fmtTime(C.LOCK_TIME) .. "!" .. (plot.LockPaused == "theft" and " It stays paused until you're home with your game." or ""), GREEN)
+		soundEvent:FireClient(player, "lock")
+	end
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
 MarketplaceService.ProcessReceipt = function(info)
 	local player = Players:GetPlayerByUserId(info.PlayerId)
 	if not player or not playerData[player] then
@@ -2014,6 +2003,9 @@ MarketplaceService.ProcessReceipt = function(info)
 		player:SetAttribute("ExtraSpins", data.ExtraSpins)
 		notify(player, "Extra spin added! Go spin the Lucky Wheel!", GOLD)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+	if C.LOCK_RESET_PRODUCT.Id ~= 0 and info.ProductId == C.LOCK_RESET_PRODUCT.Id then
+		return grantLockReset(player, info)
 	end
 	if C.PLAYTIME_SKIP_PRODUCT.Id ~= 0 and info.ProductId == C.PLAYTIME_SKIP_PRODUCT.Id then
 		data.PlayStart = os.time() - 3601
@@ -2427,6 +2419,7 @@ dropEvent.OnServerEvent:Connect(function(player)
 		table.remove(list, #list)
 		returnEntry(e)
 		syncHeld(player)
+		refreshLockFor(player)
 		notify(player, "You dropped " .. e.Data.Name .. ". It went back where it came from.", BLUE)
 		return
 	end
@@ -2540,6 +2533,56 @@ end
 if RunService:IsStudio() then
 	local dev = ServerStorage:FindFirstChild("DevProcessReceipt") or Instance.new("BindableFunction")
 	dev.Name = "DevProcessReceipt"
+	-- and a made-up lock reset receipt (the product has no real ID in Studio)
+	local devLock = ServerStorage:FindFirstChild("DevLockReset") or Instance.new("BindableFunction")
+	devLock.Name = "DevLockReset"
+	devLock.OnInvoke = function(info)
+		local player = Players:GetPlayerByUserId(info.PlayerId)
+		return player and grantLockReset(player, info)
+	end
+	devLock.Parent = ServerStorage
+	-- and the real theft / lock steps, for the lock timer tests
+	local devLockTest = ServerStorage:FindFirstChild("DevLockTest") or Instance.new("BindableFunction")
+	devLockTest.Name = "DevLockTest"
+	devLockTest.OnInvoke = function(player, action)
+		local plot = playerPlots[player]
+		if action == "grab" then
+			for _, spot in ipairs(spots) do
+				if spot.Item then
+					grabFromVault(player, spot)
+					break
+				end
+			end
+		elseif action == "drop" then
+			dropStolen(player)
+		elseif action == "lock" then
+			startLock(plot)
+		elseif action == "unlock" then
+			plot.LockLeft = 0
+			refreshLock(plot)
+		elseif action == "tick" then
+			refreshLock(plot)
+		elseif action == "slots" then
+			local names = {}
+			for i, slot in pairs(plot.Slots) do
+				names[i] = slot.Data and slot.Data.Name or false
+			end
+			return names
+		elseif type(action) == "number" then
+			-- shortcut: Studio-only cleanup for a test theft's game; not a real sell
+			local slot = plot.Slots[action]
+			if slot and slot.Data then
+				local item = takeFromSlot(plot, slot)
+				item:Destroy()
+			end
+		end
+		local vault = 0
+		for _, e in ipairs(heldList(player)) do
+			if e.Kind == "vault" then vault += 1 end
+		end
+		return {LockLeft = plot.LockLeft, Paused = plot.LockPaused, Vault = vault, Held = #heldList(player)}
+	end
+	devLockTest.Parent = ServerStorage
 	dev.OnInvoke = function(info, trailIdx)
 		local player = Players:GetPlayerByUserId(info.PlayerId)
 		return player and grantTrailReceipt(player, info, trailIdx)
@@ -2574,6 +2617,7 @@ local function claimPlot(player)
 			plot.LockLeft = 0
 			plot.SignLabel.Text = player.DisplayName .. "'s Base"
 			playerPlots[player] = plot
+			refreshLock(plot)
 			local floors, cases, tier = C.baseLayout(playerData[player].Upgrades)
 			Base.setTier(plot, tier)
 			Base.setLayout(plot, floors, cases, caseCallbacks)
@@ -3187,30 +3231,10 @@ task.spawn(function()
 				libraryEvent:FireClient(owner, {Installing = installing, Installed = installed, IncomePerSecond = income})
 			end
 
-			-- Lock timer: paused while the owner is being chased or is inside the Game Vault (checked by where they
-			-- are every second, so dying or teleporting out can't leave it stuck). The owner's LockLeft/LockPaused
-			-- attributes drive the countdown on their screen.
-			local paused = false
+			-- Lock timer (see refreshLock): settled every second, which also picks up chases starting and ending
+			refreshLock(plot)
 			if plot.LockLeft > 0 then
-				if plot.Owner then
-					for _, g in pairs(guards) do
-						if g.Target == plot.Owner then
-							paused = true
-						end
-					end
-					local ownerRoot = getRoot(plot.Owner)
-					if ownerRoot and inVaultArea(ownerRoot.Position) then
-						paused = true
-					end
-				end
-				if not paused then
-					plot.LockLeft -= 1
-				end
-				plot.LockLabel.Text = (paused and '<font color="#ffd23c">LOCKED (PAUSED)</font>\n' or "LOCKED\n") .. Kit.fmtTime(plot.LockLeft)
-			end
-			if plot.Owner then
-				plot.Owner:SetAttribute("LockLeft", plot.LockLeft)
-				plot.Owner:SetAttribute("LockPaused", paused)
+				plot.LockLabel.Text = (plot.LockPaused and '<font color="#ffd23c">LOCKED (PAUSED)</font>\n' or "LOCKED\n") .. Kit.fmtTime(math.ceil(plot.LockLeft))
 			end
 			-- Lock walls: solid for everyone except the owner (the owner's game makes them passable)
 			local locked = plot.LockLeft > 0
@@ -3295,7 +3319,8 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Stolen games drop into free cases as soon as you're inside your base
+	-- Bringing a stolen game into your own base is what steals it: it's yours from that moment (the owner's alarm stops),
+	-- and it drops into a free case if you have one, or stays in your hands until you make room
 	local clock = os.clock()
 	for player, list in pairs(held) do
 		if #list > 0 and stolenCount(player) > 0 then
@@ -3319,10 +3344,13 @@ RunService.Heartbeat:Connect(function(dt)
 							finalizeStolen(player, e)
 							placeInSlot(myPlot, slot, e.Item, e.Data)
 							changed = true
-						elseif clock - (fullWarned[player] or 0) > 5 then
-							-- keep holding it as a stolen game (it never installs on your head); it drops in once a case is free
-							fullWarned[player] = clock
-							notify(player, "All your cases are full! Sell a game, or drop the one you're holding (G).", GOLD)
+						else
+							finalizeStolen(player, e) -- now an ordinary game in your hands: place it in a case when one is free
+							changed = true
+							if clock - (fullWarned[player] or 0) > 5 then
+								fullWarned[player] = clock
+								notify(player, "It's yours! Your cases are full, so you're holding it. Sell a game to make room.", GOLD)
+							end
 						end
 					end
 				end

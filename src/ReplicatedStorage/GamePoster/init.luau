@@ -224,8 +224,8 @@ local function makeKit(art)
 	return kit
 end
 
--- Hand-made posters, loaded from every ModuleScript inside GamePoster.Art
-local CUSTOM = {}
+-- Hand-made posters, loaded from every ModuleScript inside GamePoster.Art (the module's name is the poster family)
+local CUSTOM, FAMILY = {}, {}
 local artFolder = script:FindFirstChild("Art")
 if artFolder then
 	for _, mod in ipairs(artFolder:GetChildren()) do
@@ -234,6 +234,7 @@ if artFolder then
 			if ok and type(result) == "table" then
 				for name, draw in pairs(result) do
 					CUSTOM[name] = draw
+					FAMILY[name] = mod.Name
 				end
 			else
 				warn("[GamePoster] Couldn't load " .. mod.Name .. ": " .. tostring(result))
@@ -242,16 +243,78 @@ if artFolder then
 	end
 end
 
+------------------------------------------------------------------
+-- THE COVER: every poster family has a title treatment like a real game logo (its own font, a two-tone fill and
+-- a dark outline) and a colour grade for the light over its art. A few games borrow another family's look.
+------------------------------------------------------------------
+local rgb, F = Color3.fromRGB, Enum.Font
+local WHITE, BLACK = Color3.new(1, 1, 1), Color3.new(0, 0, 0)
+local THEMES = {
+	Haunted = {Font = F.Creepster, Fill = {rgb(255, 80, 70), rgb(150, 10, 20)}, Edge = rgb(25, 0, 0), Grade = rgb(25, 45, 25)},
+	Arcade = {Font = F.LuckiestGuy, Fill = {rgb(255, 245, 110), rgb(255, 140, 30)}, Edge = rgb(70, 20, 0), Grade = rgb(60, 20, 90)},
+	Toys = {Font = F.LuckiestGuy, Fill = {WHITE, rgb(175, 220, 255)}, Edge = rgb(40, 20, 90), Grade = rgb(35, 20, 85)},
+	Cyber = {Font = F.Michroma, Fill = {rgb(130, 255, 255), rgb(255, 70, 210)}, Edge = rgb(10, 0, 30), Grade = rgb(60, 0, 90)},
+	Dragon = {Font = F.GrenzeGotisch, Fill = {rgb(255, 238, 170), rgb(205, 135, 35)}, Edge = rgb(40, 15, 0), Grade = rgb(70, 25, 10)},
+	Ninja = {Font = F.Bangers, Fill = {WHITE, rgb(255, 125, 115)}, Edge = rgb(60, 0, 10), Grade = rgb(80, 10, 25)},
+	Robots = {Font = F.Sarpanch, Fill = {rgb(240, 245, 255), rgb(130, 150, 178)}, Edge = rgb(12, 18, 30), Grade = rgb(15, 35, 70)},
+	Space = {Font = F.Oswald, Fill = {WHITE, rgb(140, 195, 255)}, Edge = rgb(5, 10, 40), Grade = rgb(10, 20, 75)},
+	Pirate = {Font = F.Fondamento, Fill = {rgb(255, 232, 175), rgb(212, 150, 60)}, Edge = rgb(40, 20, 5), Grade = rgb(8, 40, 60)},
+	Bargain = {Font = F.FredokaOne, Fill = {WHITE, rgb(255, 222, 125)}, Edge = rgb(50, 30, 10), Grade = rgb(45, 30, 15)},
+	-- chrome gothic letters with a blood-red edge
+	Chrome = {Font = F.GrenzeGotisch, Fill = {WHITE, rgb(150, 160, 178)}, Edge = rgb(130, 0, 15), Grade = rgb(50, 10, 40)},
+}
+local THEME_FOR = {["Five Nights at Teddy's"] = "Haunted", ["Devil May Nubs V"] = "Chrome"}
+local PLAIN = {Font = F.FredokaOne, Fill = {WHITE, rgb(220, 225, 240)}, Edge = rgb(10, 10, 20), Grade = rgb(20, 20, 40)}
+
+-- 1 = Common ... the order in the game's RarityData; rarer covers get a metal frame (5+) and a foil sheen (6+)
+local tierOf
+local function rarityTier(name)
+	if not tierOf then
+		tierOf = {}
+		local v = game:GetService("ReplicatedStorage"):FindFirstChild("RarityData")
+		local ok, list = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(v.Value)
+		end)
+		for i, r in ipairs(ok and list or {}) do
+			tierOf[r.Name] = i
+		end
+	end
+	return tierOf[name] or 1
+end
+
+-- a full-size layer whose transparency follows a gradient (the light and shadow passes)
+local function layer(parent, color, z, rotation, keys)
+	local f = box(parent, {Name = "Light", Size = UDim2.fromScale(1, 1), BackgroundColor3 = color})
+	f.ZIndex = z
+	local g = Instance.new("UIGradient")
+	g.Rotation = rotation
+	local seq = {}
+	for _, k in ipairs(keys) do
+		table.insert(seq, NumberSequenceKeypoint.new(k[1], k[2]))
+	end
+	g.Transparency = NumberSequence.new(seq)
+	g.Parent = f
+	return f
+end
+
+-- for the case packaging (CasePackaging draws its back-cover screenshots with the same kit)
+GamePoster.makeKit = makeKit
+function GamePoster.family(name)
+	return FAMILY[name]
+end
+
 function GamePoster.Create(info)
 	local seed = hash(info.Name)
 	local rng = Random.new(seed)
 	local hue = (seed % 360) / 360
 	local c1 = Color3.fromHSV(hue, 0.65, 0.85)
 	local c2 = Color3.fromHSV((hue + rng:NextNumber(0.12, 0.45)) % 1, 0.55, 1)
-	local rarityColor = info.Color or Color3.new(1, 1, 1)
+	local rarityColor = info.Color or WHITE
+	local theme = THEMES[THEME_FOR[info.Name] or FAMILY[info.Name]] or PLAIN
+	local tier = rarityTier(info.Rarity)
 
-	local root = box(nil, {Name = "Poster", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ClipsDescendants = true})
-	gradient(root, Color3.fromHSV(hue, 0.7, 0.25), Color3.fromHSV((hue + 0.08) % 1, 0.6, 0.7), 90)
+	local root = box(nil, {Name = "Poster", Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, ClipsDescendants = true})
+	gradient(root, rgb(10, 10, 16), theme.Grade:Lerp(BLACK, 0.4), 90)
 
 	-- Picture
 	local art = box(root, {Name = "Art", Position = UDim2.fromScale(0, 0.09), Size = UDim2.fromScale(1, 0.62), BackgroundTransparency = 1, ClipsDescendants = true})
@@ -268,27 +331,59 @@ function GamePoster.Create(info)
 	end
 	if not drewCustom then
 		for _ = 1, 10 do
-			circle(art, {Position = UDim2.fromScale(rng:NextNumber(), rng:NextNumber(0, 0.6)), Size = UDim2.fromScale(0.02, 0.02), SizeConstraint = Enum.SizeConstraint.RelativeXX, BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = rng:NextNumber(0, 0.5)})
+			circle(art, {Position = UDim2.fromScale(rng:NextNumber(), rng:NextNumber(0, 0.6)), Size = UDim2.fromScale(0.02, 0.02), SizeConstraint = Enum.SizeConstraint.RelativeXX, BackgroundColor3 = WHITE, BackgroundTransparency = rng:NextNumber(0, 0.5)})
 		end
 		ART[STYLES[seed % #STYLES + 1]](art, rng, c1, c2)
 	end
 
-	-- Top bar with the rarity
-	local top = box(root, {Name = "TopBar", Size = UDim2.fromScale(1, 0.09), BackgroundColor3 = Color3.fromRGB(15, 15, 20)})
-	top.ZIndex = 5
-	local r = text(top, {Size = UDim2.fromScale(0.9, 0.8), Position = UDim2.fromScale(0.05, 0.1), Text = string.upper(info.Rarity or ""), TextColor3 = rarityColor, TextStrokeTransparency = 1})
-	r.ZIndex = 6
+	-- Light over the picture, like a lit cover instead of flat colour: a soft key light from the top left, the
+	-- family's colour grade rising out of the bottom, darker edges, and the bottom melting into the title
+	layer(art, WHITE, 900, 45, {{0, 0.82}, {0.3, 1}, {1, 1}})
+	layer(art, theme.Grade, 901, 90, {{0, 1}, {0.45, 1}, {1, 0.35}})
+	layer(art, BLACK, 902, 0, {{0, 0.45}, {0.16, 1}, {0.84, 1}, {1, 0.45}})
+	layer(art, BLACK, 903, 90, {{0, 0.55}, {0.14, 1}, {0.78, 1}, {1, 0.05}})
+	if tier >= 6 then
+		-- foil: a bright band across the picture
+		layer(art, WHITE, 904, 35, {{0, 1}, {0.44, 1}, {0.5, 0.72}, {0.56, 1}, {1, 1}})
+	end
 
-	-- Title
-	local titleBack = box(root, {Name = "TitleBar", Position = UDim2.fromScale(0, 0.71), Size = UDim2.fromScale(1, 0.24), BackgroundColor3 = Color3.fromRGB(12, 12, 18)})
+	-- Top bar with the rarity
+	local top = box(root, {Name = "TopBar", Size = UDim2.fromScale(1, 0.09), BackgroundColor3 = WHITE})
+	top.ZIndex = 5
+	gradient(top, rgb(22, 22, 30), rgb(8, 8, 12), 90)
+	local r = text(top, {Size = UDim2.fromScale(0.9, 0.72), Position = UDim2.fromScale(0.05, 0.14), Text = string.upper(info.Rarity or ""), TextColor3 = tier >= 5 and WHITE or rarityColor, TextStrokeTransparency = 1, Font = Enum.Font.GothamBlack})
+	r.ZIndex = 6
+	if tier >= 5 then
+		gradient(r, rarityColor:Lerp(WHITE, 0.55), rarityColor, 90)
+	end
+	local line = box(top, {Position = UDim2.fromScale(0, 0.92), Size = UDim2.fromScale(1, 0.08), BackgroundColor3 = rarityColor})
+	line.ZIndex = 6
+
+	-- Title: the family's logo look
+	local titleBack = box(root, {Name = "TitleBar", Position = UDim2.fromScale(0, 0.71), Size = UDim2.fromScale(1, 0.24), BackgroundColor3 = WHITE})
 	titleBack.ZIndex = 5
-	gradient(titleBack, Color3.fromRGB(12, 12, 18), Color3.fromHSV(hue, 0.5, 0.2), 90)
-	local title = text(titleBack, {Size = UDim2.fromScale(0.92, 0.84), Position = UDim2.fromScale(0.04, 0.08), Text = info.Name, TextColor3 = c2:Lerp(Color3.new(1, 1, 1), 0.6), TextStrokeColor3 = Color3.new(0, 0, 0)})
+	gradient(titleBack, rgb(4, 4, 8), theme.Grade:Lerp(BLACK, 0.55), 90)
+	local title = text(titleBack, {Size = UDim2.fromScale(0.92, 0.82), Position = UDim2.fromScale(0.04, 0.08), Text = info.Name, Font = theme.Font,
+		TextColor3 = WHITE, TextStrokeColor3 = theme.Edge, TextStrokeTransparency = 0})
 	title.ZIndex = 6
+	gradient(title, theme.Fill[1], theme.Fill[2], 90)
 
 	-- Rarity stripe at the bottom
-	local stripe = box(root, {Name = "Stripe", Position = UDim2.fromScale(0, 0.95), Size = UDim2.fromScale(1, 0.05), BackgroundColor3 = rarityColor})
+	local stripe = box(root, {Name = "Stripe", Position = UDim2.fromScale(0, 0.95), Size = UDim2.fromScale(1, 0.05), BackgroundColor3 = WHITE})
 	stripe.ZIndex = 5
+	gradient(stripe, rarityColor:Lerp(WHITE, tier >= 5 and 0.45 or 0.15), rarityColor, 0)
+
+	-- A frame in the rarity's colour round the whole cover (polished metal from Legendary up). Sized by scale so
+	-- it reads the same on a display case and in the Index.
+	for _, e in ipairs({{0, 0, 1, 0.012}, {0, 0.988, 1, 0.012}, {0, 0, 0.016, 1}, {0.984, 0, 0.016, 1}}) do
+		local edge = box(root, {Name = "Frame", Position = UDim2.fromScale(e[1], e[2]), Size = UDim2.fromScale(e[3], e[4]), BackgroundColor3 = WHITE})
+		edge.ZIndex = 7
+		if tier >= 5 then
+			gradient(edge, rarityColor:Lerp(WHITE, 0.7), rarityColor:Lerp(BLACK, 0.2), 45)
+		else
+			edge.BackgroundColor3 = rarityColor:Lerp(BLACK, 0.25)
+		end
+	end
 
 	return root
 end
