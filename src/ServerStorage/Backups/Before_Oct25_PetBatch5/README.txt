@@ -1,1 +1,0 @@
-PetAnimator was edited before this backup was taken (batch 5 additions: Stepped, Roll Side/Flip, Wobble Steer/SweepPos, Ignite Parts/Pose, Shatter). The last copy without them is Before_Oct25_PetBatch4 plus batch-4 additions.

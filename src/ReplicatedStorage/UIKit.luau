@@ -377,6 +377,187 @@ function UI.panel(gui, opts)
 	return panel
 end
 
+------------------------------------------------------------------
+-- SCREEN SIZE. The HUD is drawn in pixels for a 2560x1440 screen. Rather than shrinking pieces one by one, each HUD
+-- ScreenGui is laid out on a 1440p design canvas that is scaled to the real screen, so every size, gap, position and
+-- animation keeps its proportions: about 0.75 at 1080p, 1 at 1440p. Small screens get a floor so text stays
+-- readable (a lower one on touch screens, which have less room). Windows (MenuKit) fit themselves to the space left
+-- and cap their size by the same scale, so they cover the same share of a 1080p screen as of a 1440p one.
+------------------------------------------------------------------
+local UserInputService = game:GetService("UserInputService")
+function UI.hudScale()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(2560, 1440)
+	if vp.X < 50 or vp.Y < 50 then
+		vp = Vector2.new(2560, 1440) -- a minimised window reports a 1x1 viewport
+	end
+	local touch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	return math.clamp(math.min(vp.Y / 1440, vp.X / 2400), touch and 0.5 or 0.62, 1.15)
+end
+
+local canvases = {}
+-- lays gui out on the design canvas: its children move into a frame "Canvas" (window holders that fit themselves,
+-- marked SelfFit, stay put). Returns the canvas frame.
+function UI.canvas(gui)
+	if canvases[gui] then
+		return canvases[gui]
+	end
+	local root = new("Frame", {Name = "Canvas", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = gui})
+	local scale = new("UIScale", {Parent = root})
+	canvases[gui] = root
+	local function fit()
+		local k = UI.hudScale()
+		scale.Scale = k
+		root.Size = UDim2.fromScale(1 / k, 1 / k)
+	end
+	fit()
+	local function watch()
+		local cam = workspace.CurrentCamera
+		if cam then
+			cam:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+		end
+		fit()
+	end
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watch)
+	watch()
+	local function adopt(child)
+		if child == root or not child:IsA("GuiObject") or child:GetAttribute("SelfFit") then
+			return
+		end
+		task.defer(function()
+			if child.Parent == gui and not child:GetAttribute("SelfFit") then
+				child.Parent = root
+			end
+		end)
+	end
+	for _, c in ipairs(gui:GetChildren()) do
+		adopt(c)
+	end
+	gui.ChildAdded:Connect(adopt)
+	return root
+end
+-- the design-canvas scale an object is drawn at (1 outside any canvas)
+function UI.canvasScale(obj)
+	local root = obj and obj:FindFirstAncestor("Canvas")
+	local sc = root and root:FindFirstChildOfClass("UIScale")
+	return sc and sc.Scale or 1
+end
+-- FindFirstChild anywhere below, waiting up to timeout seconds (things may move into a canvas)
+function UI.findDeep(parent, name, timeout)
+	local t0 = os.clock()
+	repeat
+		local found = parent:FindFirstChild(name, true)
+		if found then
+			return found
+		end
+		task.wait(0.05)
+	until os.clock() - t0 > (timeout or 10)
+	return nil
+end
+
+-- A small red notification dot (with an optional count) that sits INSIDE its parent's corner, so it never clips,
+-- never covers the label it belongs to and never takes the click
+function UI.dot(parent, props)
+	props = props or {}
+	local size = props.Size or 14
+	local d = new("Frame", {Name = "Dot", AnchorPoint = Vector2.new(1, 0), Position = props.Position or UDim2.new(1, -5, 0, 5), Size = UDim2.fromOffset(size, size),
+		AutomaticSize = props.Count and Enum.AutomaticSize.X or Enum.AutomaticSize.None, BackgroundColor3 = Color3.fromRGB(255, 64, 82), Visible = false, Active = false, ZIndex = props.ZIndex or 20, Parent = parent},
+		{UI.corner(1, true), new("UIStroke", {Color = Color3.new(1, 1, 1), Thickness = props.Ring or 2, Transparency = 0.05})})
+	new("UIGradient", {Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 130, 140), Color3.fromRGB(225, 30, 55)), Parent = d})
+	local text
+	if props.Count then
+		new("UIPadding", {PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = d})
+		text = new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X, Text = "", TextColor3 = Color3.new(1, 1, 1),
+			FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), TextSize = math.floor(size * 0.72), ZIndex = (props.ZIndex or 20) + 1, Parent = d})
+	end
+	local api = {Frame = d}
+	function api.set(n)
+		local on = (tonumber(n) or (n and 1 or 0)) > 0
+		d.Visible = on
+		if text then
+			text.Text = on and tostring(n) or ""
+		end
+	end
+	return api
+end
+
+------------------------------------------------------------------
+-- HUD TILE: the side buttons (Pets, Downloads, Installed). A square tile with real depth - a soft shadow, a darker
+-- base the face sinks into when pressed, a face lit from above with a thin light rim, a soft disc behind the icon and
+-- a crisp label - instead of a flat block with an outline. States: hover lifts it, press sinks it, active (its window
+-- is open) lights the rim and a bar under the label, disabled greys it, and a red count badge sits inside its corner.
+-- props: Name, Parent, Size (px), Position, AnchorPoint, LayoutOrder, Color, Text. Returns button, refs
+-- {Icon = a square frame to draw the icon in, Text, Badge, BadgeText, setActive(on), setEnabled(on)}.
+------------------------------------------------------------------
+function UI.tileButton(props)
+	local size = props.Size or 112
+	local color = props.Color or UI.BLUE
+	local r = math.floor(size * 0.2)
+	local btn = new("TextButton", {Name = props.Name, Size = UDim2.fromOffset(size, size), Position = props.Position or UDim2.new(), AnchorPoint = props.AnchorPoint or Vector2.zero,
+		LayoutOrder = props.LayoutOrder or 0, BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = props.Parent})
+	local pop = new("UIScale", {Parent = btn})
+	new("Frame", {Name = "Shadow", Position = UDim2.fromOffset(0, 7), Size = UDim2.fromScale(1, 1), BackgroundColor3 = UI.BLACK, BackgroundTransparency = 0.72, ZIndex = 1, Parent = btn}, {UI.corner(r)})
+	local base = new("Frame", {Name = "Base", Position = UDim2.fromOffset(0, 5), Size = UDim2.fromScale(1, 1), BackgroundColor3 = color:Lerp(UI.BLACK, 0.55), ZIndex = 2, Parent = btn}, {UI.corner(r)})
+	local face = new("Frame", {Name = "Face", Size = UDim2.fromScale(1, 1), BackgroundColor3 = UI.WHITE, ZIndex = 3, Parent = btn}, {UI.corner(r)})
+	local grad = new("UIGradient", {Rotation = 90, Parent = face})
+	local rim = new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = face})
+	-- light across the top of the face
+	new("Frame", {Position = UDim2.fromOffset(5, 4), Size = UDim2.new(1, -10, 0.42, 0), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.82, ZIndex = 4, Parent = face},
+		{UI.corner(r - 4), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(0.1, 1)})})
+	-- a soft disc the icon sits on
+	new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.6, 0.6), BackgroundColor3 = color:Lerp(UI.BLACK, 0.45), BackgroundTransparency = 0.55, ZIndex = 4, Parent = face},
+		{UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 1, Transparency = 0.8})})
+	local icon = new("Frame", {Name = "Icon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.46, 0.46), BackgroundTransparency = 1, ZIndex = 5, Parent = face},
+		{new("UIAspectRatioConstraint", {AspectRatio = 1})})
+	local text = new("TextLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.83), Size = UDim2.new(1, -10, 0, math.floor(size * 0.16)), BackgroundTransparency = 1,
+		Text = props.Text or "", TextColor3 = UI.WHITE, TextScaled = true, FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 5, Parent = face},
+		{new("UIStroke", {Color = color:Lerp(UI.BLACK, 0.65), Thickness = 1.4, Transparency = 0.15})})
+	local bar = new("Frame", {AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -4), Size = UDim2.fromOffset(0, 4), BackgroundColor3 = UI.WHITE, ZIndex = 5, Parent = face}, {UI.corner(1, true)})
+	local badge = new("Frame", {Name = "Badge", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 6), Size = UDim2.fromOffset(26, 26), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = Color3.fromRGB(255, 64, 82), Visible = false, ZIndex = 8, Parent = face},
+		{UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 2}), new("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}),
+		new("UIGradient", {Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 130, 140), Color3.fromRGB(225, 30, 55))})})
+	local badgeText = new("TextLabel", {Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, Text = "", TextColor3 = UI.WHITE, TextSize = 17,
+		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 9, Parent = badge})
+	local st = {Hover = false, Down = false, Active = false, Enabled = true}
+	local function paint()
+		local c = st.Enabled and color or color:Lerp(Color3.fromRGB(120, 120, 130), 0.75)
+		if st.Hover and st.Enabled then
+			c = c:Lerp(UI.WHITE, 0.08)
+		end
+		grad.Color = ColorSequence.new(c:Lerp(UI.WHITE, 0.2), c:Lerp(UI.BLACK, 0.12))
+		base.BackgroundColor3 = c:Lerp(UI.BLACK, 0.55)
+		rim.Transparency = st.Active and 0.05 or 0.6
+		rim.Thickness = st.Active and 2.5 or 1.5
+		text.TextTransparency = st.Enabled and 0 or 0.35
+		local lift = st.Down and 4 or (st.Hover and -2 or 0)
+		TweenService:Create(face, TweenInfo.new(st.Down and 0.06 or 0.16, Enum.EasingStyle.Quad), {Position = UDim2.fromOffset(0, lift)}):Play()
+		TweenService:Create(bar, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.fromOffset(st.Active and 26 or 0, 4)}):Play()
+		TweenService:Create(pop, TweenInfo.new(st.Down and 0.06 or 0.2, Enum.EasingStyle.Quad), {Scale = st.Down and 0.97 or 1}):Play()
+	end
+	paint()
+	btn.MouseEnter:Connect(function() st.Hover = true paint() end)
+	btn.MouseLeave:Connect(function() st.Hover = false st.Down = false paint() end)
+	btn.MouseButton1Down:Connect(function() if st.Enabled then st.Down = true paint() end end)
+	btn.MouseButton1Up:Connect(function() st.Down = false paint() end)
+	btn.Activated:Connect(function()
+		st.Down = false
+		paint()
+		lastButtonSfx = os.clock() -- the window it opens plays the sound
+	end)
+	local refs = {Icon = icon, Text = text, Badge = badge, BadgeText = badgeText, Face = face}
+	function refs.setActive(on)
+		st.Active = on
+		paint()
+	end
+	function refs.setEnabled(on)
+		st.Enabled = on
+		btn.Active = on
+		paint()
+	end
+	return btn, refs
+end
+
 -- did a menu button just make its own sound? (then the window it opens doesn't add a second one)
 function UI.justClicked()
 	return os.clock() - lastButtonSfx < 0.15

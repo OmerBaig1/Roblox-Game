@@ -296,13 +296,9 @@ function Pets.init(d)
 	deps = d
 	deps.OpenEvent = d.Kit.event("OpenHatchery")
 	d.Kit.func("Pets").OnServerInvoke = onRequest
-	-- the Hatchery stands beside the Trail Shop (on the side away from the vault), facing the same way
-	local shop = d.lobby and d.lobby:FindFirstChild("TrailShop")
-	local floor = shop and shop:FindFirstChild("Floor")
-	if floor then
-		-- the shop's floor sits 0.5 up and 2 back from the shop's own origin
-		local shopCF = floor.CFrame * CFrame.new(0, -0.5, -2)
-		buildHatchery(d.lobby, shopCF * CFrame.new(-42, 0, 4))
+	-- the Hatchery stands beside the Game Vault; World picks the spot (World.HatcheryCF)
+	if d.lobby and d.cf then
+		buildHatchery(d.lobby, d.cf)
 	end
 end
 

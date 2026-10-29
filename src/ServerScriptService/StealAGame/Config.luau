@@ -13,7 +13,7 @@ local M = Enum.Material
 -- GENERAL
 ------------------------------------------------------------------
 C.START_CASH = 0
-C.ROTATE_TIME = 420             -- every 7 minutes every vault level gets 3 brand-new random games
+C.ROTATE_TIME = 420             -- every 7 minutes every vault level gets brand-new random games on its pedestals
 C.LOCK_TIME = 90                -- seconds a base stays locked (the timer pauses while you're being chased)
 C.SELL_MULTIPLIER = 30          -- an installed game sells for (income per second x this)
 C.UNINSTALLED_SELL = 10         -- a game that isn't installed yet sells for (its level's base income x this)
@@ -23,22 +23,20 @@ C.SAVE_STORE = "StealAGameSave_v3" -- v3: full reset Oct 28 (v2 still holds ever
 C.AUTOSAVE_TIME = 60
 
 ------------------------------------------------------------------
--- GAME INCOME (random for every copy, hidden until installed)
+-- GAME INCOME (fixed bands: hidden until installed, but never random)
 ------------------------------------------------------------------
--- Level N's typical income = INCOME_BASE x INCOME_GROWTH^(N-1) per second.
--- Each copy rolls a random multiplier around that (lower and upper bounds below).
-C.INCOME_BASE = 1.8
-C.INCOME_GROWTH = 1.33
-C.INCOME_SPREAD = 0.4
-C.INCOME_MIN_MULT = 0.5
-C.INCOME_MAX_MULT = 2.5
-
--- Spawn chances (%) for the 3 games in a level (varies per level)
-C.CHANCE_SETS = {
-	{55, 33, 12}, {50, 35, 15}, {58, 30, 12}, {45, 40, 15},
-	{52, 33, 15}, {48, 38, 14}, {60, 30, 10}, {47, 41, 12},
-}
-C.EXTRA_CHANCE = 5              -- spawn chance of a level's bonus 4th game (only the last level has one)
+-- A copy earns INCOME_BASE x AREA_STEP^(area-1) x SUB_STEP^(sublevel-1) x RARITY_MULT[rarity] per second.
+-- The bands are set so a deeper area always earns more, with two narrow exceptions (checked by EconomyTest):
+--   * a Legendary may earn slightly more (<= 10%) than a Common from the very next area
+--   * a premium rarity (Mythic and up) may beat the next area's Common and Uncommon, but nothing better
+C.INCOME_BASE = 3
+C.AREA_STEP = 2.2
+C.SUB_STEP = 1.2
+C.RARITY_MULT = {1, 1.15, 1.35, 1.6, 1.925, 2.0, 2.1, 2.2, 2.3, 2.4}
+C.PEDESTALS = 6                 -- game slots in every vault level (the level's other games rotate through them)
+-- where they stand: {x as a fraction of the half-width, z as a fraction of the level's length}. Two outer columns and
+-- an inner pair, all clear of the runner down the middle (the main running lane) and of the shopkeeper's counter
+C.PEDESTAL_LAYOUT = {{-0.62, 0.5}, {0.62, 0.5}, {-0.36, 0.62}, {0.36, 0.62}, {-0.62, 0.74}, {0.62, 0.74}}
 
 ------------------------------------------------------------------
 -- RARITY (rolled for every copy of a game)
@@ -46,19 +44,29 @@ C.EXTRA_CHANCE = 5              -- spawn chance of a level's bonus 4th game (onl
 -- Common to Legendary can show up at ANY level, but the rarer ones are much,
 -- much harder to get at low levels. The top rarities only appear deep in the vault.
 C.RARITIES = {
-	{Name = "Common",    Color = rgb(190, 190, 190), MinLevel = 1},
-	{Name = "Uncommon",  Color = rgb(85, 200, 90),   MinLevel = 1},
-	{Name = "Rare",      Color = rgb(60, 130, 255),  MinLevel = 1},
-	{Name = "Epic",      Color = rgb(170, 70, 255),  MinLevel = 1},
-	{Name = "Legendary", Color = rgb(255, 170, 0),   MinLevel = 1},
-	{Name = "Mythic",    Color = rgb(255, 50, 90),   MinLevel = 11},
-	{Name = "Godly",     Color = rgb(255, 230, 80),  MinLevel = 21},
-	{Name = "Secret",    Color = rgb(20, 255, 220),  MinLevel = 31},
-	{Name = "Celestial", Color = rgb(255, 150, 255), MinLevel = 41},
-	{Name = "Infinity",  Color = rgb(255, 255, 255), MinLevel = 46},
+	{Name = "Common",    Color = rgb(190, 190, 190)},
+	{Name = "Uncommon",  Color = rgb(85, 200, 90)},
+	{Name = "Rare",      Color = rgb(60, 130, 255)},
+	{Name = "Epic",      Color = rgb(170, 70, 255)},
+	{Name = "Legendary", Color = rgb(255, 170, 0)},
+	-- the premium rarities unlock one by one as you go deeper (MinArea = the first area they can drop in)
+	{Name = "Mythic",    Color = rgb(255, 50, 90),   MinArea = 4},
+	{Name = "Godly",     Color = rgb(255, 230, 80),  MinArea = 7},
+	{Name = "Secret",    Color = rgb(20, 255, 220),  MinArea = 10},
+	{Name = "Celestial", Color = rgb(255, 150, 255), MinArea = 14},
+	{Name = "Infinity",  Color = rgb(255, 255, 255), MinArea = 18},
 }
-C.RARITY_INCOME_MULT = 1.6      -- each rarity step earns this much more
-C.RARITY_INSTALL_MULT = 1.25    -- ...and takes this much longer to install
+C.RARITY_INSTALL_MULT = 1.25    -- each rarity step takes this much longer to install
+function C.rarityMult(r)
+	return C.RARITY_MULT[r] or 1
+end
+-- What a fresh copy of rarity r from this level earns per second (the one place income is decided)
+function C.gameIncome(level, r)
+	return math.max(1, math.floor(C.LEVELS[level].IncomeBase * C.rarityMult(r) + 0.5))
+end
+function C.rarityAllowed(level, r)
+	return C.LEVELS[level].ZoneIndex >= (C.RARITIES[r].MinArea or 1)
+end
 -- How likely each step up in rarity is, from level 1 (tiny) to level 50 (much better)
 C.RARITY_RATIO_LOW = 0.12
 C.RARITY_RATIO_HIGH = 0.6
@@ -67,8 +75,8 @@ function C.rarityWeights(level)
 	local t = (level - 1) / math.max(1, C.NUM_LEVELS - 1)
 	local ratio = C.RARITY_RATIO_LOW + (C.RARITY_RATIO_HIGH - C.RARITY_RATIO_LOW) * t
 	local weights = {}
-	for r, info in ipairs(C.RARITIES) do
-		weights[r] = level >= info.MinLevel and ratio ^ (r - 1) or 0
+	for r in ipairs(C.RARITIES) do
+		weights[r] = C.rarityAllowed(level, r) and ratio ^ (r - 1) or 0
 	end
 	return weights
 end
@@ -79,7 +87,7 @@ end
 function C.indexReward(level, r)
 	local L = C.LEVELS[level]
 	return {
-		Cash = math.floor(L.IncomeBase * 50 * C.RARITY_INCOME_MULT ^ (r - 1)),
+		Cash = math.floor(L.IncomeBase * 50 * C.rarityMult(r) ^ 2),
 		Speed = math.floor(C.guardPoints(level) * 0.04 * (1 + (r - 1) * 0.25)),
 	}
 end
@@ -89,12 +97,12 @@ end
 ------------------------------------------------------------------
 C.DAILY = {
 	{Kind = "cash", Amount = 500, Text = "$500"},
-	{Kind = "game", Rarity = 4, Levels = {4, 10}, Text = "Epic Game"},
+	{Kind = "game", Rarity = 4, Levels = {3, 7}, Text = "Epic Game"},
 	{Kind = "cash", Amount = 2500, Text = "$2,500"},
 	{Kind = "speed", Amount = 1500, Text = "+1,500 Speed"},
 	{Kind = "cash", Amount = 15000, Text = "$15,000"},
 	{Kind = "speed", Amount = 5000, Text = "+5,000 Speed"},
-	{Kind = "game", Rarity = 5, Levels = {8, 15}, Cash = 50000, Text = "Legendary Game + $50K"},
+	{Kind = "game", Rarity = 5, Levels = {6, 11}, Cash = 50000, Text = "Legendary Game + $50K"},
 }
 
 ------------------------------------------------------------------
@@ -179,10 +187,10 @@ C.PLAYTIME = {
 }
 
 ------------------------------------------------------------------
--- AREA COMPLETION (find all 15 games in an area for a big reward)
+-- AREA COMPLETION (find every game in an area for a big reward)
 ------------------------------------------------------------------
 function C.areaReward(zi)
-	local last = zi * 5
+	local last = C.ZONES[zi].LastLevel
 	local L = C.LEVELS[last]
 	return {
 		Cash = math.floor(L.IncomeBase * 3000),
@@ -209,7 +217,7 @@ C.OFFLINE_CASH_RATE = 0.5       -- share of your games' income earned while you'
 -- real speed = REAL_BASE_SPEED x (points / START_SPEED) ^ REAL_SPEED_POWER
 C.START_SPEED = 1000
 C.REAL_BASE_SPEED = 32
-C.REAL_SPEED_POWER = 0.165      -- tuned so level 50's recommended speed (~7.7B) lands just under MAX_REAL_SPEED
+C.REAL_SPEED_POWER = 0.165      -- tuned so the deepest level's recommended speed (~7.7B, depth 50) lands just under MAX_REAL_SPEED
 C.MAX_REAL_SPEED = 450
 C.CARRY_MULTIPLIER = 1          -- speed while carrying a stolen game (1 = no slowdown, so your speed number vs the shopkeeper's decides who wins)
 
@@ -239,8 +247,10 @@ function C.treadRate(level)
 end
 function C.treadCost(level)
 	local early = C.TREAD_COST_BASE * C.TREAD_COST_GROWTH ^ level
-	local V = math.clamp(level + 3, 1, C.NUM_LEVELS)
-	local income = C.LEVELS[V].IncomeBase * (12 * 8 ^ ((V - 1) / 49)) * (1.5 + 2.5 * (V - 1) / 49)
+	-- d is how deep (on the original 50-level scale) a player training at this level steals from
+	local d = math.clamp(level + 3, 1, 50)
+	local V = C.levelAtDepth(d)
+	local income = C.LEVELS[V].IncomeBase * (12 * 8 ^ ((d - 1) / 49)) * (1.1 + 0.8 * (d - 1) / 49)
 	local minutes = C.TREAD_COST_FIRST_MINUTES * (C.TREAD_COST_LAST_MINUTES / C.TREAD_COST_FIRST_MINUTES) ^ (level / (C.TREAD_MAX_LEVEL - 1))
 	local cost = math.min(early, income * 60 * minutes)
 	-- two significant figures, so prices read cleanly
@@ -254,11 +264,41 @@ function C.treadGain(level)
 end
 
 -- Shopkeepers (speed points, same scale as players)
+-- Difficulty is measured on the original 50-level scale ("depth"): the 40 levels spread evenly over depths 1-50, so
+-- the treadmill and speed tuning still lands the deepest level just under MAX_REAL_SPEED.
 C.GUARD_START_POINTS = 700
-C.GUARD_POINT_GROWTH = 1.32     -- each level deeper is this much faster
-C.GUARD_ZONE_JUMP = 1.25        -- ...and the first level of every new area is this much faster again (level 50 is about 7 billion)
+C.GUARD_POINT_GROWTH = 1.32     -- each depth step deeper is this much faster
+C.GUARD_ZONE_JUMP = 1.25        -- ...plus this much every 5 depth steps (depth 50 is about 7 billion)
 C.GUARD_IDLE_REAL_SPEED = 20
-C.GUARD_RETURN_SPEED = 90       -- how fast a shopkeeper walks back to their post after a chase
+-- Walking home after a chase: a deliberate pace from the guard's own speed (times its roster Pace: heavy ones lumber,
+-- nimble ones hurry), only quicker when it's far outside its own level, so it is never gone for long
+C.GUARD_RETURN_FACTOR = 0.45    -- return speed = chase speed x this, kept between MIN and MAX
+C.GUARD_RETURN_MIN = 22
+C.GUARD_RETURN_MAX = 70
+C.GUARD_FAR_DIST = 500          -- further than this from its post, it hurries: the rest of the way in about FAR_TIME s
+C.GUARD_FAR_TIME = 12
+-- Recovery for a guard that can't get home (the only time one ever teleports): stuck in place for STUCK_TIME
+-- (after one jump to get free), out for longer than RETURN_TIMEOUT, or far from home with no player within
+-- UNSEEN_DIST to see it. It vanishes in a puff of smoke and reappears at its post.
+C.GUARD_STUCK_TIME = 2.5
+C.GUARD_RETURN_TIMEOUT = 40
+C.GUARD_UNSEEN_DIST = 200
+-- Catching (GuardCatch): a guard must physically reach you. Its reach is the front of its body plus an arm's grab
+-- (never more than REACH_MAX), measured where you are now AND where your own screen shows you both (your ping plus
+-- the time the guard's movement takes to reach your screen). Then a GRAB_TIME lunge: if you're still in reach
+-- (x GRAB_SLACK) you're caught, otherwise the guard stumbles (slows, and can't grab again for WHIFF_TIME) and keeps coming.
+C.GUARD_GRAB_MARGIN = 2.5
+C.GUARD_REACH_MAX = 11
+C.GUARD_GRAB_TIME = 0.3
+C.GUARD_GRAB_SLACK = 1.15
+C.GUARD_LUNGE_BOOST = 1.15     -- the lunge: a burst of speed while the hands go out
+C.GUARD_WHIFF_TIME = 0.5
+C.GUARD_LAUGH_TIME = 1.9        -- stands laughing this long after a catch, then walks home
+C.GUARD_INTERP_DELAY = 0.18     -- how long behind the server a guard appears on a player's screen, on top of ping (measured)
+C.PLAYER_INTERP_DELAY = 0.16    -- how long behind the player's own screen the server sees them, on top of ping (measured)
+C.GUARD_LAG_MAX = 0.3           -- pings above this count as this (a huge ping never stretches a reach)
+C.GUARD_ACCEL_TIME = 0.35       -- from standing to full chase speed
+C.GUARD_TURN_RATE = 6           -- radians a second when turning on the spot (no snapping round)
 C.GUARD_REACTION = 0.6
 C.GUARD_GIVE_UP = 120
 C.GUARD_LATE_LEVEL = 25         -- past this level shopkeepers get an extra speed-up
@@ -270,9 +310,9 @@ function C.guardScale(level)
 	return C.GUARD_SCALE_MIN + (C.GUARD_SCALE_MAX - C.GUARD_SCALE_MIN) * (level - 1) / math.max(1, C.NUM_LEVELS - 1)
 end
 function C.guardPoints(level)
-	local late = math.max(0, level - C.GUARD_LATE_LEVEL)
-	local zone = math.floor((level - 1) / 5)
-	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (level - 1) * C.GUARD_ZONE_JUMP ^ zone * C.GUARD_LATE_GROWTH ^ late
+	local d = C.LEVELS[level].Depth
+	local late = math.max(0, d - C.GUARD_LATE_LEVEL)
+	return C.GUARD_START_POINTS * C.GUARD_POINT_GROWTH ^ (d - 1) * C.GUARD_ZONE_JUMP ^ math.floor((d - 1) / 5 + 1e-6) * C.GUARD_LATE_GROWTH ^ late
 end
 
 -- The speed shown on each level's hanging sign: a little faster than its shopkeeper,
@@ -285,9 +325,9 @@ function C.recommendedSpeed(level)
 end
 
 C.SLAP_COOLDOWN = 0.8
-C.SLAP_HIT_DELAY = 0.12        -- the slap lands as the arm swings across (matches the animation)
+C.SLAP_HIT_DELAY = 0.14        -- the slap lands as the arm sweeps across in front (the swing's strike frame)
 C.STEAL_LEVEL_GRACE = 2         -- stolen games earn fully up to (deepest vault level you've stolen from + this)
-C.ESCAPE_CONFIRM_TIME = 0.6     -- seconds you must stay out of the vault before the chase ends
+C.ESCAPE_CONFIRM_TIME = 0.3     -- seconds you must stay out of the vault before the chase ends
 C.FALL_RETURN_Y = -40           -- falling below this height returns any stolen games
 -- Friends in the same server boost your cash: the first friend +10%, every friend after that +2.5% more.
 -- It follows who is here right now, so a friend leaving and rejoining can never stack it twice.
@@ -397,20 +437,20 @@ end
 ------------------------------------------------------------------
 -- WORLD LAYOUT
 ------------------------------------------------------------------
-C.ROOM_W = 120                  -- width of the vault hallway
-C.SEG_LEN = 200                 -- length of each vault level
-C.WALL_H = 90
-C.ENTRANCE_W = 56
-C.ENTRANCE_H = 38
+C.ROOM_W = 120                  -- widest the vault hallway gets (each level sets its own Width, never more)
+C.OLD_SEG_LEN = 200             -- length of one level in the old 50-level vault (the new lengths are measured against it)
+C.WALL_H = 63                   -- 70% of the old 90, so the sky shows from everywhere inside
+C.ENTRANCE_W = 80
+C.ENTRANCE_H = 60
 C.HALL_START_Z = 20             -- the vault entrance
-C.BASE_RING_RADIUS = 297        -- distance from the entrance to the bases
-C.BASE_YARD = 36                -- open front yard between the walkway loop and each base (the treadmill stands here)
+C.BASE_RING_RADIUS = 250        -- distance from the entrance to the bases (was 297, then a cramped 214)
+C.BASE_YARD = 26                -- open front yard between the walkway loop and each base (the treadmill stands here)
 C.LOOP_R = C.BASE_RING_RADIUS - C.PLOT_D / 2 - 7 - C.BASE_YARD -- radius of the walkway loop
 C.TREAD_OFFSET_X = 20           -- treadmill sits in the front yard, this far to the right of the base's centre
 C.TREAD_OFFSET_Z = 12           -- and this far out from the base's open front, leaving room to walk by
-C.BASE_ARC = 150
-C.FENCE_R = 450                 -- leaves room for the biggest bases
-C.ISLAND_R = 640
+C.BASE_ARC = 170
+C.FENCE_R = 420                 -- leaves room for the biggest bases (196 deep)
+C.ISLAND_R = 600
 C.NUM_PLOTS = 8
 C.INVITE_SCALE = 1.5            -- size of the character on the Invite Friend pad
 
@@ -460,13 +500,16 @@ C.TRAIL_PRODUCTS = {
 }
 
 ------------------------------------------------------------------
--- AREAS: 10 themes x 5 levels = 50 vault levels
+-- AREAS: 20 themes x 2 sublevels = 40 vault levels
+-- Areas 1-10 are the original ten. Each kept all 15 of its games (Outer Space: 16), now split over two sublevels.
+-- Their old 5 stores live on in Stores, which is how saves made before the expansion are read.
+-- Areas 11-20 are new. Every level has its own look (Theme: materials and colours, read by World) and its own
+-- shopkeeper (Guards.ROSTER, by level number). Len is the level's length in studs, Width its hallway width.
+-- Old vault: 5 x 200 studs per area. New: two sublevels of 350 = 700 studs, 3.5 old sublevels' worth.
 ------------------------------------------------------------------
 C.ZONES = {
 	{
-		Name = "Bargain Basement", Rarity = "Common", Color = rgb(190, 190, 190),
-		Ground = M.Mud, Wall = rgb(255, 190, 110), WallMat = M.WoodPlanks, Accent = rgb(255, 210, 60), Props = {"crate", "barrel"},
-		Guard = {Title = "Clearance Bouncer", Shirt = rgb(230, 120, 40), Pants = rgb(90, 60, 40), Hat = "cap", HatColor = rgb(255, 210, 60)},
+		Name = "Bargain Basement", Rarity = "Common", Color = rgb(190, 190, 190), Accent = rgb(255, 210, 60), Wall = rgb(255, 190, 110),
 		Stores = {
 			{"Bargain Bin", {"Pang", "Wee Sports Bowling", "Marco Kart"}},
 			{"Dollar Disc Depot", {"Flappy Bard", "Cookie Klicker", "Temple Ruin"}},
@@ -474,11 +517,13 @@ C.ZONES = {
 			{"Clearance Corner", {"Saleway Surfers", "Pac-Can", "Tetrus"}},
 			{"Pawn and Play", {"Monopawly", "Trollercoaster Tycoon", "Animal Bossing"}},
 		},
+		Levels = {
+			{Name = "Bargain Bin Warehouse", Len = 350, Width = 120, Theme = {Floor = M.Concrete, FloorColor = rgb(214, 204, 186), Wall = M.Cardboard, WallColor = rgb(205, 160, 105), Trim = rgb(255, 210, 60), Accent = rgb(230, 50, 50), Light = rgb(255, 245, 220), Props = {"pricetag", "boxpile", "crate"}, Panel = M.CorrodedMetal}},
+			{Name = "Pawn and Play", Len = 350, Width = 116, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(150, 100, 62), Wall = M.Brick, WallColor = rgb(170, 84, 62), Trim = rgb(210, 170, 80), Accent = rgb(60, 220, 120), Light = rgb(255, 210, 150), Props = {"barrel", "chest", "lamp"}, Panel = M.Wood}},
+		},
 	},
 	{
-		Name = "Retro Arcade", Rarity = "Uncommon", Color = rgb(85, 200, 90),
-		Ground = M.Brick, Wall = rgb(150, 120, 255), WallMat = M.SmoothPlastic, Accent = rgb(255, 60, 200), Props = {"screen", "lamp"},
-		Guard = {Title = "Pixel Patrol", Shirt = rgb(255, 60, 200), Pants = rgb(40, 30, 60), Hat = "headband", HatColor = rgb(0, 230, 255)},
+		Name = "Retro Arcade", Rarity = "Uncommon", Color = rgb(85, 200, 90), Accent = rgb(255, 60, 200), Wall = rgb(150, 120, 255),
 		Stores = {
 			{"Retro Pixel Shop", {"Super Mario Bruhs", "The Legend of Zelma", "Pocketmon Red"}},
 			{"Joystick Junction", {"Sweet Fighter II", "Monkey Kong", "Galagoo"}},
@@ -486,11 +531,13 @@ C.ZONES = {
 			{"High Score Hall", {"Space Raiders", "Froggo", "Mega Dan"}},
 			{"Neon Arcade Alley", {"Prance Prance Revolution", "Mortal Wombat", "Crash Bandicoop"}},
 		},
+		Levels = {
+			{Name = "Retro Pixel Shop", Len = 350, Width = 120, Theme = {Floor = M.CeramicTiles, FloorColor = rgb(70, 64, 110), Wall = M.SmoothPlastic, WallColor = rgb(112, 84, 224), Trim = rgb(0, 230, 255), Accent = rgb(255, 60, 200), Light = rgb(200, 170, 255), Props = {"arcade", "joystick"}, Panel = M.Plastic, Pixel = true}},
+			{Name = "Neon Arcade Alley", Len = 350, Width = 112, Theme = {Floor = M.Carpet, FloorColor = rgb(44, 34, 86), Wall = M.Asphalt, WallColor = rgb(40, 34, 58), Trim = rgb(255, 60, 200), Accent = rgb(0, 230, 255), Light = rgb(120, 220, 255), Props = {"arcade", "screen", "lamp"}, Panel = M.Neon}},
+		},
 	},
 	{
-		Name = "Toy Town", Rarity = "Rare", Color = rgb(60, 130, 255),
-		Ground = M.LeafyGrass, Wall = rgb(255, 225, 90), WallMat = M.SmoothPlastic, Accent = rgb(255, 90, 90), Props = {"toyblock", "cone"},
-		Guard = {Title = "Toy Soldier", Shirt = rgb(200, 30, 40), Pants = rgb(30, 50, 140), Hat = "tophat", HatColor = rgb(20, 20, 20)},
+		Name = "Toy Town", Rarity = "Rare", Color = rgb(60, 130, 255), Accent = rgb(255, 90, 90), Wall = rgb(255, 225, 90),
 		Stores = {
 			{"Toy Box Arcade", {"Fall Toys", "Puppy Playtime", "Kirbo's Dream Land"}},
 			{"Brick Builder Bazaar", {"Minecrate", "Blocko Galaxy Wars", "Fortnut"}},
@@ -498,11 +545,13 @@ C.ZONES = {
 			{"Plushie Palace", {"Five Nights at Teddy's", "Plushmon Go", "Webkins Whirl"}},
 			{"Wind-Up Workshop", {"Cup Hat", "Wayman Legends", "Little Big Plant"}},
 		},
+		Levels = {
+			{Name = "Toy Box Playroom", Len = 350, Width = 120, Theme = {Floor = M.Rubber, FloorColor = rgb(96, 196, 124), Wall = M.Plastic, WallColor = rgb(255, 222, 92), Trim = rgb(80, 160, 255), Accent = rgb(255, 90, 90), Light = rgb(255, 245, 225), Props = {"teddy", "toyblock", "bigball"}, Panel = M.Plastic}},
+			{Name = "Wind-Up Workshop", Len = 350, Width = 116, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(222, 182, 122), Wall = M.Wood, WallColor = rgb(176, 118, 78), Trim = rgb(220, 175, 80), Accent = rgb(80, 160, 255), Light = rgb(255, 225, 170), Props = {"toyblock", "gear", "cone"}, Panel = M.Metal}},
+		},
 	},
 	{
-		Name = "Pirate Cove", Rarity = "Epic", Color = rgb(170, 70, 255),
-		Ground = M.Sand, Wall = rgb(90, 200, 255), WallMat = M.WoodPlanks, Accent = rgb(60, 170, 220), Props = {"barrel", "palm"},
-		Guard = {Title = "Pirate Captain", Shirt = rgb(170, 30, 30), Pants = rgb(50, 35, 25), Hat = "pirate", HatColor = rgb(20, 20, 20)},
+		Name = "Pirate Cove", Rarity = "Epic", Color = rgb(170, 70, 255), Accent = rgb(60, 170, 220), Wall = rgb(90, 200, 255),
 		Stores = {
 			{"Pirate Cove Games", {"Sea of Robbers", "Assassin's Greed: Black Flag", "Pirates of the Carrot-bean"}},
 			{"Treasure Map Traders", {"Uncharred", "Skull and Phones", "One Peace"}},
@@ -510,11 +559,13 @@ C.ZONES = {
 			{"Parrot's Perch", {"Angry Parrots", "The Secret of Donkey Island", "Sid Meier's Parrots!"}},
 			{"Black Flag Bazaar", {"Pirate 102", "Port Royalty", "Sea Hogs"}},
 		},
+		Levels = {
+			{Name = "Treasure Beach", Len = 350, Width = 120, Theme = {Floor = M.Sand, FloorColor = rgb(240, 214, 150), Wall = M.WoodPlanks, WallColor = rgb(122, 82, 50), Trim = rgb(255, 205, 60), Accent = rgb(60, 170, 220), Light = rgb(255, 240, 200), Props = {"palm", "barrel", "chest"}, Panel = M.Wood}},
+			{Name = "Black Flag Fortress", Len = 350, Width = 112, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(108, 74, 46), Wall = M.Cobblestone, WallColor = rgb(124, 118, 108), Trim = rgb(40, 36, 34), Accent = rgb(200, 40, 40), Light = rgb(255, 190, 120), Props = {"anchor", "barrel", "cannon"}, Panel = M.Slate}},
+		},
 	},
 	{
-		Name = "Haunted Crypt", Rarity = "Legendary", Color = rgb(255, 170, 0),
-		Ground = M.Slate, Wall = rgb(175, 135, 235), WallMat = M.SmoothPlastic, Accent = rgb(120, 255, 120), Props = {"tombstone", "lamp"},
-		Guard = {Title = "Crypt Keeper", Shirt = rgb(50, 70, 50), Pants = rgb(30, 30, 30), Hat = "hood", HatColor = rgb(90, 90, 100)},
+		Name = "Haunted Crypt", Rarity = "Legendary", Color = rgb(255, 170, 0), Accent = rgb(120, 255, 120), Wall = rgb(175, 135, 235),
 		Stores = {
 			{"Haunted Game Crypt", {"Resident Weevil", "Ghostdusters", "Luigo's Mansion"}},
 			{"Spooky Swap Shop", {"Phasmophonia", "Dead by Midnight", "Little Nightmarez"}},
@@ -522,11 +573,13 @@ C.ZONES = {
 			{"Phantom Pixels", {"Silent Bill", "Outpast", "Amnesiac"}},
 			{"Vampire Vault", {"Vampire Thrivers", "Floodborne", "Vampurr"}},
 		},
+		Levels = {
+			{Name = "Haunted Game Crypt", Len = 350, Width = 116, Theme = {Floor = M.Slate, FloorColor = rgb(92, 88, 112), Wall = M.Granite, WallColor = rgb(118, 108, 140), Trim = rgb(70, 64, 84), Accent = rgb(120, 255, 120), Light = rgb(160, 255, 170), Props = {"tombstone", "pumpkin", "ghost"}, Panel = M.Cobblestone}},
+			{Name = "Vampire Vault", Len = 350, Width = 120, Theme = {Floor = M.Marble, FloorColor = rgb(70, 24, 34), Wall = M.Fabric, WallColor = rgb(118, 22, 42), Trim = rgb(220, 180, 80), Accent = rgb(230, 40, 70), Light = rgb(255, 120, 120), Props = {"candelabra", "ghost", "tombstone"}, Panel = M.Wood}},
+		},
 	},
 	{
-		Name = "Cyber City", Rarity = "Mythic", Color = rgb(255, 50, 90),
-		Ground = M.Concrete, Wall = rgb(80, 115, 200), WallMat = M.SmoothPlastic, Accent = rgb(150, 120, 255), Props = {"neonpillar", "screen"},
-		Guard = {Title = "Cyber Enforcer", Shirt = rgb(20, 20, 30), Pants = rgb(20, 40, 90), Hat = "visor", HatColor = rgb(0, 230, 255)},
+		Name = "Cyber City", Rarity = "Mythic", Color = rgb(255, 50, 90), Accent = rgb(150, 120, 255), Wall = rgb(80, 115, 200),
 		Stores = {
 			{"Neon Cyber Mart", {"Cyberpunk 2078", "Ghostjogger", "Deus Next"}},
 			{"Circuit City Games", {"Overwash", "Valorent", "Apex Legendz"}},
@@ -534,11 +587,13 @@ C.ZONES = {
 			{"Data Stream Depot", {"Watch Hogs", "Counter-Stroke", "Dentistry"}},
 			{"Synthwave Store", {"Hotline Maimi", "Beet Saber", "Geometry Splash"}},
 		},
+		Levels = {
+			{Name = "Neon Cyber Mart", Len = 350, Width = 120, Theme = {Floor = M.DiamondPlate, FloorColor = rgb(72, 82, 104), Wall = M.Metal, WallColor = rgb(58, 78, 138), Trim = rgb(20, 24, 34), Accent = rgb(60, 230, 255), Light = rgb(120, 230, 255), Props = {"holo", "screen", "neonpillar"}, Panel = M.Neon}},
+			{Name = "Synthwave Boulevard", Len = 350, Width = 116, Theme = {Floor = M.Marble, FloorColor = rgb(26, 18, 44), Wall = M.SmoothPlastic, WallColor = rgb(232, 86, 170), Trim = rgb(255, 170, 60), Accent = rgb(255, 120, 40), Light = rgb(255, 140, 210), Props = {"neonpillar", "palm", "holo"}, Panel = M.Glass, Grid = true}},
+		},
 	},
 	{
-		Name = "Ninja Dojo", Rarity = "Godly", Color = rgb(255, 230, 80),
-		Ground = M.WoodPlanks, Wall = rgb(255, 130, 130), WallMat = M.Wood, Accent = rgb(255, 120, 150), Props = {"lamp", "bamboo"},
-		Guard = {Title = "Shadow Ninja", Shirt = rgb(25, 25, 30), Pants = rgb(25, 25, 30), Hat = "hood", HatColor = rgb(20, 20, 25)},
+		Name = "Ninja Dojo", Rarity = "Godly", Color = rgb(255, 230, 80), Accent = rgb(255, 120, 150), Wall = rgb(255, 130, 130),
 		Stores = {
 			{"Ninja Dojo Games", {"Ghost of Sushima", "Ninja Garden", "Root Ninja"}},
 			{"Bamboo Blade Shop", {"Sekiwo: Shadows Die Thrice", "Shadow Bite 2", "Naru-toe Storm"}},
@@ -546,11 +601,13 @@ C.ZONES = {
 			{"Shogun Supply", {"Total Bore: Shogun", "Samurai Slowdown", "Ni-Oh No"}},
 			{"Cherry Blossom Shop", {"Tekkon 8", "Super Smush Bros", "Splatune"}},
 		},
+		Levels = {
+			{Name = "Ninja Dojo Hall", Len = 350, Width = 116, Theme = {Floor = M.Fabric, FloorColor = rgb(204, 192, 132), Wall = M.Wood, WallColor = rgb(88, 50, 34), Trim = rgb(30, 26, 24), Accent = rgb(220, 40, 40), Light = rgb(255, 220, 170), Props = {"lantern", "torii", "bamboo"}, Panel = M.Plaster, Shoji = true}},
+			{Name = "Cherry Blossom Garden", Len = 350, Width = 120, Theme = {Floor = M.Pebble, FloorColor = rgb(206, 200, 190), Wall = M.Plaster, WallColor = rgb(246, 226, 222), Trim = rgb(160, 50, 50), Accent = rgb(255, 150, 190), Light = rgb(255, 225, 235), Props = {"blossom", "lantern", "bamboo"}, Panel = M.ClayRoofTiles}},
+		},
 	},
 	{
-		Name = "Robot Factory", Rarity = "Secret", Color = rgb(20, 255, 220),
-		Ground = M.Pavement, Wall = rgb(185, 200, 220), WallMat = M.SmoothPlastic, Accent = rgb(255, 170, 0), Props = {"gear", "crate"},
-		Guard = {Title = "Security Bot", Shirt = rgb(170, 175, 185), Pants = rgb(90, 95, 105), Hat = "antenna", HatColor = rgb(255, 40, 40)},
+		Name = "Robot Factory", Rarity = "Secret", Color = rgb(20, 255, 220), Accent = rgb(255, 170, 0), Wall = rgb(185, 200, 220),
 		Stores = {
 			{"Robo Factory Store", {"Titanfail", "Armored Chore", "Mechworrier"}},
 			{"Gearworks Games", {"Fractorio", "Satisfactoree", "Bioshocked"}},
@@ -558,11 +615,13 @@ C.ZONES = {
 			{"Circuit Assembly", {"Detroit: Become Toaster", "Nearly: Automata", "The Taco Principle"}},
 			{"AI Arcade", {"Mass Defect", "Horizon Zero Yawn", "The Mattress"}},
 		},
+		Levels = {
+			{Name = "Assembly Line", Len = 350, Width = 120, Theme = {Floor = M.Metal, FloorColor = rgb(128, 134, 146), Wall = M.CorrodedMetal, WallColor = rgb(150, 140, 128), Trim = rgb(30, 30, 34), Accent = rgb(255, 170, 0), Light = rgb(255, 230, 190), Props = {"gear", "crate", "robot"}, Panel = M.DiamondPlate, Hazard = true}},
+			{Name = "AI Clean Room", Len = 350, Width = 112, Theme = {Floor = M.Pavement, FloorColor = rgb(214, 222, 234), Wall = M.SmoothPlastic, WallColor = rgb(232, 236, 246), Trim = rgb(150, 160, 180), Accent = rgb(60, 140, 255), Light = rgb(210, 230, 255), Props = {"holo", "robot", "screen"}, Panel = M.Glass}},
+		},
 	},
 	{
-		Name = "Dragon's Lair", Rarity = "Celestial", Color = rgb(255, 150, 255),
-		Ground = M.CrackedLava, Wall = rgb(255, 145, 80), WallMat = M.SmoothPlastic, Accent = rgb(255, 100, 20), Props = {"gold", "rock"},
-		Guard = {Title = "Dragon Knight", Shirt = rgb(150, 20, 20), Pants = rgb(60, 20, 20), Hat = "horns", HatColor = rgb(240, 230, 200)},
+		Name = "Dragon's Lair", Rarity = "Celestial", Color = rgb(255, 150, 255), Accent = rgb(255, 100, 20), Wall = rgb(255, 145, 80),
 		Stores = {
 			{"Dragon's Hoard", {"The Elder Trolls: Skyrim", "Spyrow", "Dragon Quest-ion"}},
 			{"Lava Lair Games", {"Dark Soles", "Elden Ding", "Cod of War"}},
@@ -570,18 +629,120 @@ C.ZONES = {
 			{"Ember Emporium", {"Diablow", "Shades", "Bald Dude's Gate 3"}},
 			{"Hoard Keeper's Haven", {"World of Warcrafts", "Final Fanta-sea", "The Twitcher 3"}},
 		},
+		Levels = {
+			{Name = "Dragon's Hoard", Len = 350, Width = 120, Theme = {Floor = M.Rock, FloorColor = rgb(112, 92, 76), Wall = M.Basalt, WallColor = rgb(72, 62, 62), Trim = rgb(255, 200, 40), Accent = rgb(255, 200, 40), Light = rgb(255, 210, 120), Props = {"gold", "egg", "rock"}, Panel = M.Slate}},
+			{Name = "Ember Forge", Len = 350, Width = 116, Theme = {Floor = M.CrackedLava, FloorColor = rgb(236, 120, 64), Wall = M.Rock, WallColor = rgb(84, 40, 32), Trim = rgb(40, 20, 16), Accent = rgb(255, 100, 20), Light = rgb(255, 140, 70), Props = {"rock", "brazier", "egg"}, Panel = M.Basalt}},
+		},
 	},
 	{
-		Name = "Outer Space", Rarity = "Infinity", Color = rgb(255, 255, 255),
-		Ground = M.Basalt, Wall = rgb(115, 125, 255), WallMat = M.SmoothPlastic, Accent = rgb(170, 90, 255), Props = {"planet", "crystal"},
-		Guard = {Title = "Space Ranger", Shirt = rgb(240, 240, 245), Pants = rgb(200, 200, 210), Hat = "helmet", HatColor = rgb(160, 220, 255)},
+		Name = "Outer Space", Rarity = "Infinity", Color = rgb(255, 255, 255), Accent = rgb(170, 90, 255), Wall = rgb(115, 125, 255),
 		Stores = {
 			{"Galactic Game Station", {"No Man's Pie", "Starfeld", "Star Bores"}},
 			{"Nebula Nook", {"Among Bus", "Outer Mild", "Herbal Space Program"}},
 			{"Black Hole Bazaar", {"Bed Space", "Hallo Infinite", "Elite Dangerless"}},
 			{"Starlight Archive", {"Super Marco Galaxy", "Ratchet & Crank", "Metro-Void Prime"}},
-			-- the 4th game is the rarest in the whole vault (see EXTRA_CHANCE)
+			-- the 4th game is the rarest of the original vault
 			{"The Forbidden Archive", {"Grand Theft Avocado VI", "Half-Lite 3", "Steal a Brainrut", "Devil May Nubs V"}},
+		},
+		Levels = {
+			{Name = "Galactic Space Station", Len = 350, Width = 116, Theme = {Floor = M.Metal, FloorColor = rgb(182, 188, 204), Wall = M.SmoothPlastic, WallColor = rgb(222, 226, 240), Trim = rgb(60, 70, 96), Accent = rgb(90, 170, 255), Light = rgb(200, 225, 255), Props = {"rocket", "planet", "holo"}, Panel = M.DiamondPlate, Portholes = true}},
+			{Name = "The Forbidden Archive", Len = 350, Width = 120, Theme = {Floor = M.Basalt, FloorColor = rgb(42, 40, 74), Wall = M.Slate, WallColor = rgb(44, 32, 86), Trim = rgb(255, 215, 120), Accent = rgb(170, 90, 255), Light = rgb(190, 140, 255), Props = {"crystal", "planet", "column"}, Panel = M.Glass, Stars = true},
+				-- the original vault's four rarest games stay the rarest here
+				Chances = {[5] = 6, [6] = 4, [7] = 3, [8] = 1}},
+		},
+	},
+
+	-- THE EXPANSION: ten new areas, deeper than Outer Space
+	{
+		Name = "Sunken Atlantis", Rarity = "Mythic", Color = rgb(255, 50, 90), Accent = rgb(60, 220, 230), Wall = rgb(60, 180, 210),
+		Levels = {
+			{Name = "Coral Reef Arcade", Len = 320, Width = 120, Theme = {Floor = M.Sand, FloorColor = rgb(232, 222, 182), Wall = M.Limestone, WallColor = rgb(118, 200, 208), Trim = rgb(255, 240, 210), Accent = rgb(255, 120, 100), Light = rgb(150, 230, 255), Props = {"coral", "shell", "coral"}, Panel = M.Pebble, Bubbles = true},
+				Games = {"Finding Nemoji", "Subway Sharks", "Bioshark Infinite", "Abzoo", "Ecco the Dolphone", "Feeding Frenzy Fries"}},
+			{Name = "Poseidon's Throne Room", Len = 380, Width = 120, Theme = {Floor = M.Marble, FloorColor = rgb(240, 246, 255), Wall = M.Marble, WallColor = rgb(50, 186, 208), Trim = rgb(255, 200, 60), Accent = rgb(255, 200, 60), Light = rgb(170, 245, 255), Props = {"column", "urn", "coral"}, Panel = M.Glacier, Throne = true},
+				Games = {"God of Water", "Trident Turismo", "Kraken Krossing", "Assassin's Greed: Odd-yssey", "Tide Hunter Online", "Tsunami Dash"}},
+		},
+	},
+	{
+		Name = "Desert Pyramids", Rarity = "Mythic", Color = rgb(255, 50, 90), Accent = rgb(40, 170, 160), Wall = rgb(220, 180, 120),
+		Levels = {
+			{Name = "Oasis Bazaar", Len = 300, Width = 116, Theme = {Floor = M.Sand, FloorColor = rgb(240, 212, 152), Wall = M.Sandstone, WallColor = rgb(220, 180, 122), Trim = rgb(40, 170, 160), Accent = rgb(40, 170, 160), Light = rgb(255, 230, 180), Props = {"palm", "urn", "crate"}, Panel = M.Fabric, Awnings = true},
+				Games = {"Prince of Pursia", "Tomb Rater", "Camel Kart", "Desert Strife", "Oasis Odyssey", "Assassin's Greed: Oranges"}},
+			{Name = "Tomb of Ra", Len = 360, Width = 112, Theme = {Floor = M.Limestone, FloorColor = rgb(212, 182, 132), Wall = M.Sandstone, WallColor = rgb(180, 122, 72), Trim = rgb(40, 70, 180), Accent = rgb(230, 90, 40), Light = rgb(255, 190, 110), Props = {"obelisk", "urn", "statue"}, Panel = M.Limestone, Glyphs = true},
+				Games = {"The Mummy's Cursor", "Pharaoh Phone", "Pyramid Head Start", "Age of Mythologee", "Scarab Smash", "Sunsinger of Ra"}},
+		},
+	},
+	{
+		Name = "Candy Kingdom", Rarity = "Godly", Color = rgb(255, 230, 80), Accent = rgb(255, 90, 160), Wall = rgb(150, 240, 200),
+		Levels = {
+			{Name = "Gumdrop Galleria", Len = 300, Width = 120, Theme = {Floor = M.CeramicTiles, FloorColor = rgb(255, 200, 222), Wall = M.SmoothPlastic, WallColor = rgb(150, 240, 204), Trim = rgb(255, 255, 255), Accent = rgb(255, 90, 160), Light = rgb(255, 225, 240), Props = {"lollipop", "gumdrop", "candycane"}, Panel = M.Plastic, Sprinkles = true},
+				Games = {"Candy Crash Saga", "Cookie Crunch Run", "Sugar Rush Racers", "Gummy Bear Grylls", "Lollipop Chainsoar", "Kirbo's Snack Land"}},
+			{Name = "Chocolate Factory", Len = 340, Width = 116, Theme = {Floor = M.Brick, FloorColor = rgb(118, 70, 44), Wall = M.Leather, WallColor = rgb(104, 62, 38), Trim = rgb(255, 190, 80), Accent = rgb(255, 190, 80), Light = rgb(255, 210, 160), Props = {"pipe", "candycane", "gumdrop"}, Panel = M.Metal},
+				Games = {"Willy's Wonka Kart", "Overbaked", "Choco Bombo", "Marshmallow Mayhem", "Sweet Tooth Twisted", "Donut Countee"}},
+		},
+	},
+	{
+		Name = "Frozen Tundra", Rarity = "Godly", Color = rgb(255, 230, 80), Accent = rgb(90, 200, 255), Wall = rgb(150, 200, 240),
+		Levels = {
+			{Name = "Ice Cave Outlet", Len = 330, Width = 112, Theme = {Floor = M.Ice, FloorColor = rgb(200, 230, 255), Wall = M.Glacier, WallColor = rgb(150, 202, 240), Trim = rgb(240, 250, 255), Accent = rgb(90, 200, 255), Light = rgb(190, 235, 255), Props = {"icicle", "snowman", "crystal"}, Panel = M.Ice},
+				Games = {"Frostpunch", "Ice Slippers", "The Long Darkish", "Snowboard Dudes", "Club Pengwin", "Glacier Glide"}},
+			{Name = "Yeti Peak Lodge", Len = 300, Width = 120, Theme = {Floor = M.Snow, FloorColor = rgb(245, 248, 255), Wall = M.WoodPlanks, WallColor = rgb(132, 86, 56), Trim = rgb(230, 60, 60), Accent = rgb(230, 60, 60), Light = rgb(255, 214, 160), Props = {"pine", "snowman", "lamp"}, Panel = M.Wood, Plaid = true},
+				Games = {"Celestay", "Steep Slopes", "Yeti Spaghetti", "Frozen Throne Wars", "Avalanche Ave", "Abominable Snowball"}},
+		},
+	},
+	{
+		Name = "Wild West", Rarity = "Secret", Color = rgb(20, 255, 220), Accent = rgb(255, 200, 80), Wall = rgb(150, 95, 55),
+		Levels = {
+			{Name = "Dusty Saloon", Len = 310, Width = 116, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(172, 122, 76), Wall = M.Wood, WallColor = rgb(150, 96, 56), Trim = rgb(60, 36, 22), Accent = rgb(255, 200, 80), Light = rgb(255, 210, 140), Props = {"barrel", "cactus", "wagonwheel"}, Panel = M.WoodPlanks},
+				Games = {"Red Dead Redemp-chin", "Gun Slinger Slinky", "Oregon Trail Mix", "Tumbleweed Tycoon", "Wild Gun Fun", "Saloon Showdown"}},
+			{Name = "Gold Rush Mine", Len = 350, Width = 112, Theme = {Floor = M.Ground, FloorColor = rgb(120, 92, 62), Wall = M.Rock, WallColor = rgb(132, 102, 76), Trim = rgb(96, 64, 38), Accent = rgb(255, 200, 40), Light = rgb(255, 190, 100), Props = {"minecart", "lantern", "gold"}, Panel = M.Wood, Beams = true},
+				Games = {"Gold Digger Deluxe", "Minecart Mania", "Dig Dug Deeper", "Deep Rock Garlic", "Steamworld Digg", "Prospector's Paradise"}},
+		},
+	},
+	{
+		Name = "Jungle Temple", Rarity = "Secret", Color = rgb(20, 255, 220), Accent = rgb(40, 200, 120), Wall = rgb(100, 120, 90),
+		Levels = {
+			{Name = "Vine Vault", Len = 340, Width = 120, Theme = {Floor = M.LeafyGrass, FloorColor = rgb(82, 150, 62), Wall = M.Cobblestone, WallColor = rgb(104, 122, 92), Trim = rgb(70, 120, 50), Accent = rgb(255, 200, 60), Light = rgb(220, 255, 190), Props = {"fern", "rock", "tiki"}, Panel = M.Grass, Vines = true},
+				Games = {"Jungle Jumble", "Pitfall Panic", "Far Cry Baby", "Snake Pass-word", "Banjo-Kazoomie", "Tarzan Tumble"}},
+			{Name = "Idol Sanctum", Len = 320, Width = 116, Theme = {Floor = M.Pebble, FloorColor = rgb(152, 142, 112), Wall = M.Limestone, WallColor = rgb(172, 152, 112), Trim = rgb(40, 200, 120), Accent = rgb(40, 200, 120), Light = rgb(255, 200, 120), Props = {"idol", "torch", "tiki"}, Panel = M.Slate, Glyphs = true},
+				Games = {"Indiana Bones", "Golden Idol Grab", "Tiki Torch Tag", "Shadow of the Tomb Rater", "Aztec Attack", "Jungle Juice Jam"}},
+		},
+	},
+	{
+		Name = "Midnight Carnival", Rarity = "Celestial", Color = rgb(255, 150, 255), Accent = rgb(255, 220, 60), Wall = rgb(220, 60, 80),
+		Levels = {
+			{Name = "Funhouse Midway", Len = 290, Width = 120, Theme = {Floor = M.CeramicTiles, FloorColor = rgb(226, 64, 68), Wall = M.Fabric, WallColor = rgb(244, 240, 236), Trim = rgb(255, 220, 60), Accent = rgb(255, 220, 60), Light = rgb(255, 230, 170), Props = {"balloon", "bigball", "ticketbooth"}, Panel = M.Fabric, Stripes = rgb(220, 40, 60)},
+				Games = {"Carnival Clash", "Whack-a-Moe", "Funhouse Frenzy", "Cotton Candy Crush", "Ring Toss Royale", "Mirror Maze Madness"}},
+			{Name = "Big Top Circus", Len = 360, Width = 120, Theme = {Floor = M.Sand, FloorColor = rgb(222, 182, 122), Wall = M.Fabric, WallColor = rgb(64, 42, 150), Trim = rgb(255, 210, 70), Accent = rgb(255, 80, 120), Light = rgb(255, 200, 230), Props = {"drum", "balloon", "cannon"}, Panel = M.Fabric, Stripes = rgb(255, 210, 70)},
+				Games = {"Circus Charlie Horse", "Clown Car Kart", "Trapeze Tycoon", "Juggle Juggernaut", "Lion Tamer Legends", "Human Cannonball Club"}},
+		},
+	},
+	{
+		Name = "Steampunk Skyway", Rarity = "Celestial", Color = rgb(255, 150, 255), Accent = rgb(255, 190, 80), Wall = rgb(180, 110, 70),
+		Levels = {
+			{Name = "Brass Gearworks Deck", Len = 330, Width = 116, Theme = {Floor = M.DiamondPlate, FloorColor = rgb(192, 152, 82), Wall = M.Metal, WallColor = rgb(178, 110, 70), Trim = rgb(70, 50, 36), Accent = rgb(255, 190, 80), Light = rgb(255, 210, 150), Props = {"gear", "pipe", "barrel"}, Panel = M.CorrodedMetal, Rivets = true},
+				Games = {"Sky Pirates of Arcadia", "Steamworld Sky", "Airship Armada", "Cloud Crusher", "Gear Grinder", "Clockwork Clash"}},
+			{Name = "Captain's Sky Bridge", Len = 300, Width = 120, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(142, 72, 42), Wall = M.Leather, WallColor = rgb(112, 62, 40), Trim = rgb(220, 180, 90), Accent = rgb(90, 200, 255), Light = rgb(255, 225, 180), Props = {"globe", "telescope", "anchor"}, Panel = M.Glass, Windows = true},
+				Games = {"Zeppelin Zoom", "Aerostat Ace", "Sky Captain Smash", "Pilotwings Pro", "Star Fax", "Ace Combat Wombat"}},
+		},
+	},
+	{
+		Name = "Crystal Caverns", Rarity = "Infinity", Color = rgb(255, 255, 255), Accent = rgb(180, 90, 255), Wall = rgb(70, 60, 90),
+		Levels = {
+			{Name = "Geode Gallery", Len = 340, Width = 112, Theme = {Floor = M.Rock, FloorColor = rgb(92, 82, 112), Wall = M.Slate, WallColor = rgb(72, 62, 92), Trim = rgb(40, 34, 52), Accent = rgb(180, 90, 255), Light = rgb(200, 150, 255), Props = {"crystal", "rock", "minecart"}, Panel = M.Basalt},
+				Games = {"Crystal Clash", "Gem Miner Gem", "Spelunky Spunk", "Mole Mania", "Geode Golf", "Diamond Dash Deluxe"}},
+			{Name = "Prism Throne", Len = 330, Width = 120, Theme = {Floor = M.Glass, FloorColor = rgb(206, 232, 255), Wall = M.Marble, WallColor = rgb(232, 222, 255), Trim = rgb(255, 255, 255), Accent = rgb(255, 120, 220), Light = rgb(255, 210, 250), Props = {"prism", "crystal", "column"}, Panel = M.Glass},
+				Games = {"Prismatic Palace", "Hollow Knite", "Ori and the Bland Forest", "Crystal Chronicles", "Monument Valet", "Kaleidoscope Kingdom"}},
+		},
+	},
+	{
+		Name = "Cosmic Nexus", Rarity = "Infinity", Color = rgb(255, 255, 255), Accent = rgb(255, 220, 100), Wall = rgb(240, 235, 220),
+		Levels = {
+			{Name = "Time Warp Terminal", Len = 340, Width = 116, Theme = {Floor = M.Metal, FloorColor = rgb(42, 48, 64), Wall = M.DiamondPlate, WallColor = rgb(62, 72, 94), Trim = rgb(80, 255, 200), Accent = rgb(80, 255, 200), Light = rgb(150, 255, 220), Props = {"clock", "holo", "neonpillar"}, Panel = M.Neon},
+				Games = {"Chrono Trigger Happy", "Braid Braid", "Superhot Sauce", "Life is Strange-r", "Quantum Breaker", "Timesplitters Splat"}},
+			{Name = "Throne of Infinity", Len = 380, Width = 120, Theme = {Floor = M.Marble, FloorColor = rgb(26, 22, 32), Wall = M.Marble, WallColor = rgb(240, 236, 222), Trim = rgb(255, 215, 90), Accent = rgb(255, 220, 100), Light = rgb(255, 240, 200), Props = {"column", "planet", "crystal"}, Panel = M.Foil, Throne = true, Stars = true},
+				-- the rarest games in the whole vault
+				Games = {"Infinity Gauntlet Run", "The Last of Uz", "Mind Craft Infinite", "Final Boss Rush", "Game of the Year Edition", "Steal a Game 2"},
+				Chances = {[5] = 4, [6] = 2}},
 		},
 	},
 }
@@ -589,31 +750,74 @@ C.ZONES = {
 ------------------------------------------------------------------
 -- BUILD THE LEVEL LIST
 ------------------------------------------------------------------
-C.LEVELS = {}
-for zi, zone in ipairs(C.ZONES) do
-	for si, store in ipairs(zone.Stores) do
-		local i = #C.LEVELS + 1
-		local chances = C.CHANCE_SETS[(i - 1) % #C.CHANCE_SETS + 1]
-		local games = {}
-		for gi, name in ipairs(store[2]) do
-			table.insert(games, {Name = name, Rarity = zone.Rarity, Color = zone.Color, Chance = chances[gi] or C.EXTRA_CHANCE, GI = gi})
+-- The original areas' 15 games: the first 8 go to sublevel 1, the rest to sublevel 2
+for _, zone in ipairs(C.ZONES) do
+	if zone.Stores then
+		local all = {}
+		for _, store in ipairs(zone.Stores) do
+			for _, name in ipairs(store[2]) do
+				table.insert(all, name)
+			end
 		end
-		table.insert(C.LEVELS, {
-			Index = i, Zone = zone, ZoneIndex = zi, Sub = si, Store = store[1], Games = games,
-			IncomeBase = C.INCOME_BASE * C.INCOME_GROWTH ^ (i - 1),
-			InstallBase = C.INSTALL_BASE * C.INSTALL_GROWTH ^ (i - 1),
-			Accent = zone.Accent:Lerp(Color3.new(1, 1, 1), (si - 1) * 0.1),
-			Wall = zone.Wall:Lerp(Color3.new(1, 1, 1), (si - 1) * 0.06),
-		})
+		zone.Levels[1].Games = table.move(all, 1, 8, 1, {})
+		zone.Levels[2].Games = table.move(all, 9, #all, 1, {})
 	end
 end
+
+C.LEVELS = {}
+local totalLevels = 0
+for _, zone in ipairs(C.ZONES) do
+	totalLevels += #zone.Levels
+end
+for zi, zone in ipairs(C.ZONES) do
+	for si, lv in ipairs(zone.Levels) do
+		local i = #C.LEVELS + 1
+		-- how deep this level is on the original 50-level scale (drives guard speed and install times)
+		local depth = 1 + (i - 1) * 49 / math.max(1, totalLevels - 1)
+		local games = {}
+		for gi, name in ipairs(lv.Games) do
+			-- earlier games in the list turn up more often; Chances overrides single games (the rare ones)
+			local chance = (lv.Chances and lv.Chances[gi]) or (10 + (#lv.Games - gi) * 3)
+			table.insert(games, {Name = name, Rarity = zone.Rarity, Color = zone.Color, Chance = chance, GI = gi})
+		end
+		table.insert(C.LEVELS, {
+			Index = i, Zone = zone, ZoneIndex = zi, Sub = si, Store = lv.Name, Games = games, Depth = depth,
+			Len = lv.Len, Width = math.min(lv.Width, C.ROOM_W), Theme = lv.Theme,
+			IncomeBase = C.INCOME_BASE * C.AREA_STEP ^ (zi - 1) * C.SUB_STEP ^ (si - 1),
+			InstallBase = C.INSTALL_BASE * C.INSTALL_GROWTH ^ (depth - 1),
+			Accent = lv.Theme.Accent,
+			Wall = lv.Theme.WallColor,
+		})
+	end
+	zone.FirstLevel = #C.LEVELS - #zone.Levels + 1
+	zone.LastLevel = #C.LEVELS
+end
 C.NUM_LEVELS = #C.LEVELS
+
+-- the level whose depth (original 50-level scale) is nearest d
+function C.levelAtDepth(d)
+	return math.clamp(math.floor(1 + (d - 1) * (C.NUM_LEVELS - 1) / 49 + 0.5), 1, C.NUM_LEVELS)
+end
 
 -- Which level each game name comes from (for the Index)
 C.GAME_LEVEL = {}
 for _, L in ipairs(C.LEVELS) do
 	for _, g in ipairs(L.Games) do
+		assert(not C.GAME_LEVEL[g.Name], "duplicate game name: " .. g.Name)
 		C.GAME_LEVEL[g.Name] = L.Index
+	end
+end
+
+-- SAVES FROM BEFORE THE EXPANSION stored games as (old level 1-50, game 1-4). LEGACY[oldLevel][gi] = the game's name.
+-- Their BestLevel maps to the sublevel that now holds that old store (stores 1-2 -> sublevel 1, stores 3-5 -> 2).
+C.SAVE_VERSION = 2
+C.LEGACY = {}
+C.LEGACY_BEST = {}
+for zi, zone in ipairs(C.ZONES) do
+	for si, store in ipairs(zone.Stores or {}) do
+		local old = (zi - 1) * 5 + si
+		C.LEGACY[old] = store[2]
+		C.LEGACY_BEST[old] = zone.FirstLevel + (si <= 2 and 0 or 1)
 	end
 end
 

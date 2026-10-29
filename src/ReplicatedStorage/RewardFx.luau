@@ -207,7 +207,7 @@ end
 -- the middle of the CASH or SPEED box's round icon, where it is right now
 local function hudTarget(kind)
 	local hud = Players.LocalPlayer.PlayerGui:FindFirstChild("StealAGameUI")
-	local box = hud and hud:FindFirstChild(HUD_BOX[kind])
+	local box = hud and hud:FindFirstChild(HUD_BOX[kind], true) -- it sits on the HUD's design canvas
 	return box and box.AbsolutePosition + Vector2.new(21, box.AbsoluteSize.Y / 2)
 end
 

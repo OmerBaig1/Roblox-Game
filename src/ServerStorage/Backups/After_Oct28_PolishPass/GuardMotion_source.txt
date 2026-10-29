@@ -1,0 +1,1047 @@
+--[[
+	GuardMotion: draws every shopkeeper's movement on this screen.
+
+	Each guard is a rigged, sculpted body (see Guards.ROSTER on the server) with six joints: Root, Neck,
+	LeftShoulder, RightShoulder, LeftHip, RightHip. The server moves the giants (Humanoid:MoveTo) and names the guard
+	in the Motion attribute; MOTION[name] here is that guard's own idle, chase gait and catch reaction.
+
+	Moving vs standing: the gait's weight follows the guard's real, smoothed ground speed with hysteresis (on above
+	MOVE_ON body lengths a second, off below MOVE_OFF), so a guard standing at its post always plays its idle, never
+	its run. The stride phase advances by the distance really covered, so feet never slide or run in place. Idles
+	never step: they breathe, shift weight, look around and fidget.
+	Joints are written through Transform every PreSimulation. Only guards near the camera are animated.
+]]
+
+local RunService = game:GetService("RunService")
+
+local V = Vector3.new
+local ZERO = Vector3.zero
+local sin, cos, abs, pi, clamp, max = math.sin, math.cos, math.abs, math.pi, math.clamp, math.max
+local NEAR = 260 -- studs from the camera within which guards are animated
+local MOVE_ON, MOVE_OFF = 1.2, 0.5 -- body lengths a second
+
+local JOINTS = {Root = "Root", Neck = "Neck", LS = "LeftShoulder", RS = "RightShoulder", LH = "LeftHip", RH = "RightHip"}
+local KEYS = {"Root", "Neck", "LS", "RS", "LH", "RH"}
+
+-- A pose: joint key -> Vector3 of angles (radians: X pitch, Y yaw, Z roll), plus Off = root offset in body studs.
+-- Signs: +X on a hip or shoulder swings the limb forward; -X on Root leans forward; on the left shoulder -Z lifts the
+-- arm out to the side (+Z on the right).
+local function newPose()
+	return {Root = ZERO, Neck = ZERO, LS = ZERO, RS = ZERO, LH = ZERO, RH = ZERO, Off = ZERO}
+end
+local function legs(p, ph, amp, spread)
+	local a = sin(ph)
+	p.LH = V(amp * a, 0, -(spread or 0))
+	p.RH = V(-amp * a, 0, spread or 0)
+end
+local function swing(p, ph, amp, out, fwd)
+	local a = sin(ph)
+	p.LS = V((fwd or 0) - amp * a, 0, -(out or 0.1))
+	p.RS = V((fwd or 0) + amp * a, 0, out or 0.1)
+end
+local function arms(p, l, r)
+	p.LS, p.RS = l, r
+end
+local function breathe(p, t, amp)
+	p.Off = V(0, 0.03 * sin(t * 1.6) * (amp or 1), 0)
+	p.LS = V(0, 0, -0.08)
+	p.RS = V(0, 0, 0.08)
+end
+local function shake(age, speed, amp)
+	return sin(age * (speed or 18)) * (amp or 0.08)
+end
+
+------------------------------------------------------------------
+-- EVERY GUARD'S MOTION. Stride = studs per full cycle (two steps) at body scale 1.
+------------------------------------------------------------------
+local MOTION = {}
+
+-- Brutus: heavy, shoulders rolling, fists low. Idle: arms folded, checks his biceps. Catch: a belly laugh.
+MOTION.brutus = {Stride = 5,
+	Gait = function(p, ph)
+		legs(p, ph, 0.5, 0.05)
+		swing(p, ph, 0.35, 0.35)
+		p.Root = V(-0.12, 0.12 * sin(ph), 0.08 * sin(ph))
+		p.Off = V(0, -0.1 + 0.2 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		local f = max(0, sin(t * 0.6)) ^ 4
+		arms(p, V(0.2 + 0.4 * f, 0.5 * (1 - f), -0.25 - 1.1 * f), V(0.2 + 0.4 * f, -0.5 * (1 - f), 0.25 + 1.1 * f))
+		p.Neck = V(-0.15 * f, 0.4 * f, 0)
+	end,
+	Catch = function(p, age)
+		arms(p, V(0.5, 0, -0.3), V(0.5, 0, 0.3))
+		p.Root = V(0.3 + shake(age), 0, 0)
+		p.Neck = V(0.45, 0, 0)
+	end}
+-- Tusk: a short-legged charge, head down like a battering ram. Idle: weighs coins in one hand. Catch: shakes his fists.
+MOTION.tusk = {Stride = 3.2,
+	Gait = function(p, ph)
+		legs(p, ph, 0.6, 0.08)
+		swing(p, ph, 0.5, 0.25)
+		p.Root = V(-0.35, 0, 0.1 * sin(ph))
+		p.Neck = V(-0.2, 0, 0)
+		p.Off = V(0, 0.15 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t, 1.4)
+		p.RS = V(0.9 + 0.12 * abs(sin(t * 3)), 0, 0.15)
+		p.LS = V(0.1, 0, -0.2)
+		p.Neck = V(-0.25, 0.1 * sin(t * 0.7), 0)
+	end,
+	Catch = function(p, age)
+		arms(p, V(2.4 + shake(age, 14, 0.3), 0, -0.4), V(2.4 - shake(age, 14, 0.3), 0, 0.4))
+		p.Root = V(0.15, 0, 0)
+	end}
+-- Kong: knuckle-swinging gorilla run, long arms reaching forward in turn. Idle: chest heaves, looks around. Catch: pounds his chest.
+MOTION.kong = {Stride = 6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.45, 0.15)
+		local a = sin(ph)
+		arms(p, V(0.35 - 0.9 * a, 0, -0.3), V(0.35 + 0.9 * a, 0, 0.3))
+		p.Root = V(-0.45, 0.2 * a, 0.12 * a)
+		p.Neck = V(0.35, 0, 0)
+		p.Off = V(0, -0.3 + 0.35 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.Root = V(-0.2 + 0.05 * sin(t * 1.2), 0, 0.04 * sin(t * 0.5))
+		arms(p, V(0.15, 0, -0.2), V(0.15, 0, 0.2))
+		p.Neck = V(0.15, 0.6 * sin(t * 0.35), 0)
+		p.Off = V(0, 0.06 * sin(t * 1.2), 0)
+	end,
+	Catch = function(p, age)
+		local a = sin(age * 10)
+		arms(p, V(1.3 + 0.35 * a, 0.7, -0.1), V(1.3 - 0.35 * a, -0.7, 0.1))
+		p.Root = V(0.25, 0, 0)
+		p.Neck = V(0.6, 0, 0)
+	end}
+-- Static: grapevine dance steps, one finger to the sky. Idle: nods along to his headphones. Catch: spins into a pose.
+MOTION.static = {Stride = 4.2,
+	Gait = function(p, ph)
+		legs(p, ph, 0.6, 0)
+		p.LH += V(0, 0, -0.2 * cos(ph))
+		p.RH += V(0, 0, -0.2 * cos(ph))
+		p.RS = V(2.6, 0, 0.3 + 0.2 * sin(ph * 2))
+		p.LS = V(0.3 * sin(ph), 0, -0.5)
+		p.Root = V(0, 0.25 * sin(ph), 0.15 * sin(ph))
+		p.Off = V(0.3 * sin(ph), 0.2 * abs(sin(ph * 2)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		p.Neck = V(0.15 * abs(sin(t * 4)), 0, 0)
+		p.RS = V(1.6, 0, 0.5)
+		p.Root = V(0, 0.15 * sin(t * 2), 0)
+	end,
+	Catch = function(p, age)
+		p.Root = V(0, clamp(age / 0.6, 0, 1) * 2 * pi, 0)
+		p.RS = V(2.7, 0, 0.5)
+		p.LS = V(-0.3, 0, -0.5)
+	end}
+-- Sergeant Tin: a goose-step march, legs locked straight. Idle: at attention, salutes now and then. Catch: winds down, slumping.
+MOTION.tin = {Stride = 3.8,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(1.0 * max(0, a) - 0.15 * max(0, -a), 0, 0)
+		p.RH = V(1.0 * max(0, -a) - 0.15 * max(0, a), 0, 0)
+		swing(p, ph, 0.7, 0.05)
+		p.Neck = V(0.08, 0, 0)
+		p.Off = V(0, 0.12 * abs(a), 0)
+	end,
+	Idle = function(p, t)
+		local f = max(0, sin(t * 0.7)) ^ 4
+		p.RS = V(2.5 * f, 0, 0.6 * f)
+		p.LS = V(0, 0, -0.04)
+		p.Off = V(0, 0.02 * sin(t * 2), 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 1.4, 0, 1)
+		p.Root = V(-0.45 * f, 0, 0)
+		p.Neck = V(-0.5 * f, 0, 0)
+		arms(p, V(0, 0, -0.1 - 0.2 * f), V(0, 0, 0.1 + 0.2 * f))
+	end}
+-- Stitches: bounces both feet together as if still on a toy spring. Idle: slumps, then twitches upright as if his
+-- stuffing shifted. Catch: a bouncy backflip.
+MOTION.stitches = {Stride = 5.5,
+	Gait = function(p, ph)
+		local h = abs(sin(ph))
+		p.LH, p.RH = V(-0.15 + 0.35 * (1 - h), 0, -0.08), V(-0.15 + 0.35 * (1 - h), 0, 0.08)
+		arms(p, V(0.6 * h, 0, -1.2 - 0.4 * h), V(0.6 * (1 - h), 0, 1.2 + 0.4 * h))
+		p.Neck = V(0, 0, 0.35 * sin(ph * 0.5))
+		p.Off = V(0, 2.2 * h ^ 0.7 - 0.3, 0)
+	end,
+	Idle = function(p, t)
+		local tug = (t % 2.3 < 0.25) and 1 or 0
+		p.Neck = V(0, 0, 0.3 + 0.1 * tug)
+		arms(p, V(0.3 * tug, 0, -0.4 - 0.5 * tug), V(0, 0, 0.5))
+		p.Root = V(0, 0, 0.06 * sin(t * 0.9))
+		p.Off = V(0, 0.15 * tug, 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.9, 0, 1)
+		p.Root = V(f * 2 * pi, 0, 0)
+		p.Off = V(0, 3 * sin(f * pi), 0)
+		arms(p, V(0.3, 0, -1.6), V(0.3, 0, 1.6))
+	end}
+-- Captain Calico: a lurching peg-leg hop (the peg leg never bends). Idle: peers through an imaginary spyglass. Catch: cutlass to the sky.
+MOTION.calico = {Stride = 4.6,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(0.7 * a, 0, 0)
+		p.RH = V(-0.4 * a, 0, 0.1)
+		swing(p, ph, 0.5, 0.2)
+		p.RS = V(1.2, 0, 0.2)
+		p.Root = V(-0.1, 0, 0.22 * a)
+		p.Off = V(0, 0.4 * max(0, -a) - 0.1, 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		p.LS = V(1.8, 0.2, -0.1)
+		p.Neck = V(0.05, 0.5 * sin(t * 0.4), 0)
+		p.Root = V(0, 0.25 * sin(t * 0.4), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(3.0, 0, 0.2)
+		p.LS = V(0.5, 0, -0.4)
+		p.Neck = V(0.5, 0, 0)
+		p.Root = V(0.2 + shake(age, 14, 0.06), 0, 0)
+	end}
+-- Brineback: wide sea legs, rolling side to side as if the deck moves. Idle: hauls on a rope, hand over hand. Catch: slaps his knee.
+MOTION.brine = {Stride = 4.8,
+	Gait = function(p, ph)
+		legs(p, ph, 0.45, 0.3)
+		swing(p, ph, 0.25, 0.5)
+		p.Root = V(-0.05, 0, 0.3 * sin(ph))
+		p.Off = V(0.5 * sin(ph), 0.15 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		local a = sin(t * 2)
+		arms(p, V(1.2 + 0.6 * a, 0, -0.2), V(1.2 - 0.6 * a, 0, 0.2))
+		p.Root = V(0.1 + 0.05 * a, 0, 0)
+	end,
+	Catch = function(p, age)
+		p.Root = V(-0.45, 0, 0)
+		p.RS = V(0.6 + 0.4 * max(0, sin(age * 14)), 0, 0.2)
+		p.LS = V(0.6, 0, -0.3)
+		p.Neck = V(0.6, 0, 0)
+	end}
+-- Mortimer: a cartoon tiptoe sneak, knees high, hands up. Idle: holds the lantern out and peers around. Catch: rattles with laughter.
+MOTION.mortimer = {Stride = 4.2,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(1.2 * max(0, a) - 0.1, 0, 0)
+		p.RH = V(1.2 * max(0, -a) - 0.1, 0, 0)
+		arms(p, V(1.0 + 0.2 * a, 0, -0.2), V(1.0 - 0.2 * a, 0, 0.2))
+		p.Root = V(-0.35, 0, 0)
+		p.Neck = V(0.3, 0, 0)
+		p.Off = V(0, 0.35 + 0.3 * abs(a), 0)
+	end,
+	Idle = function(p, t)
+		p.LS = V(1.5, 0, -0.2)
+		p.Root = V(-0.2, 0, 0)
+		p.Neck = V(0.2, 0.6 * sin(t * 0.9), 0.15 * sin(t * 6))
+	end,
+	Catch = function(p, age)
+		local k = sin(age * 30)
+		p.Root = V(0.1 * k, 0.1 * k, 0.1 * k)
+		p.Neck = V(0.4, 0.15 * k, 0)
+		arms(p, V(1.5 + 0.2 * k, 0, -0.4), V(1.5 - 0.2 * k, 0, 0.4))
+	end}
+-- Count Fangula: glides off the floor, legs together, cape-arms spread. Idle: hovers, cape across his face. Catch: flares the cape and rises.
+MOTION.fangula = {Stride = 6,
+	Gait = function(p, ph, s)
+		p.LH, p.RH = V(-0.1, 0, 0.04), V(-0.1, 0, -0.04)
+		arms(p, V(0.6, 0, -1.3), V(0.6, 0, 1.3))
+		p.Root = V(-0.25, 0, 0)
+		p.Neck = V(0.15, 0, 0)
+		p.Off = V(0, 1.2 + 0.25 * sin(s.T * 2.5), 0)
+	end,
+	Idle = function(p, t)
+		p.RS = V(1.2, -0.7, 0.2)
+		p.LS = V(0.2, 0, -0.2)
+		p.Off = V(0, 0.8 + 0.2 * sin(t * 1.5), 0)
+		p.Neck = V(-0.1, 0.3 * sin(t * 0.3), 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.4, 0, 1)
+		arms(p, V(0.5, 0, -2.0 * f), V(0.5, 0, 2.0 * f))
+		p.Neck = V(0.4, 0, 0)
+		p.Off = V(0, 1.2 + 1.2 * f, 0)
+	end}
+-- Unit Vex: a hard athletic sprint, forward lean, arms pumping. Idle: sweeps the hall with his visor. Catch: points the baton: case closed.
+MOTION.vex = {Stride = 6.4,
+	Gait = function(p, ph)
+		legs(p, ph, 0.9, 0)
+		swing(p, ph, 1.0, 0.1, 0.2)
+		p.Root = V(-0.3, 0, 0)
+		p.Neck = V(0.25, 0, 0)
+		p.Off = V(0, -0.1 + 0.3 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		p.Neck = V(0, 0.7 * sin(t * 0.6), 0)
+		p.RS = V(0.6, 0, 0.1)
+	end,
+	Catch = function(p, age)
+		p.RS = V(1.57, 0, 0)
+		p.LS = V(0.6, 0.5, -0.1)
+		p.Neck = V(0, 0, 0.3 * sin(age * 3))
+	end}
+-- Vapor: a loping wolf sprint, long strides, body level. Idle: sniffs the air, ears-first head tilts. Catch: throws its head back in a howl.
+MOTION.vapor = {Stride = 8,
+	Gait = function(p, ph)
+		legs(p, ph, 0.95, 0)
+		arms(p, V(0.6 + 0.6 * sin(ph + pi), 0, -0.2), V(0.6 + 0.6 * sin(ph), 0, 0.2))
+		p.Root = V(-0.6, 0, 0)
+		p.Neck = V(0.55, 0, 0)
+		p.Off = V(0, -0.6 + 0.3 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		p.Neck = V(0.15 + 0.08 * sin(t * 7), 0.4 * sin(t * 0.5), 0.25 * sin(t * 0.8))
+		p.Root = V(-0.1, 0, 0)
+	end,
+	Catch = function(p, age)
+		p.Neck = V(0.9, 0, 0)
+		p.Root = V(0.25, 0, 0)
+		arms(p, V(0.2, 0, -0.5), V(0.2, 0, 0.5))
+	end}
+-- Kage: the ninja run, arms flung straight back, body low. Idle: hands together, perfectly still. Catch: a dramatic sword pose.
+MOTION.kage = {Stride = 6.8,
+	Gait = function(p, ph)
+		legs(p, ph, 1.0, 0)
+		arms(p, V(-1.3, 0, -0.25), V(-1.3, 0, 0.25))
+		p.Root = V(-0.55, 0, 0)
+		p.Neck = V(0.5, 0, 0)
+		p.Off = V(0, -0.5 + 0.2 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		arms(p, V(1.1, 0.5, -0.1), V(1.1, -0.5, 0.1))
+		p.Off = V(0, 0.015 * sin(t * 0.8), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(1.57, 0.6, 0.3)
+		p.LS = V(1.2, -0.6, -0.3)
+		p.LH, p.RH = V(0.5, 0, -0.4), V(-0.3, 0, 0.3)
+		p.Off = V(0, -0.5, 0)
+	end}
+-- Taiho: a wide-legged stomp, club held high. Idle: rests the club on his shoulder, chest rising. Catch: slams the club down.
+MOTION.oni = {Stride = 3.6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.35, 0.4)
+		p.RS = V(2.2, 0, 0.3)
+		p.LS = V(0.4 * sin(ph), 0, -0.6)
+		p.Root = V(0, 0, 0.18 * sin(ph))
+		p.Off = V(0.3 * sin(ph), -0.4 + 0.25 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t, 1.6)
+		p.RS = V(2.6, 0, 0.6)
+		p.LS = V(0, 0, -0.35)
+		p.LH, p.RH = V(0, 0, -0.25), V(0, 0, 0.25)
+		p.Neck = V(0, 0.3 * sin(t * 0.4), 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.35, 0, 1)
+		p.RS = V(2.8 - 2.2 * f, 0, 0.2)
+		p.Root = V(-0.35 * f, 0, 0)
+		p.Neck = V(0.4, 0, 0)
+	end}
+-- SB-9000: precise ticking steps, each pose held then snapped. Idle: head turns in fixed clicks. Catch: arms up and down in 90° steps.
+MOTION.sb9000 = {Stride = 4,
+	Gait = function(p, ph)
+		local step = math.floor(ph / pi)
+		local f = (ph % pi) / pi
+		local q = step * pi + (f < 0.35 and f / 0.35 or 1) * pi
+		legs(p, q, 0.55, 0)
+		swing(p, q, 0.5, 0.15)
+		p.Off = V(0, 0.1 * (f < 0.35 and 1 or 0), 0)
+	end,
+	Idle = function(p, t)
+		p.Neck = V(0, (math.floor(t) % 4 - 1.5) * 0.35, 0)
+		arms(p, V(0.2, 0, -0.15), V(0.2, 0, 0.15))
+	end,
+	Catch = function(p, age)
+		local f = math.floor(age * 5) % 2
+		arms(p, V(f * 3.0, 0, -0.1), V((1 - f) * 3.0, 0, 0.1))
+		p.Neck = V(0, math.floor(age * 8) * pi / 2, 0)
+	end}
+-- Model-7: a run that skips frames like corrupted video. Idle: stands rigid, head glitching sideways. Catch: a stuttering victory pose.
+MOTION.model7 = {Stride = 5,
+	Gait = function(p, ph, s)
+		local q = math.floor(ph / (pi / 2)) * (pi / 2) + pi / 4
+		legs(p, q, 0.8, 0)
+		swing(p, q, 0.8, 0.1)
+		local glitch = (s.T * 4) % 1 < 0.08
+		p.Root = V(-0.1, glitch and 0.3 or 0, 0)
+		p.Off = V(glitch and 0.3 or 0, 0.2 * (math.floor(ph / (pi / 2)) % 2), 0)
+	end,
+	Idle = function(p, t)
+		local glitch = (t * 0.7) % 1 < 0.06
+		p.Neck = V(0, glitch and 0.5 or 0, glitch and 0.2 or 0)
+		arms(p, V(0, 0, -0.05), V(0, 0, 0.05))
+	end,
+	Catch = function(p, age)
+		local f = math.floor(age * 6) % 2
+		p.RS = V(2.9, 0, 0.2)
+		p.LS = V(0, 0, -0.3)
+		p.Off = V(0, 0.8 * f, 0)
+	end}
+-- Sir Scorch: a charging gallop behind his shield, sword raised back. Idle: guard stance, still as a statue. Catch: roars, sword high.
+MOTION.scorch = {Stride = 5.6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.8, 0)
+		p.LS = V(1.4, -0.5, -0.1)
+		p.RS = V(-0.6 + 0.3 * sin(ph), 0, 0.5)
+		p.Root = V(-0.35, -0.25, 0)
+		p.Off = V(0, 0.35 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.LS = V(1.0, -0.4, -0.1)
+		p.RS = V(0.4, 0, 0.2)
+		p.LH, p.RH = V(0.15, 0, -0.1), V(-0.1, 0, 0.1)
+		p.Off = V(0, 0.025 * sin(t * 1.2), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(2.9, 0, 0.3)
+		p.LS = V(1.0, -0.5, -0.1)
+		p.Neck = V(0.5, 0, 0)
+		p.Root = V(0.15, 0, 0)
+	end}
+-- Magmor: enormous slow strides, fists swinging low, torso heaving. Idle: smoulders, slumped and breathing like a furnace.
+-- Catch: rears up and drums the ground.
+MOTION.magmor = {Stride = 7,
+	Gait = function(p, ph)
+		legs(p, ph, 0.45, 0.1)
+		local a = sin(ph)
+		arms(p, V(0.2 - 0.6 * a, 0, -0.3), V(0.2 + 0.6 * a, 0, 0.3))
+		p.Root = V(-0.25, 0.25 * a, 0.1 * a)
+		p.Neck = V(0.2, 0, 0)
+		p.Off = V(0, -0.35 + 0.35 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.Root = V(-0.2 + 0.07 * sin(t * 0.7), 0, 0)
+		arms(p, V(0.1, 0, -0.3), V(0.1, 0, 0.3))
+		p.Neck = V(0.2, 0, 0)
+		p.Off = V(0, -0.2 + 0.08 * sin(t * 0.7), 0)
+	end,
+	Catch = function(p, age)
+		local a = sin(age * 10)
+		p.Root = V(0.3, 0, 0)
+		arms(p, V(2.5 + 0.3 * a, 0, -0.6), V(2.5 - 0.3 * a, 0, 0.6))
+		p.Neck = V(0.6, 0, 0)
+	end}
+-- Commander Nova: low gravity. Huge, fast, floaty bounds with a long hang time. Idle: drifts up, waves hello. Catch: a slow somersault.
+MOTION.nova = {Stride = 13,
+	Gait = function(p, ph)
+		local air = abs(sin(ph)) ^ 0.55 -- rounded top: lots of hang time
+		local a = sin(ph)
+		p.LH, p.RH = V(1.0 * a, 0, -0.1), V(-1.0 * a, 0, 0.1)
+		arms(p, V(-0.6 * a + 0.3, 0, -0.9 - 0.3 * air), V(0.6 * a + 0.3, 0, 0.9 + 0.3 * air))
+		p.Root = V(-0.15 + 0.1 * air, 0, 0)
+		p.Off = V(0, 3.2 * air, 0)
+	end,
+	Idle = function(p, t)
+		p.Off = V(0, 0.5 + 0.3 * sin(t * 0.9), 0)
+		p.Root = V(0.06 * sin(t * 0.5), 0, 0.06 * sin(t * 0.7))
+		p.RS = V(0.3 + 0.15 * sin(t * 4), 0, 2.4)
+		p.LS = V(0.1, 0, -0.5)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 1.6, 0, 1)
+		p.Root = V(-f * 2 * pi, 0, 0)
+		p.Off = V(0, 4 * sin(f * pi), 0)
+		p.LH, p.RH = V(1.2 * sin(f * pi), 0, 0), V(1.2 * sin(f * pi), 0, 0)
+		arms(p, V(0.5, 0, -1.0), V(0.5, 0, 1.0))
+	end}
+-- Zorp: a jelly-limbed run, every limb flopping a beat behind. Idle: strokes its chin, head wobbling. Catch: waves all its limbs.
+MOTION.zorp = {Stride = 4.8,
+	Gait = function(p, ph)
+		legs(p, ph, 0.7, 0)
+		p.LH += V(0, 0, 0.3 * sin(ph * 2))
+		p.RH += V(0, 0, 0.3 * sin(ph * 2 + 1))
+		arms(p, V(-1.2 * sin(ph - 0.8), 0, -0.7 - 0.4 * sin(ph * 2)), V(1.2 * sin(ph - 0.8), 0, 0.7 + 0.4 * sin(ph * 2 + 1)))
+		p.Root = V(0, 0.3 * sin(ph - 0.5), 0.2 * sin(ph * 2))
+		p.Neck = V(0.2 * sin(ph * 2), 0, 0.4 * sin(ph - 1))
+		p.Off = V(0, 0.3 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.RS = V(1.4, 0, 0.2)
+		p.LS = V(0.9, 0.4, -0.2)
+		p.Neck = V(0.1 * sin(t * 2), 0, 0.3 * sin(t * 1.3))
+		p.Root = V(0, 0, 0.08 * sin(t * 1.1))
+	end,
+	Catch = function(p, age)
+		arms(p, V(1.5 + 0.8 * sin(age * 9), 0, -1.2), V(1.5 + 0.8 * sin(age * 9 + 2), 0, 1.2))
+		p.Neck = V(0.3 * sin(age * 7), 0, 0.4 * sin(age * 5))
+		p.Root = V(0, 0, 0.3 * sin(age * 6))
+	end}
+-- Dex: slow, heavy underwater wading, arms paddling. Idle: bobs as if floating, arms drifting. Catch: a slow thumbs up.
+MOTION.dex = {Stride = 4.4,
+	Gait = function(p, ph)
+		legs(p, ph, 0.45, 0.05)
+		arms(p, V(0.9 + 0.6 * sin(ph * 2), 0, -0.5), V(0.9 + 0.6 * sin(ph * 2 + pi), 0, 0.5))
+		p.Root = V(-0.3, 0, 0)
+		p.Off = V(0, 0.35 * sin(ph * 2) ^ 2, 0)
+	end,
+	Idle = function(p, t)
+		p.Off = V(0, 0.18 * sin(t * 1.2), 0)
+		arms(p, V(0.3 + 0.2 * sin(t), 0, -0.5), V(0.3 + 0.2 * sin(t + 1), 0, 0.5))
+		p.Neck = V(0.1, 0.3 * sin(t * 0.5), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(1.5, 0, 0.2)
+		p.LS = V(0.2, 0, -0.3)
+		p.Off = V(0, 0.2 * sin(age * 3), 0)
+	end}
+-- King Tridentus: majestic lunging strides, the trident driven forward each step. Idle: surveys his kingdom, chin up.
+-- Catch: raises the trident to the heavens.
+MOTION.tridentus = {Stride = 6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.7, 0)
+		local thrust = max(0, sin(ph * 2))
+		p.RS = V(1.0 + 0.6 * thrust, 0, 0.15)
+		p.LS = V(-0.4 * sin(ph), 0, -0.4)
+		p.Root = V(-0.2, -0.15, 0)
+		p.Neck = V(0.15, 0, 0)
+		p.Off = V(0, 0.25 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t, 1.3)
+		p.RS = V(0.35, 0, 0.3)
+		p.LS = V(0.2, 0, -0.35)
+		p.Neck = V(0.15, 0.35 * sin(t * 0.35), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(3.0, 0, 0.1)
+		p.LS = V(0, 0, -0.9)
+		p.Neck = V(0.5, 0, 0)
+	end}
+-- Mumbles: arms straight out, stiff legs shuffling. Idle: sways on the spot, arms twitching. Catch: spins, bandages flailing.
+MOTION.mumbles = {Stride = 3,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH, p.RH = V(0.35 * a, 0, 0), V(-0.35 * a, 0, 0)
+		arms(p, V(1.55, 0, -0.08 + 0.05 * a), V(1.55, 0, 0.08 - 0.05 * a))
+		p.Root = V(-0.05, 0, 0.12 * a)
+		p.Neck = V(-0.25, 0, 0.2)
+	end,
+	Idle = function(p, t)
+		p.Root = V(0, 0, 0.1 * sin(t * 0.8))
+		arms(p, V(1.1 + 0.1 * sin(t * 5), 0, -0.1), V(0.9, 0, 0.1))
+		p.Neck = V(-0.2, 0, 0.25 * sin(t * 0.8 + 1))
+	end,
+	Catch = function(p, age)
+		p.Root = V(0, age * 8 % (2 * pi), 0)
+		arms(p, V(1.5, 0, -1.2), V(1.5, 0, 1.2))
+	end}
+-- Anubis: a temple-painting side strut, arms bent at sharp angles. Idle: staff planted, head turning slowly like a statue
+-- come to life. Catch: lifts the staff overhead.
+MOTION.anubis = {Stride = 4.6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.65, 0)
+		p.LS = V(0, 0, -1.4)
+		p.RS = V(1.0, 0, 0.2)
+		p.Neck = V(0, 0.4 * sin(ph), 0)
+		p.Root = V(0, -0.2 * sin(ph), 0)
+		p.Off = V(0, 0.2 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.RS = V(0.5, 0, 0.3)
+		p.LS = V(0.15, 0, -0.15)
+		p.Neck = V(0, 0.5 * sin(t * 0.25), 0)
+		p.Off = V(0, 0.02 * sin(t * 1.5), 0)
+	end,
+	Catch = function(p, age)
+		arms(p, V(0.3, 0, -2.6), V(0.3, 0, 2.6))
+		p.Neck = V(0.5, 0, 0)
+		p.Off = V(0, 0.3 * sin(clamp(age / 0.5, 0, 1) * pi / 2), 0)
+	end}
+-- Sir Peppermint: a knightly trot, lance levelled, shield held across. Idle: lance planted, shield up, a slow look along
+-- the hall. Catch: raises the lance in triumph.
+MOTION.peppermint = {Stride = 5,
+	Gait = function(p, ph)
+		legs(p, ph, 0.6, 0)
+		p.RS = V(1.4, 0, 0.15)
+		p.LS = V(1.1, -0.5, -0.1)
+		p.Root = V(-0.15, -0.15, 0)
+		p.Off = V(0, 0.3 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t)
+		p.RS = V(0.3, 0, 0.25)
+		p.LS = V(0.9, -0.4, -0.1)
+		p.Neck = V(0, 0.4 * sin(t * 0.4), 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(2.9, 0, 0.2)
+		p.LS = V(0.8, -0.4, -0.2)
+		p.Neck = V(0.4, 0, 0)
+		p.Off = V(0, 0.25 * abs(sin(age * 6)), 0)
+	end}
+-- Baron von Bonbon: a delighted step-hop skip. Idle: rubs his hands together, scheming. Catch: a chef's kiss.
+MOTION.bonbon = {Stride = 5.2,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(1.0 * max(0, a) - 0.2, 0, 0)
+		p.RH = V(1.0 * max(0, -a) - 0.2, 0, 0)
+		p.RS = V(2.2 + 0.4 * sin(ph * 4), 0, 0.3)
+		p.LS = V(-0.5 * a, 0, -0.6)
+		p.Neck = V(0.2, 0, 0.2 * a)
+		p.Off = V(0, 1.0 * max(0, sin(ph * 2)), 0)
+	end,
+	Idle = function(p, t)
+		arms(p, V(1.1 + 0.08 * sin(t * 8), 0.5, -0.1), V(1.1 - 0.08 * sin(t * 8), -0.5, 0.1))
+		p.Neck = V(-0.15, 0.2 * sin(t * 0.6), 0)
+		p.Root = V(-0.08, 0, 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.6, 0, 1)
+		p.RS = V(1.6 - 0.8 * f, 0, 0.3 + 0.8 * f)
+		p.LS = V(0, 0, -0.5)
+		p.Neck = V(0.3 * f, 0, 0)
+	end}
+-- Pemberton: a frantic penguin waddle, legs barely moving, flippers out. Idle: adjusts his bow tie. Catch: flaps madly and hops.
+MOTION.pemberton = {Stride = 2.2,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH, p.RH = V(0.2 * a, 0, -0.1), V(-0.2 * a, 0, 0.1)
+		arms(p, V(-0.2, 0, -0.7 - 0.25 * abs(a)), V(-0.2, 0, 0.7 + 0.25 * abs(a)))
+		p.Root = V(0, 0.15 * a, 0.32 * a)
+		p.Neck = V(0.1, 0, -0.28 * a)
+		p.Off = V(0, 0.1 * abs(a), 0)
+	end,
+	Idle = function(p, t)
+		p.LS = V(1.4, 0.5, -0.1)
+		p.RS = V(0.1, 0, 0.3)
+		p.Root = V(0, 0, 0.04 * sin(t * 3))
+		p.Neck = V(-0.1, 0, 0)
+	end,
+	Catch = function(p, age)
+		local a = sin(age * 22)
+		arms(p, V(0, 0, -0.8 - 0.6 * a), V(0, 0, 0.8 + 0.6 * a))
+		p.Off = V(0, 0.5 * abs(sin(age * 9)), 0)
+	end}
+-- Yuki: a knuckle gallop, leaning right over, arms reaching to the ground in turns. Idle: hunched, heaving breaths,
+-- sniffing the cold air. Catch: rears up and roars.
+MOTION.yuki = {Stride = 7.5,
+	Gait = function(p, ph)
+		legs(p, ph, 0.75, 0.1)
+		arms(p, V(0.9 + 0.9 * sin(ph + 1.2), 0, -0.25), V(0.9 + 0.9 * sin(ph + 1.2 + pi), 0, 0.25))
+		p.Root = V(-0.75, 0, 0.1 * sin(ph))
+		p.Neck = V(0.7, 0, 0)
+		p.Off = V(0, -1.0 + 0.7 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.Root = V(-0.35 + 0.08 * sin(t * 1.1), 0, 0)
+		p.Neck = V(0.4 + 0.1 * sin(t * 6) * max(0, sin(t * 0.5)), 0.4 * sin(t * 0.45), 0)
+		arms(p, V(0.45, 0, -0.3), V(0.45, 0, 0.3))
+		p.Off = V(0, -0.5 + 0.1 * sin(t * 1.1), 0)
+	end,
+	Catch = function(p, age)
+		p.Root = V(0.35, 0, 0)
+		arms(p, V(2.4, 0, -0.9), V(2.4, 0, 0.9))
+		p.Neck = V(0.8 + shake(age, 30, 0.05), 0, 0)
+	end}
+-- Sheriff Tumbleweed: rides an invisible horse: a bouncing giddy-up, one hand on the reins, one swinging the lasso.
+-- Idle: thumbs in his belt, tips his hat now and then. Catch: spins the lasso overhead.
+MOTION.sheriff = {Stride = 5,
+	Gait = function(p, ph, s)
+		local a = sin(ph)
+		local b = abs(sin(ph))
+		p.LH, p.RH = V(0.5 * a + 0.3, 0, -0.35), V(-0.5 * a + 0.3, 0, 0.35)
+		p.LS = V(1.0, 0, -0.1)
+		p.RS = V(2.6, s.T * 12 % (2 * pi), 0.3)
+		p.Root = V(-0.1 + 0.15 * b, 0, 0)
+		p.Off = V(0, 0.9 * b - 0.3, 0)
+	end,
+	Idle = function(p, t)
+		local f = max(0, sin(t * 0.6)) ^ 4
+		p.RS = V(2.3 * f + 0.2, 0, 0.25)
+		p.LS = V(0.2, 0, -0.3)
+		p.LH, p.RH = V(0, 0, -0.15), V(0, 0, 0.15)
+		p.Neck = V(-0.2 * f, 0, 0)
+	end,
+	Catch = function(p, age)
+		p.RS = V(2.8, age * 16 % (2 * pi), 0.4)
+		p.LS = V(0.2, 0, -0.4)
+		p.Off = V(0, 0.4 * abs(sin(age * 6)), 0)
+	end}
+-- Rattler: an S-shaped slither-run, body swaying side to side. Idle: coils and sways like a charmed snake, tasting the air.
+-- Catch: rears back to strike, then rattles.
+MOTION.rattler = {Stride = 6,
+	Gait = function(p, ph)
+		legs(p, ph, 0.55, 0)
+		arms(p, V(0.5, 0, -0.4), V(0.5, 0, 0.4))
+		p.Root = V(-0.3, 0.35 * sin(ph), 0.2 * sin(ph))
+		p.Neck = V(0.3, -0.4 * sin(ph), 0)
+		p.Off = V(0.7 * sin(ph), 0, 0)
+	end,
+	Idle = function(p, t)
+		p.Root = V(0, 0, 0.12 * sin(t * 1.4))
+		p.Neck = V(0.1, 0, -0.3 * sin(t * 1.4 - 0.6))
+		arms(p, V(0.6, 0.3, -0.2), V(0.6, -0.3, 0.2))
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.4, 0, 1)
+		p.Root = V(0.35 * f, 0, shake(age, 40, 0.05))
+		p.Neck = V(-0.4 * f, 0, 0)
+		arms(p, V(1.2, 0, -0.6), V(1.2, 0, 0.6))
+	end}
+-- Tiki Tok: a war-dance stomp, hopping leg to leg. Idle: drums a slow beat on its own belly. Catch: a stomping war dance.
+MOTION.tiki = {Stride = 4.4,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(1.1 * max(0, a), 0, -0.2)
+		p.RH = V(1.1 * max(0, -a), 0, 0.2)
+		p.RS = V(2.4, 0, 0.4)
+		p.LS = V(1.5, 0, -0.8 + 0.3 * a)
+		p.Root = V(0, 0, 0.2 * a)
+		p.Off = V(0, 0.8 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		local a = sin(t * 4)
+		p.LS = V(0.6 + 0.3 * max(0, a), 0, -0.1)
+		p.RS = V(0.6 + 0.3 * max(0, -a), 0, 0.1)
+		p.Off = V(0, 0.03 * abs(a), 0)
+	end,
+	Catch = function(p, age)
+		local a = sin(age * 10)
+		p.RS = V(2.6, 0, 0.4 + 0.2 * a)
+		p.LS = V(1.6, 0, -0.6)
+		p.LH = V(1.0 * max(0, a), 0, -0.3)
+		p.Off = V(0, 0.7 * abs(a), 0)
+	end}
+-- Itza: a low prowl that bursts into a pouncing sprint. Idle: crouched and coiled, tail-flick sway. Catch: a pounce, then a cat stretch.
+MOTION.itza = {Stride = 7.8,
+	Gait = function(p, ph)
+		legs(p, ph, 0.9, 0)
+		arms(p, V(0.9 + 0.5 * sin(ph + pi), 0, -0.2), V(0.9 + 0.5 * sin(ph), 0, 0.2))
+		p.Root = V(-0.8, 0, 0)
+		p.Neck = V(0.85, 0, 0)
+		p.Off = V(0, -1.1 + 0.35 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.LH, p.RH = V(0.6, 0, -0.1), V(0.6, 0, 0.1)
+		p.Root = V(-0.35, 0, 0.06 * sin(t * 2))
+		p.Neck = V(0.45, 0.3 * sin(t * 0.7), 0)
+		arms(p, V(0.6, 0, -0.2), V(0.6, 0, 0.2))
+		p.Off = V(0, -0.8, 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.6, 0, 1)
+		p.Root = V(-0.8 * (1 - f) + 0.3 * f, 0, 0)
+		arms(p, V(2.5, 0, -0.3), V(2.5, 0, 0.3))
+		p.Off = V(0, 1.4 * sin(f * pi), 0)
+	end}
+-- Wobbles: a skipping clown run, arms windmilling. Idle: juggles invisible balls. Catch: doubles over laughing.
+MOTION.wobbles = {Stride = 5,
+	Gait = function(p, ph, s)
+		legs(p, ph, 0.8, 0.1)
+		arms(p, V(s.T * 9 % (2 * pi), 0, -0.8), V((s.T * 9 + pi) % (2 * pi), 0, 0.8))
+		p.Root = V(0.1 * sin(ph * 2), 0, 0.15 * sin(ph))
+		p.Off = V(0, 0.6 * max(0, sin(ph * 2)), 0)
+	end,
+	Idle = function(p, t)
+		p.LS = V(1.0 + 0.4 * sin(t * 6), 0, -0.2)
+		p.RS = V(1.0 + 0.4 * sin(t * 6 + pi), 0, 0.2)
+		p.Neck = V(0.3 + 0.1 * sin(t * 6), 0, 0)
+	end,
+	Catch = function(p, age)
+		p.Root = V(-0.5 + shake(age, 16, 0.1), 0, 0)
+		arms(p, V(0.6, 0, -0.4), V(0.6, 0, 0.4))
+		p.Neck = V(0.6, 0, 0)
+	end}
+-- Taurus: a head-down bull charge, horns first. Idle: paws the ground with one hoof, snorting. Catch: flexes in a strongman pose.
+MOTION.taurus = {Stride = 6.4,
+	Gait = function(p, ph)
+		legs(p, ph, 0.75, 0.05)
+		swing(p, ph, 0.5, 0.35, 0.2)
+		p.Root = V(-0.4, 0, 0.08 * sin(ph))
+		p.Neck = V(-0.35, 0, 0)
+		p.Off = V(0, 0.3 * abs(sin(ph)), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t, 1.6)
+		local paw = max(0, sin(t * 1.8)) * (sin(t * 0.4) > 0.3 and 1 or 0)
+		p.RH = V(0.4 * paw, 0, 0.05)
+		p.Neck = V(-0.15 - 0.08 * paw, 0, 0)
+		arms(p, V(0.15, 0, -0.35), V(0.15, 0, 0.35))
+	end,
+	Catch = function(p, age)
+		arms(p, V(0.2, 0, -1.6), V(0.2, 0, 1.6))
+		p.Root = V(0.1, 0, 0)
+		p.Neck = V(0.3, 0, 0)
+	end}
+-- Jetpack Jenny: skims along in the air, legs trailing, leaning into the flight. Idle: hovers, shading her eyes to scan the
+-- horizon. Catch: a loop-the-loop.
+MOTION.jenny = {Stride = 10,
+	Gait = function(p, ph, s)
+		p.LH, p.RH = V(-0.4, 0, -0.1), V(-0.6, 0, 0.1)
+		arms(p, V(0.2, 0, -0.6), V(0.2, 0, 0.6))
+		p.Root = V(-0.7, 0, 0.1 * sin(s.T * 2))
+		p.Neck = V(0.6, 0, 0)
+		p.Off = V(0, 2.4 + 0.4 * sin(s.T * 3), 0)
+	end,
+	Idle = function(p, t)
+		p.Off = V(0, 1.2 + 0.2 * sin(t * 3), 0)
+		p.LS = V(2.2, 0, -0.3)
+		p.RS = V(0, 0, 0.3)
+		p.Neck = V(0.1, 0.5 * sin(t * 0.5), 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 1.2, 0, 1)
+		p.Root = V(f * 2 * pi, 0, 0)
+		p.Off = V(0, 2.4 + 2.5 * sin(f * pi), 0)
+	end}
+-- Ironclad: piston-powered strides, knees pumping high, steam with each step. Idle: stands still, furnace breathing,
+-- the occasional mechanical twitch. Catch: a steam-powered fist pump.
+MOTION.ironclad = {Stride = 6,
+	Gait = function(p, ph)
+		local a = sin(ph)
+		p.LH = V(1.2 * max(0, a) - 0.25, 0, 0)
+		p.RH = V(1.2 * max(0, -a) - 0.25, 0, 0)
+		swing(p, ph, 0.5, 0.25)
+		p.Off = V(0, 0.55 * abs(a), 0)
+	end,
+	Idle = function(p, t)
+		breathe(p, t, 1.2)
+		local twitch = (t % 3.1 < 0.12) and 0.15 or 0
+		p.RS = V(0.2 + twitch, 0, 0.25)
+		p.LS = V(0.2, 0, -0.25)
+	end,
+	Catch = function(p, age)
+		local a = abs(sin(age * 8))
+		p.RS = V(2.0 + 0.8 * a, 0, 0.2)
+		p.LS = V(0, 0, -0.3)
+		p.Off = V(0, 0.8 * a, 0)
+	end}
+-- Moe: a crouched scurry, claws digging at the air. Idle: squints and sniffs, claws rubbing together. Catch: digs in a frenzy of delight.
+MOTION.moe = {Stride = 2.4,
+	Gait = function(p, ph)
+		legs(p, ph, 0.55, 0.1)
+		arms(p, V(1.2 + 0.7 * sin(ph * 2), 0, -0.3), V(1.2 + 0.7 * sin(ph * 2 + pi), 0, 0.3))
+		p.Root = V(-0.45, 0, 0.12 * sin(ph))
+		p.Neck = V(0.45, 0.25 * sin(ph * 2), 0)
+		p.Off = V(0, -0.5 + 0.15 * abs(cos(ph)), 0)
+	end,
+	Idle = function(p, t)
+		p.Neck = V(0.25 + 0.1 * sin(t * 10), 0.3 * sin(t * 0.8), 0)
+		arms(p, V(1.1, 0.4 + 0.1 * sin(t * 7), -0.1), V(1.1, -0.4 - 0.1 * sin(t * 7), 0.1))
+		p.Root = V(-0.2, 0, 0)
+	end,
+	Catch = function(p, age)
+		arms(p, V(0.8 + 0.8 * sin(age * 16), 0, -0.2), V(0.8 + 0.8 * sin(age * 16 + pi), 0, 0.2))
+		p.Root = V(-0.55, 0, 0)
+		p.Off = V(0, -0.5 + 0.2 * abs(sin(age * 8)), 0)
+	end}
+-- Queen Lumina: grand jetes, arms in a perfect arc, a pirouette now and then. Idle: a slow, regal pirouette on the spot.
+-- Catch: a curtsy.
+MOTION.lumina = {Stride = 10,
+	Gait = function(p, ph, s)
+		local air = abs(sin(ph))
+		local lead = sin(ph) >= 0 and 1 or -1
+		p.LH, p.RH = V(1.2 * air * lead, 0, 0), V(-1.2 * air * lead, 0, 0)
+		arms(p, V(0.6, 0, -1.8), V(0.6, 0, 1.8))
+		p.Neck = V(0.3, 0, 0)
+		p.Root = V(0, (s.T % 6 < 0.8) and (s.T % 6) / 0.8 * 2 * pi or 0, 0)
+		p.Off = V(0, 2.2 * air ^ 0.8, 0)
+	end,
+	Idle = function(p, t)
+		p.Root = V(0, (t * 0.6) % (2 * pi), 0)
+		arms(p, V(0.5, 0, -2.3), V(0.5, 0, 2.3))
+		p.Off = V(0, 0.25, 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.8, 0, 1)
+		p.RH = V(-0.4 * sin(f * pi), 0, 0.2)
+		arms(p, V(0.2, 0, -1.0), V(0.2, 0, 1.0))
+		p.Root = V(-0.2 * sin(f * pi), 0, 0)
+		p.Off = V(0, -0.5 * sin(f * pi), 0)
+	end}
+-- Chronos: moves in skipped frames: freezes, jumps ahead, rewinds a little. Idle: turns his hourglass over, impatient.
+-- Catch: spins backwards in jerky rewinds.
+MOTION.chronos = {Stride = 4.4,
+	Gait = function(p, ph, s)
+		local glitch = (s.T * 3) % 1
+		local q = math.floor((ph + (glitch < 0.15 and -0.6 or 0)) / 0.7) * 0.7
+		legs(p, q, 0.65, 0)
+		swing(p, q, 0.4, 0.1)
+		p.RS = V(1.4, 0, 0.2)
+		p.Root = V(-0.1, (glitch < 0.15) and 0.25 or 0, 0)
+		p.Off = V((glitch < 0.15) and 0.4 or 0, 0.2 * abs(cos(q)), 0)
+	end,
+	Idle = function(p, t)
+		local f = (t % 4) / 4
+		p.RS = V(1.2, f < 0.25 and f / 0.25 * pi or pi, 0.2)
+		p.LS = V(0, 0, -0.2)
+		p.Neck = V(-0.3, 0, 0)
+	end,
+	Catch = function(p, age)
+		p.Root = V(0, -math.floor(age * 10) * 0.6, 0)
+		p.RS = V(2.8, 0, 0.3)
+		p.LS = V(1.0, 0, -1.0)
+	end}
+-- The Game Master: never walks; floats with arms raised. Idle: hovers, arms folded, slowly turning to watch the hall.
+-- Catch: rises high, arms flung wide.
+MOTION.gamemaster = {Stride = 9,
+	Gait = function(p, ph, s)
+		p.LH, p.RH = V(-0.15, 0, -0.08), V(-0.05, 0, 0.08)
+		arms(p, V(0.4, 0, -2.2 + 0.15 * sin(s.T * 2)), V(0.4, 0, 2.2 - 0.15 * sin(s.T * 2)))
+		p.Root = V(-0.2, 0, 0)
+		p.Off = V(0, 3.5 + 0.5 * sin(s.T * 1.6), 0)
+	end,
+	Idle = function(p, t)
+		p.Off = V(0, 2.5 + 0.4 * sin(t * 1.2), 0)
+		arms(p, V(0.9, 0.9, 0.2), V(0.9, -0.9, -0.2))
+		p.Root = V(0, 0.3 * sin(t * 0.25), 0)
+	end,
+	Catch = function(p, age)
+		local f = clamp(age / 0.6, 0, 1)
+		arms(p, V(0.6, 0, -2.6 * f), V(0.6, 0, 2.6 * f))
+		p.Neck = V(0.7 * f, 0, 0)
+		p.Root = V(0.25 * f, 0, 0)
+		p.Off = V(0, 3.5 + 2 * f, 0)
+	end}
+
+-- the taunt when a chase starts: points straight at you
+local function taunt(p, age)
+	p.RS = V(1.57, 0, 0.1)
+	p.Neck = V(0, 0, 0.1 * sin(age * 10))
+end
+
+------------------------------------------------------------------
+-- RUNNING THEM
+------------------------------------------------------------------
+local guards = {} -- model -> state
+local function track(model)
+	if guards[model] or not model:IsA("Model") then return end
+	guards[model] = {Model = model, Phase = 0, MoveW = 0, ActW = 0, Speed = 0, Moving = false, Seed = math.random() * 100}
+end
+local function untrack(model)
+	local st = guards[model]
+	if st and st.Joints then
+		for _, j in pairs(st.Joints) do
+			if j.Parent then
+				j.Transform = CFrame.identity
+			end
+		end
+	end
+	guards[model] = nil
+end
+local function findJoints(st)
+	local joints = {}
+	for _, d in ipairs(st.Model:GetDescendants()) do
+		if d:IsA("Motor6D") or d:IsA("AnimationConstraint") then
+			for key, name in pairs(JOINTS) do
+				if d.Name == name then
+					joints[key] = d
+				end
+			end
+		end
+	end
+	if joints.Root then
+		st.Joints = joints
+	end
+end
+
+local function lerpPose(a, b, w)
+	for _, k in ipairs(KEYS) do
+		a[k] = a[k]:Lerp(b[k], w)
+	end
+	a.Off = a.Off:Lerp(b.Off, w)
+end
+
+local function step(dt)
+	local cam = workspace.CurrentCamera
+	local camPos = cam and cam.CFrame.Position or Vector3.zero
+	local now = workspace:GetServerTimeNow()
+	local t = os.clock()
+	for model, st in pairs(guards) do
+		local root = model.Parent and model.PrimaryPart
+		if not root then
+			continue
+		end
+		if (root.Position - camPos).Magnitude > NEAR then
+			st.Far = true
+			continue
+		end
+		if not st.Joints then
+			findJoints(st)
+			if not st.Joints then
+				continue
+			end
+		end
+		local scale = model:GetAttribute("Scale") or 4
+		local m = MOTION[model:GetAttribute("Motion")] or MOTION.brutus
+
+		-- how far they really moved since last frame (a teleport home or a stream-in doesn't count)
+		local pos = root.Position
+		local moved = st.Last and Vector3.new(pos.X - st.Last.X, 0, pos.Z - st.Last.Z).Magnitude or 0
+		st.Last = pos
+		if st.Far or moved > 60 * scale * dt + 20 then
+			moved = 0
+			st.Far = false
+		end
+		-- smoothed speed in body lengths a second, with hysteresis between standing and moving
+		local speed = moved / math.max(dt, 1 / 240) / scale
+		st.Speed += (speed - st.Speed) * (1 - math.exp(-dt * 10))
+		if st.Moving and st.Speed < MOVE_OFF then
+			st.Moving = false
+		elseif not st.Moving and st.Speed > MOVE_ON then
+			st.Moving = true
+		end
+		st.MoveW += ((st.Moving and 1 or 0) - st.MoveW) * (1 - math.exp(-dt * 7))
+		local stride = m.Stride * scale
+		local before = st.Phase
+		st.Phase = (st.Phase + moved / stride * 2 * pi) % (4 * pi)
+		-- a footstep each time the stride passes a half cycle (the footstep sound lives in StealAGameClient)
+		if st.Moving and math.floor(before / pi) ~= math.floor(st.Phase / pi) then
+			model:SetAttribute("StepTick", (model:GetAttribute("StepTick") or 0) + 1)
+		end
+
+		local s = {T = t + st.Seed}
+		local pose = newPose()
+		m.Idle(pose, t + st.Seed)
+		if st.MoveW > 0.01 then
+			local gp = newPose()
+			m.Gait(gp, st.Phase, s)
+			lerpPose(pose, gp, st.MoveW)
+		end
+		-- one-off reactions, eased in and out
+		local act = model:GetAttribute("Act")
+		local age = now - (model:GetAttribute("ActAt") or 0)
+		local dur = act == "catch" and 1.8 or act == "taunt" and 0.9 or 0
+		st.ActW += (((age >= 0 and age < dur) and 1 or 0) - st.ActW) * (1 - math.exp(-dt * 12))
+		if st.ActW > 0.01 then
+			local ap = newPose()
+			if act == "catch" then
+				m.Catch(ap, math.max(0, age))
+			else
+				taunt(ap, math.max(0, age))
+			end
+			lerpPose(pose, ap, st.ActW)
+		end
+
+		for key, joint in pairs(st.Joints) do
+			local r = pose[key]
+			if key == "Root" then
+				joint.Transform = CFrame.new(pose.Off * scale) * CFrame.fromEulerAnglesXYZ(r.X, r.Y, r.Z)
+			else
+				joint.Transform = CFrame.fromEulerAnglesXYZ(r.X, r.Y, r.Z)
+			end
+		end
+	end
+end
+
+task.spawn(function()
+	local map = workspace:WaitForChild("StealAGameMap", 60)
+	local folder = map and map:WaitForChild("Shopkeepers", 60)
+	if not folder then return end
+	for _, m in ipairs(folder:GetChildren()) do
+		track(m)
+	end
+	folder.ChildAdded:Connect(track)
+	folder.ChildRemoved:Connect(untrack)
+	RunService.PreSimulation:Connect(step)
+end)

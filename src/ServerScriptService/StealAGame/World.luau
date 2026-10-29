@@ -86,11 +86,18 @@ function World.build(C, Kit)
 	local ENTRANCE = Vector3.new(0, 0, C.HALL_START_Z)
 	W.Entrance = ENTRANCE
 
+	-- Every level has its own length (C.LEVELS[i].Len), so the levels' start lines are added up once here
+	local starts = {}
+	local z = C.HALL_START_Z
+	for i, L in ipairs(C.LEVELS) do
+		starts[i] = z
+		z += L.Len
+	end
+	local hallEnd = z
 	local function segStart(level)
-		return C.HALL_START_Z + (level - 1) * C.SEG_LEN
+		return starts[level]
 	end
 	W.segStart = segStart
-	local hallEnd = segStart(C.NUM_LEVELS) + C.SEG_LEN
 	W.HallEnd = hallEnd
 
 	-- Which vault level is this position in? (nil = outside the vault)
@@ -98,7 +105,12 @@ function World.build(C, Kit)
 		if math.abs(pos.X) > C.ROOM_W / 2 or pos.Y > C.WALL_H or pos.Z < C.HALL_START_Z or pos.Z > hallEnd then
 			return nil
 		end
-		return math.clamp(math.floor((pos.Z - C.HALL_START_Z) / C.SEG_LEN) + 1, 1, C.NUM_LEVELS)
+		for i = C.NUM_LEVELS, 1, -1 do
+			if pos.Z >= starts[i] then
+				return i
+			end
+		end
+		return 1
 	end
 
 	------------------------------------------------------------------
@@ -131,25 +143,42 @@ function World.build(C, Kit)
 	------------------------------------------------------------------
 	-- SKY
 	------------------------------------------------------------------
-	Lighting.ClockTime = 13
-	Lighting.Brightness = 3.2
+	-- A bright midday: deep blue overhead fading to a pale horizon, real volumetric clouds drifting across it.
+	-- The vault walls are low enough (C.WALL_H) that this sky fills the view from everywhere inside.
+	Lighting.ClockTime = 13.5
+	Lighting.GeographicLatitude = 35
+	Lighting.Brightness = 3
 	Lighting.Ambient = rgb(130, 130, 140)
-	Lighting.OutdoorAmbient = rgb(185, 185, 195)
-	Lighting.ExposureCompensation = 0.15
+	Lighting.OutdoorAmbient = rgb(175, 180, 195)
+	Lighting.ExposureCompensation = 0.1
 	local grade = Lighting:FindFirstChild("WorldColor") or Instance.new("ColorCorrectionEffect")
 	grade.Name = "WorldColor"
-	grade.Saturation = 0.25
-	grade.Brightness = 0.03
-	grade.Contrast = 0.05
+	grade.Saturation = 0.2
+	grade.Brightness = 0.02
+	grade.Contrast = 0.06
 	grade.Parent = Lighting
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmosphere.Density = 0.12
-	atmosphere.Offset = 0.1
-	atmosphere.Haze = 0.8
-	atmosphere.Color = rgb(190, 215, 255)
-	atmosphere.Decay = rgb(120, 160, 230)
+	-- thin air: blue sky overhead, only a soft haze down at the horizon (a thick one washed the sky out to grey)
+	atmosphere.Density = 0.22
+	atmosphere.Offset = 0.05
+	atmosphere.Haze = 0.6
+	atmosphere.Glare = 0.15
+	atmosphere.Color = rgb(200, 225, 255)
+	atmosphere.Decay = rgb(92, 150, 235)
 	atmosphere.Parent = Lighting
+	-- Roblox's own sky (a Sky with no textures set draws the default blue sky with a sun)
+	if not Lighting:FindFirstChildOfClass("Sky") then
+		local sky = Instance.new("Sky")
+		sky.Name = "BlueSky"
+		sky.SunAngularSize = 14
+		sky.Parent = Lighting
+	end
 	workspace.Terrain:Clear()
+	local clouds = workspace.Terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
+	clouds.Cover = 0.55
+	clouds.Density = 0.6
+	clouds.Color = rgb(255, 255, 255)
+	clouds.Parent = workspace.Terrain
 	local baseplate = workspace:FindFirstChild("Baseplate")
 	if baseplate then
 		baseplate:Destroy()
@@ -174,7 +203,19 @@ function World.build(C, Kit)
 	------------------------------------------------------------------
 	-- THE ISLAND
 	------------------------------------------------------------------
-	cyl(lobby, 12, C.ISLAND_R * 2, CFrame.new(ENTRANCE + Vector3.new(0, -6, 0)), {Name = "Island", Color = rgb(80, 210, 70), Material = M.Grass})
+	-- a soft, warm meadow green (not a flat neon one), with large, faint patches of lighter and darker grass so the
+	-- lawn reads as one natural surface rather than a single colour
+	local GRASS = rgb(104, 182, 78)
+	cyl(lobby, 12, C.ISLAND_R * 2, CFrame.new(ENTRANCE + Vector3.new(0, -6, 0)), {Name = "Island", Color = GRASS, Material = M.Grass})
+	do
+		local tones = {GRASS:Lerp(rgb(150, 196, 96), 0.35), GRASS:Lerp(rgb(70, 140, 60), 0.3), GRASS:Lerp(rgb(170, 190, 100), 0.25)}
+		for k = 1, 26 do
+			local a = rng:NextNumber(0, math.pi * 2)
+			local r = rng:NextNumber(90, C.ISLAND_R - 70)
+			local size = rng:NextNumber(40, 90)
+			cyl(lobby, 0.04, size, CFrame.new(ENTRANCE + Vector3.new(math.cos(a) * r, 0.02, math.sin(a) * r)), {Name = "Meadow", Color = tones[k % #tones + 1], Material = M.Grass, CanCollide = false, CanQuery = false, CastShadow = false})
+		end
+	end
 	cyl(lobby, 10, C.ISLAND_R * 2 + 8, CFrame.new(ENTRANCE + Vector3.new(0, -11, 0)), {Name = "IslandRim", Color = rgb(120, 85, 55), Material = M.Ground})
 	for i = 1, 7 do
 		local r = C.ISLAND_R * (1 - i * 0.125)
@@ -195,6 +236,7 @@ function World.build(C, Kit)
 	-- Stone walkways: a loop in front of the bases, a main path to the vault, a short path to each base
 	-- (each base sits back from the loop behind a front yard, where its treadmill stands)
 	local PATH = rgb(200, 192, 176)
+	local EDGE = rgb(146, 136, 120) -- the kerb along every walkway
 	local LOOP_R = C.LOOP_R
 	local function inHall(pos, pad)
 		return math.abs(pos.X) < C.ROOM_W / 2 + pad and pos.Z > C.HALL_START_Z - 2
@@ -207,14 +249,31 @@ function World.build(C, Kit)
 			local pos = ENTRANCE + Vector3.new(math.sin(a), 0, -math.cos(a)) * LOOP_R
 			if not inHall(pos, 4) then
 				part(lobby, {Name = "Walkway", Size = Vector3.new(chord + 0.4, 0.2, 14), CFrame = CFrame.lookAt(pos + Vector3.new(0, 0.1, 0), ENTRANCE + Vector3.new(0, 0.1, 0)), Color = PATH, Material = M.Pavement})
+				part(lobby, {Name = "WalkwayEdge", Size = Vector3.new(chord + 0.4, 0.14, 15.6), CFrame = CFrame.lookAt(pos + Vector3.new(0, 0.07, 0), ENTRANCE + Vector3.new(0, 0.07, 0)), Color = EDGE, Material = M.Slate, CanCollide = false})
 			end
 		end
 		local function path(r1, r2, angle, width)
 			local dir = Vector3.new(math.sin(angle), 0, -math.cos(angle))
 			local a, b = ENTRANCE + dir * r1, ENTRANCE + dir * r2
 			part(lobby, {Name = "Walkway", Size = Vector3.new(width, 0.24, (b - a).Magnitude), CFrame = CFrame.lookAt((a + b) / 2 + Vector3.new(0, 0.12, 0), b + Vector3.new(0, 0.12, 0)), Color = PATH, Material = M.Pavement})
+			part(lobby, {Name = "WalkwayEdge", Size = Vector3.new(width + 1.6, 0.14, (b - a).Magnitude), CFrame = CFrame.lookAt((a + b) / 2 + Vector3.new(0, 0.07, 0), b + Vector3.new(0, 0.07, 0)), Color = EDGE, Material = M.Slate, CanCollide = false})
 		end
-		path(12, LOOP_R - 7, 0, 24)
+		path(12, LOOP_R - 7, 0, 30)
+		-- VAULT PLAZA: a paved half-circle in front of the entrance, rimmed in gold
+		do
+			local PLAZA_R = 70
+			for i = 0, 17 do
+				local a0 = math.pi / 2 + (i + 0.5) / 18 * math.pi
+				local mid = ENTRANCE + Vector3.new(math.sin(a0) * PLAZA_R / 2, 0, -math.abs(math.cos(a0)) * PLAZA_R / 2 - 10)
+				-- smooth plastic: neighbouring slices overlap a little near the middle, and an untextured surface hides that
+				part(lobby, {Name = "Plaza", Size = Vector3.new(2 * PLAZA_R * math.sin(math.pi / 36) + 2, 0.3, PLAZA_R), CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.15, 0), ENTRANCE + Vector3.new(0, 0.15, -10)), Color = rgb(226, 218, 200), Material = M.SmoothPlastic})
+			end
+			for i = 0, 35 do
+				local a = math.pi / 2 + (i + 0.5) / 36 * math.pi
+				local pos = ENTRANCE + Vector3.new(math.sin(a) * PLAZA_R, 0, math.cos(a) * PLAZA_R - 10)
+				part(lobby, {Name = "PlazaRim", Size = Vector3.new(2 * PLAZA_R * math.sin(math.pi / 72) + 0.6, 0.4, 2), CFrame = CFrame.lookAt(pos + Vector3.new(0, 0.2, 0), ENTRANCE + Vector3.new(0, 0.2, -10)), Color = Kit.GOLD, Material = M.Metal})
+			end
+		end
 		for i = 1, C.NUM_PLOTS do
 			path(LOOP_R + 7, C.BASE_RING_RADIUS - C.PLOT_D / 2, math.rad(-C.BASE_ARC / 2 + (i - 1) * C.BASE_ARC / (C.NUM_PLOTS - 1)), 12)
 		end
@@ -481,34 +540,259 @@ function World.build(C, Kit)
 				Kit.wedge(parent, {Size = Vector3.new(0.4, 3, 2.4), CFrame = face * CFrame.new(0, 2, 0) * CFrame.Angles(0, i * math.pi * 2 / 3, 0) * CFrame.new(0, 0, -2.2), Color = rgb(235, 50, 60)})
 			end
 			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(2.4, 1.6, 2.4), CFrame = face * CFrame.new(0, 0.6, 0), Color = rgb(255, 170, 40), Material = M.Neon, CanCollide = false})
+		elseif kind == "candelabra" then
+			cyl(parent, 9, 0.6, face * CFrame.new(0, 4.5, 0), {Color = Kit.GOLD, Material = M.Metal})
+			cyl(parent, 0.6, 3, face * CFrame.new(0, 0.3, 0), {Color = Kit.GOLD, Material = M.Metal})
+			part(parent, {Size = Vector3.new(6, 0.5, 0.5), CFrame = face * CFrame.new(0, 8.6, 0), Color = Kit.GOLD, Material = M.Metal})
+			for i = -1, 1 do
+				cyl(parent, 2, 0.6, face * CFrame.new(i * 2.6, 9.9, 0), {Color = rgb(245, 240, 225)})
+				local flame = part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(0.5, 0.9, 0.5), CFrame = face * CFrame.new(i * 2.6, 11.3, 0), Color = rgb(255, 200, 90), Material = M.Neon, CanCollide = false})
+				if i == 0 then
+					local l = Instance.new("PointLight")
+					l.Color = rgb(255, 170, 90)
+					l.Range = 14
+					l.Shadows = false
+					l.Parent = flame
+				end
+			end
+		elseif kind == "cannon" then
+			cyl(parent, 1, 5, face * CFrame.new(0, 0.5, 0), {Color = rgb(90, 60, 35), Material = M.Wood})
+			for _, wx in ipairs({-2.2, 2.2}) do
+				part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 3.4, 3.4), CFrame = face * CFrame.new(wx, 1.7, 0), Color = rgb(70, 45, 25), Material = M.Wood})
+			end
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(7, 2.2, 2.2), CFrame = face * CFrame.new(0, 2.6, -1) * CFrame.Angles(0, math.pi / 2, 0.3), Color = rgb(45, 45, 50), Material = M.Metal})
+			for k = 0, 2 do
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = face * CFrame.new(2.8 + (k % 2) * 1.2, 0.65 + math.floor(k / 2) * 1, 2), Color = rgb(30, 30, 35), Material = M.Metal})
+			end
+		elseif kind == "blossom" then
+			cyl(parent, 12, 1.4, face * CFrame.new(0, 6, 0), {Color = rgb(80, 50, 40), Material = M.Wood})
+			part(parent, {Size = Vector3.new(0.9, 6, 0.9), CFrame = face * CFrame.new(1.6, 11, 0) * CFrame.Angles(0, 0, -0.6), Color = rgb(80, 50, 40), Material = M.Wood})
+			for _ = 1, 6 do
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.one * rng:NextNumber(4, 6.5), CFrame = face * CFrame.new(rng:NextNumber(-3.5, 4), rng:NextNumber(12, 15.5), rng:NextNumber(-2.5, 2.5)), Color = rgb(255, rng:NextInteger(170, 200), rng:NextInteger(200, 220)), Material = M.Grass, CanCollide = false, CastShadow = false})
+			end
+		elseif kind == "brazier" then
+			cyl(parent, 5, 1.2, face * CFrame.new(0, 2.5, 0), {Color = rgb(50, 40, 40), Material = M.Metal})
+			local bowl = part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.6, 6, 6), CFrame = face * CFrame.new(0, 5.6, 0) * CFrame.Angles(0, 0, math.pi / 2), Color = rgb(70, 50, 40), Material = M.Metal})
+			local fire = Instance.new("Fire")
+			fire.Size = 7
+			fire.Heat = 10
+			fire.Color = rgb(255, 140, 30)
+			fire.SecondaryColor = rgb(200, 40, 0)
+			fire.Parent = bowl
+			local l = Instance.new("PointLight")
+			l.Color = rgb(255, 140, 60)
+			l.Range = 18
+			l.Shadows = false
+			l.Parent = bowl
+		elseif kind == "column" then
+			cyl(parent, 1.2, 6, face * CFrame.new(0, 0.6, 0), {Color = rgb(240, 240, 235), Material = M.Marble})
+			cyl(parent, 20, 3.6, face * CFrame.new(0, 11, 0), {Color = rgb(245, 245, 240), Material = M.Marble})
+			for k = 0, 7 do
+				part(parent, {Size = Vector3.new(0.5, 19.6, 0.5), CFrame = face * CFrame.Angles(0, k * math.pi / 4, 0) * CFrame.new(1.75, 11, 0), Color = rgb(225, 225, 220), Material = M.Marble})
+			end
+			part(parent, {Size = Vector3.new(6.4, 1.6, 6.4), CFrame = face * CFrame.new(0, 21.8, 0), Color = color, Material = M.Metal})
+		elseif kind == "urn" then
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(4.2, 5, 4.2), CFrame = face * CFrame.new(0, 3, 0), Color = rgb(200, 110, 60), Material = M.Slate})
+			cyl(parent, 1.6, 2.4, face * CFrame.new(0, 6.1, 0), {Color = rgb(200, 110, 60), Material = M.Slate})
+			cyl(parent, 0.5, 3.2, face * CFrame.new(0, 7, 0), {Color = color, Material = M.Metal})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.8, 4.3, 4.3), CFrame = face * CFrame.new(0, 3.2, 0) * CFrame.Angles(0, 0, math.pi / 2), Color = rgb(30, 30, 30), Material = M.Slate})
+		elseif kind == "coral" then
+			local colors = {rgb(255, 110, 120), rgb(255, 160, 90), rgb(200, 90, 220), rgb(255, 210, 90)}
+			for k = 1, 5 do
+				local h = rng:NextNumber(3, 8)
+				local c = colors[(k % #colors) + 1]
+				local base = face * CFrame.new(rng:NextNumber(-2.5, 2.5), 0, rng:NextNumber(-2, 2)) * CFrame.Angles(rng:NextNumber(-0.4, 0.4), 0, rng:NextNumber(-0.4, 0.4))
+				cyl(parent, h, 0.9, base * CFrame.new(0, h / 2, 0), {Color = c, Material = M.Pebble, CanCollide = false})
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.one * 1.6, CFrame = base * CFrame.new(0, h, 0), Color = c, Material = M.Pebble, CanCollide = false})
+			end
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(6, 2.4, 5), CFrame = face * CFrame.new(0, 0.6, 0), Color = rgb(150, 130, 120), Material = M.Rock})
+		elseif kind == "shell" then
+			for k = 0, 6 do
+				part(parent, {Size = Vector3.new(1.1, 0.6, 5), CFrame = face * CFrame.new(0, 0.5, 0) * CFrame.Angles(0, (k - 3) * 0.32, 0) * CFrame.new(0, 0, -2.3) * CFrame.Angles(-0.25, 0, 0), Color = rgb(255, 225, 210):Lerp(rgb(255, 170, 160), k / 6), Material = M.SmoothPlastic})
+			end
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(1.4, 1.4, 1.4), CFrame = face * CFrame.new(0, 1.4, -1.2), Color = rgb(250, 250, 255), Material = M.Glass, Reflectance = 0.4})
+		elseif kind == "obelisk" then
+			part(parent, {Size = Vector3.new(5, 1.4, 5), CFrame = face * CFrame.new(0, 0.7, 0), Color = rgb(190, 150, 90), Material = M.Sandstone})
+			part(parent, {Size = Vector3.new(3, 20, 3), CFrame = face * CFrame.new(0, 11.4, 0), Color = rgb(215, 180, 120), Material = M.Sandstone})
+			for _, sx in ipairs({-1, 1}) do
+				Kit.wedge(parent, {Size = Vector3.new(3, 3, 1.5), CFrame = face * CFrame.new(0, 22.9, sx * 0.75) * CFrame.Angles(0, sx > 0 and math.pi or 0, 0), Color = Kit.GOLD, Material = M.Metal})
+			end
+			for y = 4, 18, 3.5 do
+				part(parent, {Size = Vector3.new(1.4, 1.4, 0.2), CFrame = face * CFrame.new(0, y, -1.55), Color = rgb(40, 70, 180)})
+			end
+		elseif kind == "statue" then
+			-- a falcon-headed sun god on a plinth
+			part(parent, {Size = Vector3.new(6, 3, 6), CFrame = face * CFrame.new(0, 1.5, 0), Color = rgb(190, 150, 90), Material = M.Sandstone})
+			part(parent, {Size = Vector3.new(3.4, 7, 2.2), CFrame = face * CFrame.new(0, 6.5, 0), Color = rgb(40, 70, 180), Material = M.Sandstone})
+			part(parent, {Size = Vector3.new(2.4, 2.4, 2.4), CFrame = face * CFrame.new(0, 11.2, 0), Color = rgb(215, 180, 120), Material = M.Sandstone})
+			Kit.wedge(parent, {Size = Vector3.new(1, 1.2, 1.6), CFrame = face * CFrame.new(0, 10.8, -1.9) * CFrame.Angles(0, math.pi, 0), Color = rgb(60, 50, 40)})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 4, 4), CFrame = face * CFrame.new(0, 14.2, 0) * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(255, 150, 40), Material = M.Neon, CanCollide = false})
+		elseif kind == "lollipop" then
+			cyl(parent, 12, 0.6, face * CFrame.new(0, 6, 0), {Color = rgb(250, 250, 250)})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 7, 7), CFrame = face * CFrame.new(0, 14, 0) * CFrame.Angles(0, math.pi / 2, 0), Color = color, Material = M.SmoothPlastic})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.1, 4.4, 4.4), CFrame = face * CFrame.new(0, 14, 0) * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(255, 255, 255), Material = M.SmoothPlastic})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 2, 2), CFrame = face * CFrame.new(0, 14, 0) * CFrame.Angles(0, math.pi / 2, 0), Color = color, Material = M.SmoothPlastic})
+		elseif kind == "candycane" then
+			for k = 0, 5 do
+				cyl(parent, 2, 1.1, face * CFrame.new(0, 1 + k * 2, 0), {Color = k % 2 == 0 and rgb(230, 30, 50) or rgb(255, 255, 255)})
+			end
+			for k = 0, 4 do
+				local a = k / 4 * math.pi
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = face * CFrame.new(-1.6 + math.cos(a) * 1.6, 12 + math.sin(a) * 1.6, 0), Color = k % 2 == 0 and rgb(230, 30, 50) or rgb(255, 255, 255)})
+			end
+		elseif kind == "gumdrop" then
+			local colors = {rgb(255, 80, 120), rgb(120, 220, 90), rgb(255, 200, 60), rgb(120, 160, 255)}
+			for k = 0, 2 do
+				local c = colors[(k + rng:NextInteger(0, 3)) % #colors + 1]
+				local at = face * CFrame.new((k - 1) * 3.4, 0, rng:NextNumber(-1, 1))
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(3.4, 3.6, 3.4), CFrame = at * CFrame.new(0, 1.6, 0), Color = c, Material = M.Glass, Transparency = 0.1})
+				cyl(parent, 1, 3.4, at * CFrame.new(0, 0.5, 0), {Color = c, Material = M.Glass, Transparency = 0.1})
+			end
+		elseif kind == "pipe" then
+			local copper = rgb(190, 110, 60)
+			cyl(parent, 16, 2.2, face * CFrame.new(0, 8, 0), {Color = copper, Material = M.Metal})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(6, 2.2, 2.2), CFrame = face * CFrame.new(0, 16, -3) * CFrame.Angles(0, math.pi / 2, 0), Color = copper, Material = M.Metal})
+			for _, y in ipairs({3, 9, 15}) do
+				cyl(parent, 0.6, 2.8, face * CFrame.new(0, y, 0), {Color = rgb(90, 60, 40), Material = M.Metal})
+			end
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 3, 3), CFrame = face * CFrame.new(1.4, 7, 0), Color = rgb(200, 40, 40), Material = M.Metal})
+		elseif kind == "snowman" then
+			for k, d in ipairs({5.5, 4.2, 3}) do
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.one * d, CFrame = face * CFrame.new(0, ({2.6, 6.8, 10})[k], 0), Color = rgb(250, 252, 255), Material = M.Snow})
+			end
+			Kit.wedge(parent, {Size = Vector3.new(0.6, 0.6, 1.8), CFrame = face * CFrame.new(0, 10, -2.2) * CFrame.Angles(0, math.pi, 0), Color = rgb(255, 130, 30)})
+			cyl(parent, 2.2, 2.4, face * CFrame.new(0, 12.4, 0), {Color = rgb(30, 30, 35)})
+			cyl(parent, 0.3, 3.6, face * CFrame.new(0, 11.4, 0), {Color = rgb(30, 30, 35)})
+			part(parent, {Size = Vector3.new(4.6, 0.9, 4.6), CFrame = face * CFrame.new(0, 8.4, 0), Color = color, Material = M.Fabric})
+		elseif kind == "pine" then
+			cyl(parent, 4, 1.2, face * CFrame.new(0, 2, 0), {Color = rgb(90, 60, 40), Material = M.Wood})
+			for k = 0, 3 do
+				local s = 9 - k * 2
+				cyl(parent, 3, s, face * CFrame.new(0, 5 + k * 3, 0), {Color = rgb(40, 110, 70), Material = M.Grass})
+				cyl(parent, 0.6, s * 0.92, face * CFrame.new(0, 6.6 + k * 3, 0), {Color = rgb(250, 252, 255), Material = M.Snow, CanCollide = false})
+			end
+		elseif kind == "icicle" then
+			for k = 1, 4 do
+				local h = rng:NextNumber(5, 11)
+				part(parent, {Size = Vector3.new(1.6, h, 1.6), CFrame = face * CFrame.new(rng:NextNumber(-2, 2), h / 2, rng:NextNumber(-2, 2)) * CFrame.Angles(0, rng:NextNumber(0, 3), rng:NextNumber(-0.2, 0.2)), Color = rgb(190, 235, 255), Material = M.Ice, Transparency = 0.15})
+			end
+		elseif kind == "cactus" then
+			local green = rgb(70, 150, 70)
+			cyl(parent, 11, 2.2, face * CFrame.new(0, 5.5, 0), {Color = green, Material = M.Grass})
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(2.2, 2.2, 2.2), CFrame = face * CFrame.new(0, 11, 0), Color = green, Material = M.Grass})
+			for _, sx in ipairs({-1, 1}) do
+				part(parent, {Size = Vector3.new(2.6, 1.6, 1.6), CFrame = face * CFrame.new(sx * 1.8, 5 + sx, 0), Color = green, Material = M.Grass})
+				cyl(parent, 4, 1.6, face * CFrame.new(sx * 2.8, 7 + sx, 0), {Color = green, Material = M.Grass})
+			end
+		elseif kind == "wagonwheel" then
+			local wheel = face * CFrame.new(0, 4.2, 0) * CFrame.Angles(0, 0, 0.12)
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 8.4, 8.4), CFrame = wheel * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(110, 70, 40), Material = M.Wood})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.7, 7, 7), CFrame = wheel * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(170, 130, 90), Material = M.Wood})
+			for k = 0, 3 do
+				part(parent, {Size = Vector3.new(0.5, 7, 0.75), CFrame = wheel * CFrame.Angles(0, 0, k * math.pi / 4), Color = rgb(110, 70, 40), Material = M.Wood})
+			end
+		elseif kind == "minecart" then
+			for _, sx in ipairs({-1, 1}) do
+				part(parent, {Size = Vector3.new(0.4, 0.4, 14), CFrame = face * CFrame.new(sx * 2, 0.2, 0), Color = rgb(90, 90, 95), Material = M.Metal})
+				for wz = -2, 2, 4 do
+					part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 1.6, 1.6), CFrame = face * CFrame.new(sx * 2, 0.9, wz), Color = rgb(40, 40, 45), Material = M.Metal})
+				end
+			end
+			part(parent, {Size = Vector3.new(4.4, 3, 6.4), CFrame = face * CFrame.new(0, 2.8, 0), Color = rgb(120, 80, 50), Material = M.WoodPlanks})
+			for _ = 1, 5 do
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.one * rng:NextNumber(1, 1.8), CFrame = face * CFrame.new(rng:NextNumber(-1.4, 1.4), 4.4, rng:NextNumber(-2.4, 2.4)), Color = rgb(255, 200, 40), Material = M.Foil})
+			end
+		elseif kind == "fern" then
+			for k = 0, 6 do
+				part(parent, {Size = Vector3.new(1.4, 0.3, 7), CFrame = face * CFrame.new(0, 1.5, 0) * CFrame.Angles(0, k * math.pi * 2 / 7, 0) * CFrame.new(0, 0, -3) * CFrame.Angles(0.5, 0, 0), Color = rgb(50, rng:NextInteger(140, 170), 60), Material = M.Grass, CanCollide = false})
+			end
+		elseif kind == "tiki" then
+			local wood = rgb(140, 90, 50)
+			part(parent, {Size = Vector3.new(4, 13, 4), CFrame = face * CFrame.new(0, 6.5, 0), Color = wood, Material = M.Wood})
+			for _, y in ipairs({10, 5}) do
+				for _, ex in ipairs({-0.9, 0.9}) do
+					part(parent, {Size = Vector3.new(1, 1, 0.3), CFrame = face * CFrame.new(ex, y + 0.6, -2.05), Color = rgb(255, 230, 120), Material = M.Neon})
+				end
+				part(parent, {Size = Vector3.new(2.6, 0.7, 0.3), CFrame = face * CFrame.new(0, y - 1, -2.05), Color = rgb(40, 20, 10)})
+			end
+			part(parent, {Size = Vector3.new(6, 1, 1), CFrame = face * CFrame.new(0, 13.4, 0), Color = color, Material = M.Wood})
+		elseif kind == "idol" then
+			part(parent, {Size = Vector3.new(4, 4, 4), CFrame = face * CFrame.new(0, 2, 0), Color = rgb(150, 140, 110), Material = M.Limestone})
+			local idol = part(parent, {Size = Vector3.new(1.8, 2.6, 1.6), CFrame = face * CFrame.new(0, 5.3, 0), Color = rgb(255, 200, 40), Material = M.Foil})
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8), CFrame = face * CFrame.new(0, 7.3, 0), Color = rgb(255, 200, 40), Material = M.Foil})
+			local glow = Instance.new("PointLight")
+			glow.Color = rgb(255, 210, 80)
+			glow.Range = 10
+			glow.Shadows = false
+			glow.Parent = idol
+		elseif kind == "torch" then
+			cyl(parent, 10, 0.8, face * CFrame.new(0, 5, 0), {Color = rgb(90, 60, 35), Material = M.Wood})
+			local cup = part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.4, 2.4, 2.4), CFrame = face * CFrame.new(0, 10.4, 0) * CFrame.Angles(0, 0, math.pi / 2), Color = rgb(60, 50, 40), Material = M.Metal})
+			local fire = Instance.new("Fire")
+			fire.Size = 4
+			fire.Heat = 8
+			fire.Parent = cup
+		elseif kind == "balloon" then
+			local colors = {rgb(255, 70, 90), rgb(255, 200, 50), rgb(80, 170, 255), rgb(120, 220, 100), rgb(220, 110, 255)}
+			for k = 1, 6 do
+				local pos = Vector3.new(rng:NextNumber(-2.5, 2.5), rng:NextNumber(12, 17), rng:NextNumber(-2.5, 2.5))
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(3, 3.6, 3), CFrame = face * CFrame.new(pos), Color = colors[k % #colors + 1], Material = M.SmoothPlastic, CanCollide = false})
+				part(parent, {Size = Vector3.new(0.1, pos.Y - 1, 0.1), CFrame = face * CFrame.new(pos.X * 0.5, (pos.Y - 1) / 2, pos.Z * 0.5), Color = rgb(255, 255, 255), CanCollide = false})
+			end
+			part(parent, {Size = Vector3.new(2, 1.2, 2), CFrame = face * CFrame.new(0, 0.6, 0), Color = rgb(120, 120, 130), Material = M.Metal})
+		elseif kind == "ticketbooth" then
+			part(parent, {Size = Vector3.new(6, 7, 5), CFrame = face * CFrame.new(0, 3.5, 0), Color = rgb(220, 40, 60), Material = M.WoodPlanks})
+			part(parent, {Size = Vector3.new(4, 3, 0.2), CFrame = face * CFrame.new(0, 4.6, -2.55), Color = rgb(30, 30, 40)})
+			for k = 0, 5 do
+				part(parent, {Size = Vector3.new(1, 0.4, 6), CFrame = face * CFrame.new(-2.5 + k, 7.6, -0.4) * CFrame.Angles(-0.25, 0, 0), Color = k % 2 == 0 and rgb(255, 255, 255) or rgb(255, 210, 60)})
+			end
+			local sign = part(parent, {Size = Vector3.new(5, 1.6, 0.3), CFrame = face * CFrame.new(0, 9, -1), Color = rgb(255, 220, 60)})
+			Kit.surfaceText(sign, Enum.NormalId.Front, "TICKETS", rgb(200, 30, 40), 20).TextStrokeTransparency = 1
+		elseif kind == "drum" then
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(4, 9, 9), CFrame = face * CFrame.new(0, 2, 0) * CFrame.Angles(0, 0, math.pi / 2), Color = rgb(220, 40, 60), Material = M.SmoothPlastic})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 9.4, 9.4), CFrame = face * CFrame.new(0, 4, 0) * CFrame.Angles(0, 0, math.pi / 2), Color = Kit.GOLD, Material = M.Metal})
+			for k = 0, 7 do
+				part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(0.9, 0.9, 0.9), CFrame = face * CFrame.Angles(0, k * math.pi / 4, 0) * CFrame.new(4.4, 2, 0), Color = rgb(255, 255, 255), Material = M.SmoothPlastic})
+			end
+		elseif kind == "globe" then
+			cyl(parent, 5, 1, face * CFrame.new(0, 2.5, 0), {Color = rgb(110, 60, 35), Material = M.Wood})
+			part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(4.4, 4.4, 4.4), CFrame = face * CFrame.new(0, 7, 0), Color = rgb(70, 140, 210), Material = M.SmoothPlastic})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 5.2, 5.2), CFrame = face * CFrame.new(0, 7, 0) * CFrame.Angles(0, math.pi / 2, 0.4), Color = Kit.GOLD, Material = M.Metal})
+			for _ = 1, 4 do
+				part(parent, {Size = Vector3.new(1.4, 0.9, 0.4), CFrame = face * CFrame.new(0, 7, 0) * CFrame.Angles(rng:NextNumber(-1, 1), rng:NextNumber(0, 6), 0) * CFrame.new(0, 0, -2.05), Color = rgb(110, 180, 90), CanCollide = false})
+			end
+		elseif kind == "telescope" then
+			for k = 0, 2 do
+				part(parent, {Size = Vector3.new(0.4, 6, 0.4), CFrame = face * CFrame.Angles(0, k * math.pi * 2 / 3, 0) * CFrame.new(0, 3, -1) * CFrame.Angles(0.3, 0, 0), Color = rgb(110, 60, 35), Material = M.Wood})
+			end
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(7, 1.4, 1.4), CFrame = face * CFrame.new(0, 6.6, 0) * CFrame.Angles(0, math.pi / 2, 0) * CFrame.Angles(0, 0, 0.5), Color = Kit.GOLD, Material = M.Metal})
+		elseif kind == "prism" then
+			local colors = {rgb(255, 90, 120), rgb(255, 200, 70), rgb(90, 230, 140), rgb(90, 170, 255), rgb(200, 110, 255)}
+			for k = 1, 5 do
+				part(parent, {Size = Vector3.new(1.4, 9 + k, 1.4), CFrame = face * CFrame.Angles(0, k * math.pi * 2 / 5, 0) * CFrame.new(1.8, (9 + k) / 2, 0) * CFrame.Angles(0, 0.78, 0.2), Color = colors[k], Material = M.Glass, Transparency = 0.25})
+			end
+			local core = part(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(2.2, 2.2, 2.2), CFrame = face * CFrame.new(0, 6, 0), Color = rgb(255, 255, 255), Material = M.Neon, CanCollide = false})
+			local l = Instance.new("PointLight")
+			l.Color = rgb(255, 210, 250)
+			l.Range = 14
+			l.Shadows = false
+			l.Parent = core
+		elseif kind == "clock" then
+			cyl(parent, 14, 1, face * CFrame.new(0, 7, 0), {Color = rgb(60, 70, 90), Material = M.Metal})
+			local dial = face * CFrame.new(0, 15, 0)
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 7, 7), CFrame = dial * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(240, 240, 230), Material = M.SmoothPlastic})
+			part(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.4, 7.6, 7.6), CFrame = dial * CFrame.new(0, 0, 0.1) * CFrame.Angles(0, math.pi / 2, 0), Color = color, Material = M.Neon})
+			part(parent, {Size = Vector3.new(0.3, 2.6, 0.2), CFrame = dial * CFrame.new(0, 1.1, -0.45), Color = rgb(30, 30, 35), CanCollide = false})
+			part(parent, {Size = Vector3.new(1.8, 0.3, 0.2), CFrame = dial * CFrame.new(0.8, 0, -0.45), Color = rgb(30, 30, 35), CanCollide = false})
 		end
 	end
 
-	-- Extra themed decorations for every area (index = area number)
-	local ZONE_DECOR = {
-		{"pricetag", "boxpile", "crate"},      -- Bargain Basement
-		{"arcade", "joystick", "arcade"},       -- Retro Arcade
-		{"teddy", "bigball", "toyblock"},      -- Toys
-		{"chest", "anchor", "barrel"},         -- Pirate Cove
-		{"pumpkin", "ghost", "tombstone"},     -- Haunted
-		{"holo", "screen", "robot"},           -- Cyber City
-		{"lantern", "torii", "bamboo"},        -- Ninja
-		{"robot", "gear", "holo"},             -- Robots
-		{"egg", "crystal", "rock"},            -- Dragon
-		{"rocket", "planet", "crystal"},       -- Space
-	}
-	local ZONE_EMBLEM = {"\u{1F4B0}", "\u{1F579}", "\u{1F9F8}", "\u{2693}", "\u{1F47B}", "\u{1F4BE}", "\u{1F3EE}", "\u{1F916}", "\u{1F409}", "\u{1F680}"}
-	local DECOR_SPOTS = {{38, 0.22}, {-36, 0.5}, {42, 0.66}, {-22, 0.86}, {22, 0.86}, {46, 0.46}}
-
-	local FLOOR_COLORS = {
-		[M.Mud] = rgb(200, 150, 100), [M.Brick] = rgb(235, 120, 110), [M.LeafyGrass] = rgb(110, 210, 90),
-		[M.Sand] = rgb(250, 225, 160), [M.Slate] = rgb(160, 150, 200), [M.Concrete] = rgb(170, 230, 235),
-		[M.WoodPlanks] = rgb(225, 170, 110), [M.Pavement] = rgb(200, 210, 225), [M.CrackedLava] = rgb(240, 130, 90),
-		[M.Basalt] = rgb(140, 140, 220),
-	}
+	-- Each area's emblem (index = area number), shown on the outside of its walls
+	local ZONE_EMBLEM = {"\u{1F4B0}", "\u{1F579}", "\u{1F9F8}", "\u{2693}", "\u{1F47B}", "\u{1F4BE}", "\u{1F3EE}", "\u{1F916}", "\u{1F409}", "\u{1F680}",
+		"\u{1F531}", "\u{1F3FA}", "\u{1F36D}", "\u{2744}\u{FE0F}", "\u{1F920}", "\u{1F5FF}", "\u{1F3AA}", "\u{1F6E9}\u{FE0F}", "\u{1F48E}", "\u{267E}\u{FE0F}"}
 
 	------------------------------------------------------------------
-	-- HIGH WALL DECOR: framed posters of the store's games, a themed piece
+	-- HIGH WALL DECOR: framed posters of the level's games, a themed piece
 	-- mounted between them, and a painted frieze near the top of each wall
 	------------------------------------------------------------------
 	local ZONE_ART = {
@@ -522,6 +806,16 @@ function World.build(C, Kit)
 		{"\u{2699}\u{FE0F}", "\u{1F529}", "\u{1F916}", "\u{1F50B}", "\u{1F527}"},              -- Robot Factory
 		{"\u{1F409}", "\u{1F525}", "\u{1F6E1}\u{FE0F}", "\u{1F48E}", "\u{1F5E1}\u{FE0F}"},       -- Dragon's Lair
 		{"\u{1F315}", "\u{1F680}", "\u{1F30C}", "\u{1F47D}", "\u{2604}\u{FE0F}"},              -- Outer Space
+		{"\u{1F531}", "\u{1F41A}", "\u{1F420}", "\u{1F419}", "\u{1F988}"},                     -- Sunken Atlantis
+		{"\u{1F3FA}", "\u{1F42B}", "\u{2600}\u{FE0F}", "\u{1F982}", "\u{1F40D}"},              -- Desert Pyramids
+		{"\u{1F36D}", "\u{1F36C}", "\u{1F36B}", "\u{1F9C1}", "\u{1F369}"},                     -- Candy Kingdom
+		{"\u{2744}\u{FE0F}", "\u{26C4}", "\u{1F427}", "\u{1F3D4}\u{FE0F}", "\u{1F9CA}"},       -- Frozen Tundra
+		{"\u{1F920}", "\u{1F335}", "\u{1F40E}", "\u{26CF}\u{FE0F}", "\u{1F4B0}"},              -- Wild West
+		{"\u{1F5FF}", "\u{1F412}", "\u{1F334}", "\u{1F99C}", "\u{1F406}"},                     -- Jungle Temple
+		{"\u{1F3AA}", "\u{1F3A0}", "\u{1F921}", "\u{1F388}", "\u{1F39F}\u{FE0F}"},              -- Midnight Carnival
+		{"\u{2699}\u{FE0F}", "\u{1F388}", "\u{1F9ED}", "\u{1F52D}", "\u{1F6E9}\u{FE0F}"},       -- Steampunk Skyway
+		{"\u{1F48E}", "\u{1F52E}", "\u{1F308}", "\u{2728}", "\u{1FAA8}"},                     -- Crystal Caverns
+		{"\u{267E}\u{FE0F}", "\u{23F3}", "\u{1F300}", "\u{1F451}", "\u{1F30C}"},              -- Cosmic Nexus
 	}
 	local SALE_TEXT = {"SALE!", "50% OFF", "$1!"}
 	local deco = {Name = "WallDecor", CanCollide = false, CanQuery = false, CastShadow = false}
@@ -533,9 +827,10 @@ function World.build(C, Kit)
 		end
 		return part(parent, props)
 	end
-	-- A spot on the inside face of a wall, facing into the hallway (local -Z points into the room)
-	local function wallCF(side, y, z)
-		local pos = Vector3.new(side * (C.ROOM_W / 2 - 0.2), y, z)
+	-- A spot on the inside face of a wall (half = the level's half-width), facing into the hallway
+	-- (local -Z points into the room)
+	local function wallCF(side, y, z, half)
+		local pos = Vector3.new(side * (half - 0.2), y, z)
 		return CFrame.lookAt(pos, pos - Vector3.new(side, 0, 0))
 	end
 	local function wallGui(p, ppsd)
@@ -638,10 +933,10 @@ function World.build(C, Kit)
 			local paper = decoPart(parent, {Size = Vector3.new(7, 10, 0.15), CFrame = at(0, 0, -0.35), Color = rgb(250, 240, 215), Material = M.Fabric})
 			decoPart(parent, {Size = Vector3.new(8, 0.6, 0.6), CFrame = at(0, -5.4, -0.4), Color = rgb(60, 35, 25), Material = M.Wood})
 			guiLabel(wallGui(paper, 10), UDim2.fromScale(0.5, 0.45), UDim2.fromScale(0.8, 0.6), art[k])
-		elseif zi == 8 then -- spinning-gear look
-			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 7, 7), CFrame = at(0, 0, -0.45) * faceOut, Color = rgb(150, 155, 165), Material = M.Metal})
+		elseif zi == 8 or zi == 18 then -- gear
+			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 7, 7), CFrame = at(0, 0, -0.45) * faceOut, Color = zi == 8 and rgb(150, 155, 165) or rgb(190, 130, 70), Material = M.Metal})
 			for s = 0, 3 do
-				decoPart(parent, {Size = Vector3.new(1.6, 9, 0.5), CFrame = at(0, 0, -0.45) * CFrame.Angles(0, 0, s * math.pi / 4), Color = rgb(130, 135, 145), Material = M.Metal})
+				decoPart(parent, {Size = Vector3.new(1.6, 9, 0.5), CFrame = at(0, 0, -0.45) * CFrame.Angles(0, 0, s * math.pi / 4), Color = zi == 8 and rgb(130, 135, 145) or rgb(170, 110, 60), Material = M.Metal})
 			end
 			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 2.4, 2.4), CFrame = at(0, 0, -0.8) * faceOut, Color = accent, Material = M.Neon})
 		elseif zi == 9 then -- shield over crossed swords
@@ -651,45 +946,57 @@ function World.build(C, Kit)
 			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.4, 8.2, 8.2), CFrame = at(0, 0, -0.5) * faceOut, Color = Kit.GOLD, Material = M.Metal})
 			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 7.2, 7.2), CFrame = at(0, 0, -0.65) * faceOut, Color = accent})
 			decoPart(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8), CFrame = at(0, 0, -0.95), Color = Kit.GOLD, Material = M.Metal})
-		else -- glowing planet with a ring
+		elseif zi == 10 then -- glowing planet with a ring
 			local colors = {rgb(255, 140, 90), rgb(110, 200, 255), rgb(200, 120, 255)}
 			local planet = decoPart(parent, {Shape = Enum.PartType.Ball, Size = Vector3.new(5, 5, 5), CFrame = at(0, 0, -3), Color = colors[k], Material = M.Neon})
 			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.15, 9, 9), CFrame = planet.CFrame * CFrame.Angles(0.3, 0, math.pi / 2 + 0.5), Color = rgb(230, 230, 255), Material = M.Glass, Transparency = 0.35})
+		else -- the new areas: a gold-rimmed medallion with the area's picture
+			decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.4, 8.4, 8.4), CFrame = at(0, 0, -0.3) * faceOut, Color = Kit.GOLD, Material = M.Metal})
+			local disc = decoPart(parent, {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 7.4, 7.4), CFrame = at(0, 0, -0.45) * faceOut, Color = accent})
+			local face = decoPart(parent, {Size = Vector3.new(5.2, 5.2, 0.1), CFrame = at(0, 0, -0.75), Transparency = 1})
+			guiLabel(wallGui(face, 16), UDim2.fromScale(0.5, 0.5), UDim2.fromScale(1, 1), art[k])
+			disc.Name = "Medallion"
 		end
 	end
 
-	local function buildWallArt(parent, L, z0)
+	-- Posters of the level's games and themed pieces on both walls, and a frieze of the area's pictures up top
+	local function buildWallArt(parent, L, z0, half)
 		local zi = L.ZoneIndex
+		local T = L.Theme
 		local art = ZONE_ART[zi] or ZONE_ART[1]
-		local accent = L.Accent
-		local top, bottom = accent:Lerp(Color3.new(1, 1, 1), 0.45), L.Wall:Lerp(DARK, 0.35)
-		local frameColor = zi >= 6 and Kit.GOLD or rgb(120, 80, 45)
-		local captions = {{L.Games[1].Name, L.Games[2].Name}, {L.Games[3].Name, L.Store}}
+		local top, bottom = T.Accent:Lerp(Color3.new(1, 1, 1), 0.45), T.WallColor:Lerp(DARK, 0.35)
+		local frameColor = T.Trim
+		local n = #L.Games
 		local friezeIcons = {}
-		for _ = 1, 6 do
+		for _ = 1, math.ceil(L.Len / 30) do
 			for _, icon in ipairs(art) do
 				table.insert(friezeIcons, icon)
 			end
 		end
 		local friezeText = table.concat(friezeIcons, "   ")
+		local gi = 0
 		for si, side in ipairs({-1, 1}) do
-			for pi, f in ipairs({0.3, 0.7}) do
-				painting(parent, wallCF(side, 48, z0 + C.SEG_LEN * f), art[(L.Index + si + pi) % #art + 1], captions[si][pi], top, bottom, frameColor)
+			-- posters sit between the pilasters, out of the way of the shelves (which stand on the floor below)
+			for pi, f in ipairs({0.26, 0.5, 0.74}) do
+				gi += 1
+				local name = L.Games[(gi - 1) % n + 1].Name
+				painting(parent, wallCF(side, 30, z0 + L.Len * f, half), art[(L.Index + si + pi) % #art + 1], name, top, bottom, frameColor)
 			end
-			for k, f in ipairs({0.13, 0.5, 0.87}) do
-				wallPiece(parent, zi, wallCF(side, 50, z0 + C.SEG_LEN * f), accent, art, k)
+			for k, f in ipairs({0.13, 0.38, 0.62, 0.87}) do
+				wallPiece(parent, zi, wallCF(side, 31, z0 + L.Len * f, half), T.Accent, art, (k - 1) % 3 + 1)
 			end
-			local frieze = decoPart(parent, {Name = "Frieze", Size = Vector3.new(C.SEG_LEN - 12, 5, 0.3), CFrame = wallCF(side, 85, z0 + C.SEG_LEN / 2) * CFrame.new(0, 0, -0.2), Color = accent:Lerp(Color3.new(1, 1, 1), 0.2)})
+			local frieze = decoPart(parent, {Name = "Frieze", Size = Vector3.new(L.Len - 14, 4, 0.3), CFrame = wallCF(side, 48, z0 + L.Len / 2, half) * CFrame.new(0, 0, -0.5), Color = T.Accent:Lerp(Color3.new(1, 1, 1), 0.25)})
 			guiLabel(wallGui(frieze, 6), UDim2.fromScale(0.5, 0.5), UDim2.fromScale(0.98, 0.8), friezeText)
 		end
 	end
 
-	local function buildShelf(parent, side, z, colors)
-		local wallX = side * (C.ROOM_W / 2 - 0.3)
-		local shelfX = side * (C.ROOM_W / 2 - 2.4)
-		local wood, lightWood = rgb(70, 50, 35), rgb(115, 85, 55)
+	-- A floor-standing shelf of game boxes against a wall
+	local function buildShelf(parent, side, z, colors, half, wood)
+		local wallX = side * (half - 0.3)
+		local shelfX = side * (half - 2.4)
+		local lightWood = wood:Lerp(Color3.new(1, 1, 1), 0.2)
 		-- One solid invisible block so fast runners can't slip in between the shelves
-		part(parent, {Name = "ShelfCollider", Size = Vector3.new(5.2, 16, 19), CFrame = CFrame.new(side * (C.ROOM_W / 2 - 2.6), 8, z), Transparency = 1, CanCollide = true})
+		part(parent, {Name = "ShelfCollider", Size = Vector3.new(5.2, 16, 19), CFrame = CFrame.new(side * (half - 2.6), 8, z), Transparency = 1, CanCollide = true})
 		part(parent, {Size = Vector3.new(0.6, 14, 18), CFrame = CFrame.new(wallX, 7, z), Color = wood, Material = M.Wood, CanCollide = false})
 		for _, dz in ipairs({-9, 9}) do
 			part(parent, {Size = Vector3.new(4, 14, 0.4), CFrame = CFrame.new(shelfX, 7, z + dz), Color = wood, Material = M.Wood, CanCollide = false})
@@ -704,17 +1011,182 @@ function World.build(C, Kit)
 	end
 
 	------------------------------------------------------------------
-	-- THE VAULT: one long hallway, split into levels by lines and signs
+	-- THEMED WALL FEATURES: the details that give each level its own look (Theme flags in Config)
 	------------------------------------------------------------------
-	local HALF = C.ROOM_W / 2
-	for level = 1, C.NUM_LEVELS do
+	local function wallFeatures(decor, L, z0, half)
+		local T, len = L.Theme, L.Len
+		local zMid = z0 + len / 2
+		for _, sx in ipairs({-1, 1}) do
+			local face = sx * (half - 0.1) -- x of the wall's inside face
+			if T.Pixel then
+				-- 8-bit squares scattered over the upper wall
+				local pal = {rgb(255, 80, 80), rgb(255, 220, 60), rgb(80, 220, 120), rgb(80, 160, 255), rgb(255, 120, 220)}
+				for i = 1, math.floor(len / 9) do
+					decoPart(decor, {Name = "Pixel", Size = Vector3.new(0.2, 3, 3), CFrame = CFrame.new(face - sx * 0.12, rng:NextNumber(16, 26), z0 + rng:NextNumber(4, len - 4)), Color = pal[i % #pal + 1], Material = M.Neon})
+				end
+			end
+			if T.Shoji then
+				-- paper screens: white panels in a dark lattice along the upper wall
+				for pz = 10, len - 10, 12 do
+					decoPart(decor, {Name = "Shoji", Size = Vector3.new(0.2, 18, 10.8), CFrame = CFrame.new(face - sx * 0.12, 26, z0 + pz), Color = rgb(250, 244, 228), Material = M.Plaster})
+					for _, y in ipairs({20, 26, 32}) do
+						decoPart(decor, {Name = "Lattice", Size = Vector3.new(0.3, 0.4, 10.8), CFrame = CFrame.new(face - sx * 0.25, y, z0 + pz), Color = rgb(40, 26, 20), Material = M.Wood})
+					end
+					decoPart(decor, {Name = "Lattice", Size = Vector3.new(0.3, 18, 0.4), CFrame = CFrame.new(face - sx * 0.25, 26, z0 + pz), Color = rgb(40, 26, 20), Material = M.Wood})
+				end
+			end
+			if T.Hazard then
+				-- yellow and black warning stripes along the bottom of the wall
+				for pz = 2, len - 2, 4 do
+					decoPart(decor, {Name = "Hazard", Size = Vector3.new(0.3, 3, 2), CFrame = CFrame.new(face - sx * 0.9, 9.5, z0 + pz) * CFrame.Angles(math.rad(35), 0, 0), Color = (math.floor(pz / 4) % 2 == 0) and rgb(255, 200, 0) or rgb(25, 25, 25)})
+				end
+			end
+			if T.Portholes then
+				for pz = 20, len - 10, 30 do
+					decoPart(decor, {Name = "Porthole", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 9, 9), CFrame = CFrame.new(face - sx * 0.2, 42, z0 + pz), Color = rgb(60, 70, 96), Material = M.Metal})
+					decoPart(decor, {Name = "PortholeGlass", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.7, 7, 7), CFrame = CFrame.new(face - sx * 0.25, 42, z0 + pz), Color = rgb(20, 24, 60), Material = M.Glass, Reflectance = 0.3})
+				end
+			end
+			if T.Stars then
+				for _ = 1, math.floor(len / 6) do
+					local s = rng:NextNumber(0.4, 1.1)
+					decoPart(decor, {Name = "Star", Shape = Enum.PartType.Ball, Size = Vector3.one * s, CFrame = CFrame.new(face - sx * 0.1, rng:NextNumber(15, C.WALL_H - 4), z0 + rng:NextNumber(2, len - 2)), Color = rgb(255, 250, 230), Material = M.Neon})
+				end
+			end
+			if T.Awnings then
+				-- striped market awnings over the shelves
+				for pz = 12, len - 12, 36 do
+					for k = 0, 7 do
+						decoPart(decor, {Name = "Awning", Size = Vector3.new(7, 0.3, 2), CFrame = CFrame.new(face - sx * 3.4, 19, z0 + pz - 7 + k * 2) * CFrame.Angles(0, 0, sx * 0.35), Color = k % 2 == 0 and T.Accent or rgb(250, 240, 220), Material = M.Fabric})
+					end
+				end
+			end
+			if T.Glyphs then
+				-- a carved band of picture-writing
+				local glyphs = {"\u{1F441}", "\u{1F985}", "\u{2625}", "\u{1F40D}", "\u{2600}", "\u{1F33E}", "\u{1F3FA}", "\u{1F98E}"}
+				local band = decoPart(decor, {Name = "GlyphBand", Size = Vector3.new(len - 6, 6, 0.3), CFrame = wallCF(sx, 42, zMid, half) * CFrame.new(0, 0, -0.35), Color = T.WallColor:Lerp(Color3.new(1, 1, 1), 0.2), Material = T.Wall})
+				local parts = {}
+				for i = 1, math.floor(len / 7) do
+					parts[i] = glyphs[(i + L.Index) % #glyphs + 1]
+				end
+				guiLabel(wallGui(band, 6), UDim2.fromScale(0.5, 0.5), UDim2.fromScale(1, 0.8), table.concat(parts, "  "), T.Trim)
+			end
+			if T.Sprinkles then
+				local pal = {rgb(255, 90, 140), rgb(255, 220, 70), rgb(120, 200, 255), rgb(150, 230, 120), rgb(255, 255, 255)}
+				for i = 1, math.floor(len / 3) do
+					decoPart(decor, {Name = "Sprinkle", Size = Vector3.new(0.2, 0.5, 1.8), CFrame = CFrame.new(face - sx * 0.12, rng:NextNumber(15, 40), z0 + rng:NextNumber(2, len - 2)) * CFrame.Angles(rng:NextNumber(0, 3.1), 0, 0), Color = pal[i % #pal + 1]})
+				end
+			end
+			if T.Plaid then
+				for pz = 0, len, 6 do
+					decoPart(decor, {Name = "Plaid", Size = Vector3.new(0.2, 12, 1), CFrame = CFrame.new(face - sx * 0.95, 6, z0 + pz), Color = rgb(40, 40, 50), Transparency = 0.35})
+				end
+				for _, y in ipairs({3, 7, 11}) do
+					decoPart(decor, {Name = "Plaid", Size = Vector3.new(0.2, 1, len), CFrame = CFrame.new(face - sx * 0.95, y, zMid), Color = rgb(40, 40, 50), Transparency = 0.35})
+				end
+			end
+			if T.Stripes then
+				-- big-top tent stripes
+				for pz = 3, len - 3, 8 do
+					decoPart(decor, {Name = "TentStripe", Size = Vector3.new(0.2, C.WALL_H - 16, 4), CFrame = CFrame.new(face - sx * 0.12, 13 + (C.WALL_H - 16) / 2, z0 + pz), Color = T.Stripes, Material = M.Fabric})
+				end
+			end
+			if T.Rivets then
+				for pz = 3, len - 3, 4 do
+					for _, y in ipairs({14, 44}) do
+						decoPart(decor, {Name = "Rivet", Shape = Enum.PartType.Ball, Size = Vector3.new(0.8, 0.8, 0.8), CFrame = CFrame.new(face - sx * 0.1, y, z0 + pz), Color = rgb(220, 170, 90), Material = M.Metal})
+					end
+				end
+			end
+			if T.Windows then
+				-- tall windows onto the open sky
+				for pz = 25, len - 15, 40 do
+					decoPart(decor, {Name = "WindowFrame", Size = Vector3.new(0.4, 22, 14), CFrame = CFrame.new(face - sx * 0.2, 33, z0 + pz), Color = T.Trim, Material = M.Metal})
+					decoPart(decor, {Name = "Window", Size = Vector3.new(0.5, 20, 12), CFrame = CFrame.new(face - sx * 0.25, 33, z0 + pz), Color = rgb(150, 210, 255), Material = M.Glass, Transparency = 0.2, Reflectance = 0.2})
+					decoPart(decor, {Name = "WindowBar", Size = Vector3.new(0.6, 20, 0.5), CFrame = CFrame.new(face - sx * 0.3, 33, z0 + pz), Color = T.Trim, Material = M.Metal})
+				end
+			end
+			if T.Vines then
+				for _ = 1, math.floor(len / 10) do
+					local vz, h = z0 + rng:NextNumber(3, len - 3), rng:NextNumber(14, 34)
+					decoPart(decor, {Name = "Vine", Size = Vector3.new(0.4, h, 0.8), CFrame = CFrame.new(face - sx * 0.3, C.WALL_H - h / 2, vz), Color = rgb(60, rng:NextInteger(120, 160), 50), Material = M.Grass})
+					decoPart(decor, {Name = "Leaf", Shape = Enum.PartType.Ball, Size = Vector3.new(0.6, 2, 2), CFrame = CFrame.new(face - sx * 0.5, C.WALL_H - h, vz), Color = rgb(70, 170, 60), Material = M.Grass})
+				end
+			end
+		end
+		if T.Beams then
+			-- timber mine supports: posts on both walls and a beam overhead, high above the giants
+			for pz = 30, len - 20, 55 do
+				for _, sx in ipairs({-1, 1}) do
+					part(decor, {Name = "MinePost", Size = Vector3.new(2.4, C.WALL_H - 6, 2.4), CFrame = CFrame.new(sx * (half - 1.6), (C.WALL_H - 6) / 2, z0 + pz), Color = rgb(110, 75, 45), Material = M.Wood})
+				end
+				part(decor, {Name = "MineBeam", Size = Vector3.new(half * 2, 2.6, 2.6), CFrame = CFrame.new(0, C.WALL_H - 5, z0 + pz), Color = rgb(100, 68, 40), Material = M.Wood, CanCollide = false})
+				local lamp = part(decor, {Name = "MineLamp", Shape = Enum.PartType.Ball, Size = Vector3.new(1.6, 1.6, 1.6), CFrame = CFrame.new(0, C.WALL_H - 7, z0 + pz), Color = rgb(255, 200, 110), Material = M.Neon, CanCollide = false})
+				local l = Instance.new("PointLight")
+				l.Color = rgb(255, 190, 110)
+				l.Range = 30
+				l.Shadows = false
+				l.Parent = lamp
+			end
+		end
+		if T.Grid then
+			-- glowing synthwave grid in the floor
+			for pz = 0, len, 12 do
+				part(decor, {Name = "GridLine", Size = Vector3.new(half * 2, 0.06, 0.35), CFrame = CFrame.new(0, 0.24, z0 + pz), Color = T.Trim, Material = M.Neon, CanCollide = false, CastShadow = false})
+			end
+			for gx = -half + 6, half - 6, 12 do
+				part(decor, {Name = "GridLine", Size = Vector3.new(0.35, 0.06, len), CFrame = CFrame.new(gx, 0.24, zMid), Color = T.Accent, Material = M.Neon, CanCollide = false, CastShadow = false})
+			end
+		end
+		if T.Bubbles then
+			for k = 1, 4 do
+				local vent = part(decor, {Name = "BubbleVent", Size = Vector3.new(3, 0.4, 3), CFrame = CFrame.new((k % 2 == 0 and 1 or -1) * (half - 8), 0.4, z0 + len * k / 5), Color = rgb(90, 130, 140), Material = M.Metal, CanCollide = false})
+				local b = Instance.new("ParticleEmitter")
+				b.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+				b.Color = ColorSequence.new(rgb(200, 245, 255))
+				b.Size = NumberSequence.new(0.5, 1.2)
+				b.Transparency = NumberSequence.new(0.2, 1)
+				b.Lifetime = NumberRange.new(4, 6)
+				b.Rate = 6
+				b.Speed = NumberRange.new(4, 7)
+				b.SpreadAngle = Vector2.new(12, 12)
+				b.EmissionDirection = Enum.NormalId.Top
+				b.Parent = vent
+			end
+		end
+		if T.Throne then
+			-- a giant throne against the left wall near the end of the level, facing across the hall
+			local tz = z0 + len * 0.88
+			local tx = -(half - 7)
+			local cf = CFrame.lookAt(Vector3.new(tx, 0, tz), Vector3.new(0, 0, tz))
+			local function at(x, y, zz) return cf * CFrame.new(x, y, zz) end
+			part(decor, {Name = "ThroneStep", Size = Vector3.new(18, 2, 12), CFrame = at(0, 1, 0), Color = T.FloorColor:Lerp(T.Trim, 0.3), Material = T.Floor})
+			part(decor, {Name = "ThroneSeat", Size = Vector3.new(12, 4, 8), CFrame = at(0, 4, 1), Color = T.WallColor, Material = T.Wall})
+			part(decor, {Name = "ThroneBack", Size = Vector3.new(12, 22, 2), CFrame = at(0, 15, 5), Color = T.WallColor, Material = T.Wall})
+			part(decor, {Name = "ThroneTrim", Size = Vector3.new(13, 1.2, 2.4), CFrame = at(0, 26, 5), Color = T.Trim, Material = M.Metal})
+			for _, s in ipairs({-1, 1}) do
+				part(decor, {Name = "ThroneArm", Size = Vector3.new(2, 3, 8), CFrame = at(s * 6.5, 7, 1), Color = T.Trim, Material = M.Metal})
+				part(decor, {Name = "ThroneFinial", Shape = Enum.PartType.Ball, Size = Vector3.new(2.6, 2.6, 2.6), CFrame = at(s * 6, 27.5, 5), Color = T.Trim, Material = M.Metal})
+			end
+		end
+	end
+
+	------------------------------------------------------------------
+	-- THE VAULT: one long hallway of 40 levels. Each level has its own length, width, materials, palette, wall
+	-- features, props and landmark; a gate marks every level and a grand one every new area.
+	------------------------------------------------------------------
+	local function buildLevel(level)
 		local L = C.LEVELS[level]
+		local T = L.Theme
 		local zone = L.Zone
-		local z0 = segStart(level)
-		local zMid = z0 + C.SEG_LEN / 2
-		local accent = L.Accent
+		local z0, len = segStart(level), L.Len
+		local half = L.Width / 2
+		local zMid = z0 + len / 2
+		local accent = T.Accent
 		local zoneStart = (L.Sub == 1)
-		local COUNTER_Z, PED_Z = z0 + C.SEG_LEN * 0.32, z0 + C.SEG_LEN * 0.6
+		local prevHalf = level > 1 and C.LEVELS[level - 1].Width / 2 or half
+		local DARKEN = Color3.new(0, 0, 0)
+		local panelMat = T.Panel == M.Neon and M.SmoothPlastic or T.Panel
 
 		local seg = Instance.new("Model")
 		seg.Name = string.format("%02d_%s", level, L.Store)
@@ -724,77 +1196,143 @@ function World.build(C, Kit)
 		decor.Name = "Decor"
 		decor.Parent = seg
 
-		part(seg, {Name = "Floor", Size = Vector3.new(C.ROOM_W + 6, 8, C.SEG_LEN), CFrame = CFrame.new(0, -3.8, zMid), Color = FLOOR_COLORS[zone.Ground] or rgb(120, 120, 120), Material = zone.Ground})
-		part(seg, {Name = "Underside", Size = Vector3.new(C.ROOM_W + 4, 24, C.SEG_LEN), CFrame = CFrame.new(0, -20, zMid), Color = rgb(80, 75, 75), Material = M.Slate})
-		part(decor, {Name = "Carpet", Size = Vector3.new(30, 0.15, C.SEG_LEN), CFrame = CFrame.new(0, 0.28, zMid), Color = accent:Lerp(Color3.new(1, 1, 1), 0.25), Material = M.Fabric, CanCollide = false})
-
+		-- FLOOR: the theme's material, a contrasting runner down the middle, inlaid bands every 25 studs (so you can
+		-- read your speed), and a border along the walls
+		part(seg, {Name = "Floor", Size = Vector3.new(half * 2 + 6, 8, len), CFrame = CFrame.new(0, -3.8, zMid), Color = T.FloorColor, Material = T.Floor})
+		part(seg, {Name = "Underside", Size = Vector3.new(half * 2 + 4, 24, len), CFrame = CFrame.new(0, -20, zMid), Color = rgb(80, 75, 75), Material = M.Slate})
+		part(decor, {Name = "Runner", Size = Vector3.new(26, 0.12, len), CFrame = CFrame.new(0, 0.26, zMid), Color = T.FloorColor:Lerp(accent, 0.45), Material = M.Fabric, CanCollide = false})
 		for _, sx in ipairs({-1, 1}) do
-			part(seg, {Name = "Wall", Size = Vector3.new(3, C.WALL_H, C.SEG_LEN), CFrame = CFrame.new(sx * (HALF + 1.5), C.WALL_H / 2, zMid), Color = L.Wall, Material = zone.WallMat})
-			-- Bright painted stripes instead of neon
-			part(seg, {Name = "Stripe", Size = Vector3.new(0.4, 3, C.SEG_LEN), CFrame = CFrame.new(sx * (HALF - 0.1), 18, zMid), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
-			part(seg, {Name = "Stripe", Size = Vector3.new(0.4, 1.5, C.SEG_LEN), CFrame = CFrame.new(sx * (HALF - 0.1), 21.5, zMid), Color = Color3.new(1, 1, 1), Material = M.SmoothPlastic, CanCollide = false})
-			part(seg, {Name = "WallCap", Size = Vector3.new(5, 2, C.SEG_LEN), CFrame = CFrame.new(sx * (HALF + 1.5), C.WALL_H + 1, zMid), Color = accent, Material = M.SmoothPlastic})
-			part(seg, {Name = "Baseboard", Size = Vector3.new(0.5, 1.6, C.SEG_LEN), CFrame = CFrame.new(sx * (HALF - 0.1), 0.8, zMid), Color = Color3.new(1, 1, 1)})
+			part(decor, {Name = "RunnerEdge", Size = Vector3.new(1, 0.14, len), CFrame = CFrame.new(sx * 13.5, 0.27, zMid), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
+			part(decor, {Name = "FloorBorder", Size = Vector3.new(6, 0.1, len), CFrame = CFrame.new(sx * (half - 3), 0.24, zMid), Color = T.FloorColor:Lerp(DARKEN, 0.25), Material = T.Floor, CanCollide = false})
+		end
+		for bz = 12.5, len - 5, 25 do
+			part(decor, {Name = "Inlay", Size = Vector3.new(half * 2 - 12, 0.1, 1.2), CFrame = CFrame.new(0, 0.235, z0 + bz), Color = T.FloorColor:Lerp(T.Trim, 0.55), Material = M.SmoothPlastic, CanCollide = false})
 		end
 
-		-- DIVIDER LINE + SIGN at the start of every level (bigger at the start of every area)
-		local lineColor = zoneStart and L.Wall:Lerp(Color3.new(1, 1, 1), 0.2) or accent
-		part(decor, {Name = "Divider", Size = Vector3.new(C.ROOM_W, 0.3, zoneStart and 5 or 1.5), CFrame = CFrame.new(0, 0.38, z0 + (zoneStart and 2.5 or 0.75)), Color = lineColor, Material = M.SmoothPlastic, CanCollide = false})
-		-- A big colourful archway marks each new level (tall, so the giant shopkeepers fit under the signs)
-		local archH = zoneStart and 80 or 70
+		-- WALLS: wainscot panelling, a rail, pilasters with capitals, an accent band, and a cornice (all at 70% of the
+		-- old height, so the sky is open overhead)
 		for _, sx in ipairs({-1, 1}) do
-			part(decor, {Name = "ArchPillar", Size = Vector3.new(5, archH, 5), CFrame = CFrame.new(sx * (HALF - 2.5), archH / 2, z0 + 2.5), Color = lineColor, Material = M.SmoothPlastic})
-			part(decor, {Name = "ArchBall", Shape = Enum.PartType.Ball, Size = Vector3.new(6, 6, 6), CFrame = CFrame.new(sx * (HALF - 2.5), archH + 3, z0 + 2.5), Color = Color3.new(1, 1, 1), Material = M.SmoothPlastic})
-		end
-		part(decor, {Name = "ArchBeam", Size = Vector3.new(C.ROOM_W, 4, 5), CFrame = CFrame.new(0, archH - 2, z0 + 2.5), Color = lineColor, Material = M.SmoothPlastic})
-		local floorLabel = part(decor, {Name = "FloorLabel", Size = Vector3.new(9, 0.1, 60), CFrame = CFrame.new(0, 0.5, z0 + (zoneStart and 11 or 7)) * CFrame.Angles(0, math.pi / 2, 0), Transparency = 1, CanCollide = false})
-		Kit.surfaceText(floorLabel, Enum.NormalId.Top, string.upper(L.Store), Color3.new(1, 1, 1), 20)
-		local signW = zoneStart and C.ROOM_W - 20 or 64
-		local signH = zoneStart and 12 or 8
-		local signY = archH - 4 - signH / 2 - 1
-		local sign = part(decor, {Name = "LevelSign", Size = Vector3.new(signW, signH, 0.8), CFrame = CFrame.new(0, signY, z0 + 0.2), Color = Color3.new(1, 1, 1)})
-		part(decor, {Name = "LevelSignFrame", Size = Vector3.new(signW + 1.6, signH + 1.6, 0.5), CFrame = CFrame.new(0, signY, z0 + 0.6), Color = lineColor:Lerp(Color3.new(0, 0, 0), 0.15), Material = M.SmoothPlastic})
-		local signText = zoneStart and string.upper(zone.Name) or string.upper(L.Store)
-		local signLabel = Kit.surfaceText(sign, Enum.NormalId.Front, signText, lineColor:Lerp(Color3.new(0, 0, 0), 0.35), zoneStart and 14 or 20)
-		signLabel.TextStrokeTransparency = 1
-
-		-- Shelves and decorations along the walls
-		local boxColors = {accent, zone.Color, accent:Lerp(Color3.new(1, 1, 1), 0.4), zone.Color:Lerp(DARK, 0.3), rgb(240, 240, 240), rgb(40, 40, 50)}
-		for _, side in ipairs({-1, 1}) do
-			for _, sz in ipairs({C.SEG_LEN * 0.15, C.SEG_LEN * 0.45, C.SEG_LEN * 0.8}) do
-				buildShelf(decor, side, z0 + sz, boxColors)
+			part(seg, {Name = "Wall", Size = Vector3.new(3, C.WALL_H, len), CFrame = CFrame.new(sx * (half + 1.5), C.WALL_H / 2, zMid), Color = T.WallColor, Material = T.Wall})
+			part(decor, {Name = "Wainscot", Size = Vector3.new(0.8, 12, len), CFrame = CFrame.new(sx * (half - 0.3), 6, zMid), Color = T.WallColor:Lerp(DARKEN, 0.3), Material = panelMat, CanCollide = false})
+			if T.Panel == M.Neon then
+				part(decor, {Name = "NeonStrip", Size = Vector3.new(0.3, 0.6, len), CFrame = CFrame.new(sx * (half - 0.75), 11, zMid), Color = T.Trim, Material = M.Neon, CanCollide = false})
+			end
+			part(decor, {Name = "Rail", Size = Vector3.new(1.4, 1, len), CFrame = CFrame.new(sx * (half - 0.6), 12.5, zMid), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
+			part(decor, {Name = "Baseboard", Size = Vector3.new(1.2, 1.4, len), CFrame = CFrame.new(sx * (half - 0.5), 0.7, zMid), Color = T.Trim:Lerp(DARKEN, 0.2), CanCollide = false})
+			part(decor, {Name = "AccentBand", Size = Vector3.new(0.5, 2, len), CFrame = CFrame.new(sx * (half - 0.15), 40, zMid), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
+			part(seg, {Name = "WallCap", Size = Vector3.new(6, 2.4, len), CFrame = CFrame.new(sx * (half + 1.5), C.WALL_H + 1.2, zMid), Color = T.Trim, Material = M.SmoothPlastic})
+			part(decor, {Name = "Cornice", Size = Vector3.new(1.6, 1.4, len), CFrame = CFrame.new(sx * (half - 0.6), C.WALL_H - 1.2, zMid), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
+			local pi = 0
+			for pz = 17.5, len - 10, 35 do
+				pi += 1
+				local pzw = z0 + pz
+				part(decor, {Name = "Pilaster", Size = Vector3.new(1.6, C.WALL_H - 14, 3.6), CFrame = CFrame.new(sx * (half - 0.6), 13 + (C.WALL_H - 14) / 2, pzw), Color = T.WallColor:Lerp(T.Trim, 0.5), Material = T.Wall, CanCollide = false})
+				part(decor, {Name = "Capital", Size = Vector3.new(2.4, 1.6, 4.6), CFrame = CFrame.new(sx * (half - 1), C.WALL_H - 2.6, pzw), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
+				if pi % 3 == 2 then
+					-- a sconce in the level's light colour
+					local sconce = part(decor, {Name = "Sconce", Size = Vector3.new(1.2, 2.4, 1.6), CFrame = CFrame.new(sx * (half - 1.8), 22, pzw), Color = T.Light, Material = M.Neon, CanCollide = false})
+					local light = Instance.new("PointLight")
+					light.Color = T.Light
+					light.Range = 26
+					light.Brightness = 1.1
+					light.Shadows = false
+					light.Parent = sconce
+				end
 			end
 		end
-		buildProp(decor, zone.Props[1], Vector3.new(48, 0, z0 + C.SEG_LEN * 0.3), accent)
-		buildProp(decor, zone.Props[1], Vector3.new(-48, 0, z0 + C.SEG_LEN * 0.7), accent)
-		buildProp(decor, zone.Props[2], Vector3.new(-50, 0, z0 + C.SEG_LEN * 0.94), accent)
-		buildProp(decor, zone.Props[2], Vector3.new(50, 0, z0 + C.SEG_LEN * 0.94), accent)
-		-- themed decorations for this area
-		local kinds = ZONE_DECOR[L.ZoneIndex] or ZONE_DECOR[1]
-		for i, spot in ipairs(DECOR_SPOTS) do
-			buildProp(decor, kinds[(i + level) % #kinds + 1], Vector3.new(spot[1], 0, z0 + C.SEG_LEN * spot[2]), accent)
-		end
-		buildWallArt(decor, L, z0)
+		wallFeatures(decor, L, z0, half)
 
-		-- OUTSIDE of the hallway: pilasters, colour bands, battlements and a big area emblem
+		-- GATE at the start of the level: piers that also close off any change in width, a beam with the level's
+		-- name, and the recommended speed hanging underneath. A new area gets a taller, wider sign.
+		local lineColor = zoneStart and T.Trim or accent
+		-- the beam sits just under the wall top so its sign is high and clear of the giants; the first level's gate
+		-- stands well inside the vault, so its sign doesn't hang in the entrance doorway
+		local archH = zoneStart and C.WALL_H - 3 or C.WALL_H - 7
+		local gz = z0 + (level == 1 and 30 or 0)
+		local outer = math.max(half, prevHalf)
+		for _, sx in ipairs({-1, 1}) do
+			local inner = math.min(half, prevHalf) - 5
+			local w = outer + 3 - inner
+			part(decor, {Name = "GatePier", Size = Vector3.new(w, C.WALL_H + 4, 6), CFrame = CFrame.new(sx * (inner + w / 2), (C.WALL_H + 4) / 2, gz + 3), Color = lineColor, Material = zoneStart and M.Marble or M.SmoothPlastic})
+			part(decor, {Name = "GateCap", Shape = Enum.PartType.Ball, Size = Vector3.new(7, 7, 7), CFrame = CFrame.new(sx * (inner + 2.5), C.WALL_H + 6.5, gz + 3), Color = zoneStart and Kit.GOLD or Color3.new(1, 1, 1), Material = zoneStart and M.Metal or M.SmoothPlastic})
+		end
+		part(decor, {Name = "Divider", Size = Vector3.new(half * 2, 0.3, zoneStart and 5 or 1.5), CFrame = CFrame.new(0, 0.38, gz + (zoneStart and 8.5 or 6.75)), Color = lineColor, Material = M.SmoothPlastic, CanCollide = false})
+		part(decor, {Name = "ArchBeam", Size = Vector3.new(outer * 2, 4, 6), CFrame = CFrame.new(0, archH - 2, gz + 3), Color = lineColor, Material = M.SmoothPlastic, CanCollide = false})
+		local floorLabel = part(decor, {Name = "FloorLabel", Size = Vector3.new(9, 0.1, 60), CFrame = CFrame.new(0, 0.5, gz + (zoneStart and 17 or 13)) * CFrame.Angles(0, math.pi / 2, 0), Transparency = 1, CanCollide = false})
+		Kit.surfaceText(floorLabel, Enum.NormalId.Top, string.upper(level == 1 and zone.Name or L.Store), Color3.new(1, 1, 1), 20)
+		local signW = zoneStart and half * 2 - 24 or 64
+		local signH = zoneStart and 12 or 8
+		local signY = archH - 4 - signH / 2 - 1
+		local sign = part(decor, {Name = "LevelSign", Size = Vector3.new(signW, signH, 0.8), CFrame = CFrame.new(0, signY, gz + 0.2), Color = Color3.new(1, 1, 1), CanCollide = false})
+		part(decor, {Name = "LevelSignFrame", Size = Vector3.new(signW + 1.6, signH + 1.6, 0.5), CFrame = CFrame.new(0, signY, gz + 0.6), Color = lineColor:Lerp(DARKEN, 0.15), Material = M.SmoothPlastic, CanCollide = false})
+		local signText = zoneStart and string.upper(zone.Name) or string.upper(L.Store)
+		local signLabel = Kit.surfaceText(sign, Enum.NormalId.Front, signText, lineColor:Lerp(DARKEN, 0.35), zoneStart and 14 or 20)
+		signLabel.TextStrokeTransparency = 1
 		do
-			local outsideColor = L.Wall:Lerp(Color3.new(1, 1, 1), 0.35)
+			local hangW, hangH = zoneStart and 40 or 34, zoneStart and 9.5 or 8.5
+			local chainTop = signY - signH / 2 - 0.8
+			local chainLen = 2.4
+			local hy = chainTop - chainLen - hangH / 2
+			for _, cx in ipairs({-hangW / 2 + 2.5, hangW / 2 - 2.5}) do
+				part(decor, {Name = "SpeedSignChain", Size = Vector3.new(0.3, chainLen + 0.4, 0.3), CFrame = CFrame.new(cx, chainTop - chainLen / 2, gz + 0.4), Color = rgb(70, 70, 80), Material = M.Metal, CanCollide = false})
+			end
+			local board = part(decor, {Name = "SpeedSign", Size = Vector3.new(hangW, hangH, 0.6), CFrame = CFrame.new(0, hy, gz + 0.2), Color = rgb(30, 28, 45), CanCollide = false})
+			part(decor, {Name = "SpeedSignFrame", Size = Vector3.new(hangW + 1, hangH + 1, 0.4), CFrame = CFrame.new(0, hy, gz + 0.55), Color = lineColor:Lerp(DARKEN, 0.15), CanCollide = false})
+			local sg = Instance.new("SurfaceGui")
+			sg.Face = Enum.NormalId.Front
+			sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+			sg.PixelsPerStud = 20
+			sg.LightInfluence = 0
+			sg.Parent = board
+			guiLabel(sg, UDim2.fromScale(0.5, 0.24), UDim2.fromScale(0.9, 0.3), zoneStart and "RECOMMENDED SPEED" or (string.upper(zone.Name) .. " \u{2022} PART 2"), rgb(200, 200, 220))
+			local num = guiLabel(sg, UDim2.fromScale(0.5, 0.66), UDim2.fromScale(0.9, 0.52), "\u{1F45F} " .. Kit.fmt(C.recommendedSpeed(level)), rgb(120, 255, 140))
+			num.TextStrokeTransparency = 0
+		end
+
+		-- level 1's gate is the entrance doorway itself: nothing hangs in it, its name is on the floor just inside
+		if level == 1 then
+			for _, p in ipairs(decor:GetChildren()) do
+				if p.Name:match("^Gate") or p.Name:match("Sign") or p.Name == "ArchBeam" then
+					p:Destroy()
+				end
+			end
+		end
+
+		-- Shelves of boxed games along both walls, and the theme's props (kept to the sides so the middle stays clear
+		-- for running and for the shopkeeper's chase)
+		local boxColors = {accent, zone.Color, accent:Lerp(Color3.new(1, 1, 1), 0.4), T.WallColor:Lerp(DARK, 0.3), rgb(240, 240, 240), rgb(40, 40, 50)}
+		local wood = T.Trim:Lerp(rgb(70, 50, 35), 0.6)
+		for _, side in ipairs({-1, 1}) do
+			for _, f in ipairs({0.16, 0.86}) do
+				buildShelf(decor, side, z0 + len * f, boxColors, half, wood)
+			end
+		end
+		local spots = {{1, 0.24}, {-1, 0.44}, {1, 0.52}, {-1, 0.66}, {1, 0.8}, {-1, 0.95}, {1, 0.96}}
+		for i, spot in ipairs(spots) do
+			-- the guard's side keeps clear in front of the counter
+			local kind = T.Props[(i + level) % #T.Props + 1]
+			buildProp(decor, kind, Vector3.new(spot[1] * (half - 11), 0, z0 + len * spot[2]), accent)
+		end
+		buildWallArt(decor, L, z0, half)
+
+		-- OUTSIDE of the hallway: two colour bands, battlements and a big area emblem
+		do
+			local outsideColor = T.WallColor:Lerp(Color3.new(1, 1, 1), 0.3)
 			for _, sx in ipairs({-1, 1}) do
-				local ox = sx * (HALF + 3)
-				for _, by in ipairs({10, C.WALL_H - 10}) do
-					part(decor, {Name = "OutBand", Size = Vector3.new(1, 4, C.SEG_LEN), CFrame = CFrame.new(ox + sx * 0.5, by, zMid), Color = accent, Material = M.SmoothPlastic})
+				local ox = sx * (half + 3)
+				for _, by in ipairs({8, C.WALL_H - 8}) do
+					part(decor, {Name = "OutBand", Size = Vector3.new(1, 3, len), CFrame = CFrame.new(ox + sx * 0.5, by, zMid), Color = accent, Material = M.SmoothPlastic})
 				end
-				for pz = 25, C.SEG_LEN, 50 do
-					part(decor, {Name = "OutPilaster", Size = Vector3.new(2.4, C.WALL_H, 6), CFrame = CFrame.new(ox + sx * 1.2, C.WALL_H / 2, z0 + pz), Color = outsideColor, Material = M.SmoothPlastic})
+				for pz = 25, len, 50 do
+					part(decor, {Name = "OutPilaster", Size = Vector3.new(2.4, C.WALL_H, 6), CFrame = CFrame.new(ox + sx * 1.2, C.WALL_H / 2, z0 + pz), Color = outsideColor, Material = T.Wall})
 				end
-				for mz = 10, C.SEG_LEN, 20 do
-					part(decor, {Name = "Merlon", Size = Vector3.new(5, 4, 8), CFrame = CFrame.new(sx * (HALF + 1.5), C.WALL_H + 4, z0 + mz), Color = accent, Material = M.SmoothPlastic})
+				for mz = 10, len - 4, 20 do
+					part(decor, {Name = "Merlon", Size = Vector3.new(5, 4, 8), CFrame = CFrame.new(sx * (half + 1.5), C.WALL_H + 4.4, z0 + mz), Color = T.Trim, Material = M.SmoothPlastic})
 				end
-				-- big round emblem with the area's picture
-				local ez = z0 + C.SEG_LEN * 0.5
-				part(decor, {Name = "EmblemRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 34, 34), CFrame = CFrame.new(ox + sx * 0.6, 48, ez), Color = Color3.new(1, 1, 1), Material = M.SmoothPlastic})
-				part(decor, {Name = "EmblemDisc", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.8, 29, 29), CFrame = CFrame.new(ox + sx * 0.8, 48, ez), Color = accent, Material = M.SmoothPlastic})
-				local pic = part(decor, {Name = "Emblem", Size = Vector3.new(0.2, 18, 18), CFrame = CFrame.new(ox + sx * 1.3, 48, ez), Transparency = 1, CanCollide = false})
+				local ez = zMid
+				part(decor, {Name = "EmblemRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 30, 30), CFrame = CFrame.new(ox + sx * 0.6, 32, ez), Color = Color3.new(1, 1, 1), Material = M.SmoothPlastic})
+				part(decor, {Name = "EmblemDisc", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.8, 26, 26), CFrame = CFrame.new(ox + sx * 0.8, 32, ez), Color = accent, Material = M.SmoothPlastic})
+				local pic = part(decor, {Name = "Emblem", Size = Vector3.new(0.2, 16, 16), CFrame = CFrame.new(ox + sx * 1.3, 32, ez), Transparency = 1, CanCollide = false})
 				local sg = Instance.new("SurfaceGui")
 				sg.Face = sx > 0 and Enum.NormalId.Right or Enum.NormalId.Left
 				sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -810,156 +1348,149 @@ function World.build(C, Kit)
 			end
 		end
 
-		-- Checkout counter (the shopkeeper waits behind it)
-		part(decor, {Name = "Counter", Size = Vector3.new(18, 3.6, 3), CFrame = CFrame.new(-42, 1.8, COUNTER_Z), Color = L.Wall:Lerp(rgb(255, 255, 255), 0.2), Material = zone.WallMat})
-		part(decor, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = CFrame.new(-42, 3.8, COUNTER_Z), Color = accent, Material = M.SmoothPlastic})
-		part(decor, {Name = "Register", Size = Vector3.new(2, 1.4, 1.6), CFrame = CFrame.new(-47, 4.6, COUNTER_Z), Color = rgb(40, 40, 45), Material = M.Metal})
+		-- Checkout counter by the shopkeeper's post (the guard stands at x = -(half - 18), 30% into the level)
+		local px, pz = -(half - 18), z0 + len * 0.3
+		part(decor, {Name = "Counter", Size = Vector3.new(18, 3.6, 3), CFrame = CFrame.new(px, 1.8, pz - 7), Color = T.WallColor:Lerp(rgb(255, 255, 255), 0.2), Material = T.Wall})
+		part(decor, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = CFrame.new(px, 3.8, pz - 7), Color = accent, Material = M.SmoothPlastic})
+		part(decor, {Name = "Register", Size = Vector3.new(2, 1.4, 1.6), CFrame = CFrame.new(px - 5, 4.6, pz - 7), Color = rgb(40, 40, 45), Material = M.Metal})
 
-		-- Three display pedestals
-		for _, px in ipairs({-30, 0, 30}) do
-			local ped = part(decor, {Name = "Pedestal", Size = Vector3.new(6, 2.4, 6), CFrame = CFrame.new(px, 1.2, PED_Z), Color = accent:Lerp(Color3.new(1, 1, 1), 0.55), Material = M.Marble})
-			part(decor, {Name = "PedestalRing", Size = Vector3.new(7.6, 0.4, 7.6), CFrame = CFrame.new(px, 0.4, PED_Z), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
+		-- DISPLAY: C.PEDESTALS games past the shopkeeper, each on a glowing ring (C.PEDESTAL_LAYOUT: two outer
+		-- columns and an inner pair, leaving the runner down the middle clear)
+		for i = 1, C.PEDESTALS do
+			local p = C.PEDESTAL_LAYOUT[i]
+			local pos = Vector3.new(p[1] * half, 0, z0 + len * p[2])
+			local ped = part(decor, {Name = "Pedestal", Size = Vector3.new(6, 2.4, 6), CFrame = CFrame.new(pos + Vector3.new(0, 1.2, 0)), Color = accent:Lerp(Color3.new(1, 1, 1), 0.55), Material = M.Marble})
+			part(decor, {Name = "PedestalRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 11, 11), CFrame = CFrame.new(pos + Vector3.new(0, 0.33, 0)) * CFrame.Angles(0, 0, math.pi / 2), Color = accent, Material = M.Neon, CanCollide = false, CastShadow = false})
+			part(decor, {Name = "PedestalTrim", Size = Vector3.new(6.6, 0.4, 6.6), CFrame = CFrame.new(pos + Vector3.new(0, 2.5, 0)), Color = T.Trim, Material = M.Metal, CanCollide = false})
 			table.insert(W.Spots, {Pedestal = ped, Level = level, Item = nil, Data = nil, Carried = false})
 		end
-		local timerPart = part(decor, {Name = "RestockTimer", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(0, 20, PED_Z), Transparency = 1, CanCollide = false})
+		local timerPart = part(decor, {Name = "RestockTimer", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(0, 20, z0 + len * 0.64), Transparency = 1, CanCollide = false})
 		W.RestockLabels[level] = Kit.billboard(timerPart, 300, 56, 0, "IN STOCK", 140)
 
-		-- Recommended speed: a smaller sign hanging on two chains under the level's name sign
-		do
-			local hangW, hangH = zoneStart and 40 or 34, zoneStart and 9.5 or 8.5
-			local chainTop = signY - signH / 2 - 0.8
-			local chainLen = 2.4
-			local hy = chainTop - chainLen - hangH / 2
-			for _, cx in ipairs({-hangW / 2 + 2.5, hangW / 2 - 2.5}) do
-				part(decor, {Name = "SpeedSignChain", Size = Vector3.new(0.3, chainLen + 0.4, 0.3), CFrame = CFrame.new(cx, chainTop - chainLen / 2, z0 + 0.4), Color = rgb(70, 70, 80), Material = M.Metal, CanCollide = false})
-			end
-			local board = part(decor, {Name = "SpeedSign", Size = Vector3.new(hangW, hangH, 0.6), CFrame = CFrame.new(0, hy, z0 + 0.2), Color = rgb(30, 28, 45), CanCollide = false})
-			part(decor, {Name = "SpeedSignFrame", Size = Vector3.new(hangW + 1, hangH + 1, 0.4), CFrame = CFrame.new(0, hy, z0 + 0.55), Color = lineColor:Lerp(Color3.new(0, 0, 0), 0.15), CanCollide = false})
-			local sg = Instance.new("SurfaceGui")
-			sg.Face = Enum.NormalId.Front
-			sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-			sg.PixelsPerStud = 20
-			sg.LightInfluence = 0
-			sg.Parent = board
-			guiLabel(sg, UDim2.fromScale(0.5, 0.24), UDim2.fromScale(0.9, 0.3), "RECOMMENDED SPEED", rgb(200, 200, 220))
-			local num = guiLabel(sg, UDim2.fromScale(0.5, 0.66), UDim2.fromScale(0.9, 0.52), "\u{1F45F} " .. Kit.fmt(C.recommendedSpeed(level)), rgb(120, 255, 140))
-			num.TextStrokeTransparency = 0
-		end
-
 		Kit.setGroup(decor, "Decor")
+	end
+	for level = 1, C.NUM_LEVELS do
+		buildLevel(level)
+		if level % 4 == 0 then
+			task.wait() -- let the server breathe between big batches of parts
+		end
 	end
 	local lastL = C.LEVELS[C.NUM_LEVELS]
 	-- Invisible roof: sits right on top of the walls (no gap to climb into) and is thick
 	-- and wider than the hallway, so nobody gets in or out over the top at any speed
 	part(vault, {Name = "InvisibleRoof", Size = Vector3.new(C.ROOM_W + 24, 10, hallEnd - C.HALL_START_Z + 8), CFrame = CFrame.new(0, C.WALL_H + 2 + 5, (C.HALL_START_Z + hallEnd) / 2), Transparency = 1, CanCollide = true, CanQuery = false, CastShadow = false})
-	part(vault, {Name = "VaultEnd", Size = Vector3.new(C.ROOM_W + 6, C.WALL_H, 3), CFrame = CFrame.new(0, C.WALL_H / 2, hallEnd + 1.5), Color = lastL.Wall, Material = lastL.Zone.WallMat})
+	part(vault, {Name = "VaultEnd", Size = Vector3.new(lastL.Width + 6, C.WALL_H, 3), CFrame = CFrame.new(0, C.WALL_H / 2, hallEnd + 1.5), Color = lastL.Theme.WallColor, Material = lastL.Theme.Wall})
 
-	-- Grand entrance: a big, bright, game-themed gateway
+	-- Grand entrance: a big, bright, game-themed gateway.
+	-- Built around one rule so nothing clips: the facade is a solid block from F (its front face) back to the hall,
+	-- and every trim piece sits wholly in front of F or meets another piece edge to edge, never inside it.
 	do
 		local front = Instance.new("Model")
 		front.Name = "VaultEntrance"
 		front.Parent = vault
 		local z = C.HALL_START_Z
+		local D = 10 -- facade depth
+		local F = z - D -- the facade's front face
 		local EW, EH = C.ENTRANCE_W, C.ENTRANCE_H
-		local sideW = (C.ROOM_W - EW) / 2 + 3
+		local FW = C.ROOM_W + 30 -- facade width (wider than the hall, so it reads as the vault's front)
+		local GATE_H = 140
 		local WHITE = Color3.new(1, 1, 1)
-		local wallColor = rgb(120, 95, 235)
+		local PURPLE = rgb(120, 95, 235)
 		local PALETTE = {rgb(255, 80, 80), rgb(255, 170, 40), rgb(255, 230, 60), rgb(90, 220, 90), rgb(70, 170, 255), rgb(190, 110, 255), rgb(255, 120, 200)}
+		local pillarW = FW / 2 - EW / 2
+		local mid = F + D / 2
 
+		-- the facade: two pillars and a lintel around the doorway, a darker base course, a gold cornice on top
 		for _, sx in ipairs({-1, 1}) do
-			part(front, {Name = "FrontWall", Size = Vector3.new(sideW, C.WALL_H, 4), CFrame = CFrame.new(sx * (EW / 2 + sideW / 2), C.WALL_H / 2, z), Color = wallColor, Material = M.SmoothPlastic})
+			local px = sx * (EW / 2 + pillarW / 2)
+			part(front, {Name = "FacadePillar", Size = Vector3.new(pillarW, GATE_H, D), CFrame = CFrame.new(px, GATE_H / 2, mid), Color = PURPLE, Material = M.SmoothPlastic})
+			part(front, {Name = "BaseCourse", Size = Vector3.new(pillarW - 3, 6, 0.6), CFrame = CFrame.new(sx * (EW / 2 + 3 + (pillarW - 3) / 2), 3, F - 0.3), Color = PURPLE:Lerp(Color3.new(0, 0, 0), 0.35), Material = M.SmoothPlastic})
+			-- gold door jamb, flush on the pillar's face along the doorway edge
+			part(front, {Name = "JambTrim", Size = Vector3.new(3, EH, 1), CFrame = CFrame.new(sx * (EW / 2 + 1.5), EH / 2, F - 0.5), Color = Kit.GOLD, Material = M.Metal})
 		end
-		part(front, {Name = "Lintel", Size = Vector3.new(EW, C.WALL_H - EH, 4), CFrame = CFrame.new(0, EH + (C.WALL_H - EH) / 2, z), Color = wallColor, Material = M.SmoothPlastic})
-		-- Pixel squares sprinkled over the wall
-		for i = 1, 60 do
-			local sx = (i % 2 == 0) and 1 or -1
-			-- only on the wall beyond the towers, never hidden inside them
-			local x = sx * (EW / 2 + 21 + rng:NextNumber(0, math.max(0, sideW - 24)))
-			part(front, {Name = "Pixel", Size = Vector3.new(3, 3, 0.4), CFrame = CFrame.new(x, rng:NextNumber(4, C.WALL_H - 4), z - 2.2), Color = PALETTE[rng:NextInteger(1, #PALETTE)], CanCollide = false})
+		part(front, {Name = "Lintel", Size = Vector3.new(EW, GATE_H - EH, D), CFrame = CFrame.new(0, EH + (GATE_H - EH) / 2, mid), Color = PURPLE, Material = M.SmoothPlastic})
+		part(front, {Name = "HeadTrim", Size = Vector3.new(EW + 6, 3, 1), CFrame = CFrame.new(0, EH + 1.5, F - 0.5), Color = Kit.GOLD, Material = M.Metal})
+		part(front, {Name = "Cornice", Size = Vector3.new(FW, 4, D + 2), CFrame = CFrame.new(0, GATE_H + 2, mid), Color = Kit.GOLD, Material = M.Metal})
+
+		-- pixel squares on a loose grid over the pillars (a grid, so no two ever overlap and flicker)
+		for _, sx in ipairs({-1, 1}) do
+			for gx = EW / 2 + 7, FW / 2 - 4, 5 do
+				for gy = 10, GATE_H - 6, 5 do
+					if rng:NextNumber() < 0.16 then
+						part(front, {Name = "Pixel", Size = Vector3.new(3, 3, 0.4), CFrame = CFrame.new(sx * gx, gy, F - 0.25), Color = PALETTE[rng:NextInteger(1, #PALETTE)], CanCollide = false})
+					end
+				end
+			end
 		end
 
-		-- Two giant game-console towers
+		-- Two giant game-console towers standing against the facade's sides
+		local TW, TD, TH = 26, 20, GATE_H + 30
 		for _, sx in ipairs({-1, 1}) do
-			local tx = sx * (EW / 2 + 10)
+			local tx = sx * (FW / 2 + TW / 2)
 			local towerColor = sx < 0 and rgb(255, 85, 95) or rgb(70, 160, 255)
-			local towerH = C.WALL_H + 22
-			-- the tower stands just in front of the wall (it used to sink into it and flicker)
-			part(front, {Name = "Tower", Size = Vector3.new(19.6, towerH, 14), CFrame = CFrame.new(tx + sx * 0.2, towerH / 2, z - 9.2), Color = towerColor, Material = M.SmoothPlastic})
-			part(front, {Name = "TowerTop", Size = Vector3.new(21.6, 3, 16), CFrame = CFrame.new(tx + sx * 0.2, towerH + 1.5, z - 9.2), Color = WHITE})
-			local fz = z - 16.6
-			-- A/B/X/Y buttons
-			for _, btn in ipairs({{0, 22, rgb(255, 230, 60)}, {4.5, 18, rgb(90, 220, 90)}, {-4.5, 18, rgb(70, 170, 255)}, {0, 14, rgb(255, 120, 200)}}) do
-				part(front, {Name = "Button", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 4.6, 4.6), CFrame = CFrame.new(tx + btn[1], btn[2], fz) * CFrame.Angles(0, math.pi / 2, 0), Color = btn[3]})
+			local tf = mid - TD / 2 -- the tower's front face
+			part(front, {Name = "Tower", Size = Vector3.new(TW, TH, TD), CFrame = CFrame.new(tx, TH / 2, mid), Color = towerColor, Material = M.SmoothPlastic})
+			part(front, {Name = "TowerTop", Size = Vector3.new(TW + 2, 3, TD + 2), CFrame = CFrame.new(tx, TH + 1.5, mid), Color = WHITE})
+			-- a searchlight beam from each tower top, visible from every base
+			part(front, {Name = "Searchlight", Shape = Enum.PartType.Cylinder, Size = Vector3.new(160, 7, 7), CFrame = CFrame.new(tx, TH + 4, mid) * CFrame.Angles(0, 0, math.pi / 2 - sx * 0.22) * CFrame.new(80, 0, 0), Color = towerColor:Lerp(WHITE, 0.5), Material = M.Neon, Transparency = 0.82, CanCollide = false, CanQuery = false, CastShadow = false})
+			-- A/B/X/Y buttons, a D-pad and a little screen on the tower's front
+			for _, btn in ipairs({{0, 30, rgb(255, 230, 60)}, {6, 24, rgb(90, 220, 90)}, {-6, 24, rgb(70, 170, 255)}, {0, 18, rgb(255, 120, 200)}}) do
+				part(front, {Name = "Button", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 6, 6), CFrame = CFrame.new(tx + btn[1], btn[2], tf - 0.6) * CFrame.Angles(0, math.pi / 2, 0), Color = btn[3]})
 			end
-			-- D-pad
-			part(front, {Name = "DPad", Size = Vector3.new(11, 3.6, 1), CFrame = CFrame.new(tx, 34, fz), Color = rgb(40, 40, 55)})
-			part(front, {Name = "DPad", Size = Vector3.new(3.6, 11, 1), CFrame = CFrame.new(tx, 34, fz), Color = rgb(40, 40, 55)})
-			-- Little screen
-			local screen = part(front, {Name = "Screen", Size = Vector3.new(15, 9, 0.6), CFrame = CFrame.new(tx, 52, fz), Color = rgb(25, 25, 45)})
+			part(front, {Name = "DPad", Size = Vector3.new(14, 4.6, 1), CFrame = CFrame.new(tx, 48, tf - 0.5), Color = rgb(40, 40, 55)})
+			part(front, {Name = "DPad", Size = Vector3.new(4.6, 14, 1), CFrame = CFrame.new(tx, 48, tf - 0.5), Color = rgb(40, 40, 55)})
+			part(front, {Name = "ScreenFrame", Size = Vector3.new(20, 14, 0.4), CFrame = CFrame.new(tx, 80, tf - 0.2), Color = WHITE})
+			local screen = part(front, {Name = "Screen", Size = Vector3.new(18, 12, 0.4), CFrame = CFrame.new(tx, 80, tf - 0.6), Color = rgb(25, 25, 45)})
 			Kit.surfaceText(screen, Enum.NormalId.Front, sx < 0 and "PLAY!" or "WIN!", rgb(120, 255, 140), 20)
-			part(front, {Name = "ScreenFrame", Size = Vector3.new(17, 11, 0.4), CFrame = CFrame.new(tx, 52, fz + 0.3), Color = WHITE})
-			-- Balloon bunch
-			for bi = 1, 5 do
-				local bx = tx + sx * 13 + rng:NextNumber(-3, 3)
-				local by = 14 + bi * 2.2 + rng:NextNumber(0, 2)
-				local bz = z - 14 + rng:NextNumber(-3, 3)
-				part(front, {Name = "Balloon", Shape = Enum.PartType.Ball, Size = Vector3.new(4, 4.6, 4), CFrame = CFrame.new(bx, by, bz), Color = PALETTE[rng:NextInteger(1, #PALETTE)], CanCollide = false})
-				part(front, {Name = "String", Size = Vector3.new(0.1, by - 2, 0.1), CFrame = CFrame.new(bx, (by - 2) / 2, bz), Color = WHITE, CanCollide = false})
-			end
 		end
 
-		-- Rainbow arch around the doorway
+		-- Rainbow arch over the doorway, standing on the gold head trim, in front of the lintel's face
 		local bands = {rgb(255, 70, 70), rgb(255, 160, 40), rgb(255, 230, 60), rgb(90, 220, 90), rgb(70, 160, 255), rgb(150, 90, 255)}
-		-- the rainbow sits on top of the doorway, between the towers (it used to cut into them)
-		local cy = EH
+		local cy = EH + 6 -- the arch's feet clear the head trim
 		for bi, color in ipairs(bands) do
-			local r = EW / 2 - 1.5 - (bi - 1) * 2.2
-			local segs = 24
+			local r = EW / 2 - 2 - (bi - 1) * 2.6
+			local segs = 28
 			for sgi = 0, segs - 1 do
 				local ang = math.pi * (sgi + 0.5) / segs
-				local pos = Vector3.new(math.cos(ang) * r, cy + math.sin(ang) * r, z - 3.4)
-				part(front, {Name = "Rainbow", Size = Vector3.new(2.3, math.pi * r / segs * 1.15, 2), CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, ang), Color = color, CanCollide = false})
+				local pos = Vector3.new(math.cos(ang) * r, cy + math.sin(ang) * r, F - 1)
+				part(front, {Name = "Rainbow", Size = Vector3.new(2.6, math.pi * r / segs * 1.15, 1.6), CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, ang), Color = color, CanCollide = false})
 			end
 		end
 
-		-- Marquee sign with light bulbs
-		local signY = cy + 35 -- above the rainbow
-		local signW, signH = EW - 14, 11
-		local sign = part(front, {Name = "VaultSign", Size = Vector3.new(signW, signH, 1), CFrame = CFrame.new(0, signY, z - 4.6), Color = rgb(45, 30, 90)})
+		-- Marquee sign above the rainbow: frame against the lintel, the sign in front of it, bulbs in front of that
+		local signW, signH = EW - 10, 16
+		local signY = cy + EW / 2 + 12
+		part(front, {Name = "SignFrame", Size = Vector3.new(signW + 3, signH + 3, 0.6), CFrame = CFrame.new(0, signY, F - 0.4), Color = Kit.GOLD, Material = M.Metal})
+		local sign = part(front, {Name = "VaultSign", Size = Vector3.new(signW, signH, 0.8), CFrame = CFrame.new(0, signY, F - 1.1), Color = rgb(45, 30, 90)})
 		local signText = Kit.surfaceText(sign, Enum.NormalId.Front, "THE GAME VAULT", Kit.GOLD, 20)
-		signText.Size = UDim2.fromScale(0.84, 0.62)
-		signText.Position = UDim2.fromScale(0.08, 0.19)
-		part(front, {Name = "SignFrame", Size = Vector3.new(signW + 2, signH + 2, 0.6), CFrame = CFrame.new(0, signY, z - 4.2), Color = Kit.GOLD})
+		signText.Size = UDim2.fromScale(0.86, 0.66)
+		signText.Position = UDim2.fromScale(0.07, 0.17)
 		local function bulb(x, y)
-			part(front, {Name = "Bulb", Shape = Enum.PartType.Ball, Size = Vector3.new(0.9, 0.9, 0.9), CFrame = CFrame.new(x, y, z - 5.3), Color = rgb(255, 245, 190), Material = M.Neon, CanCollide = false})
+			part(front, {Name = "Bulb", Shape = Enum.PartType.Ball, Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(x, y, F - 1.2), Color = rgb(255, 245, 190), Material = M.Neon, CanCollide = false})
 		end
-		for x = -signW / 2, signW / 2, 2.5 do
-			bulb(x, signY + signH / 2 + 0.5)
-			bulb(x, signY - signH / 2 - 0.5)
-		end
-		for y = -signH / 2 + 1.5, signH / 2 - 1.5, 2.5 do
-			bulb(-signW / 2 - 0.5, signY + y)
-			bulb(signW / 2 + 0.5, signY + y)
+		for x = -signW / 2, signW / 2, 3 do
+			bulb(x, signY + signH / 2 + 0.75)
+			bulb(x, signY - signH / 2 - 0.75)
 		end
 
-		-- Giant controller on top of the gateway
-		local cyTop = C.WALL_H + 9
-		part(front, {Name = "ControllerBody", Size = Vector3.new(30, 11, 7), CFrame = CFrame.new(0, cyTop, z), Color = rgb(55, 55, 75)})
+		-- Giant controller sitting on the cornice
+		local cyTop = GATE_H + 4 + 8
+		part(front, {Name = "ControllerBody", Size = Vector3.new(40, 15, 9), CFrame = CFrame.new(0, cyTop, mid), Color = rgb(55, 55, 75)})
 		for _, sx in ipairs({-1, 1}) do
-			part(front, {Name = "ControllerGrip", Shape = Enum.PartType.Ball, Size = Vector3.new(14, 14, 7), CFrame = CFrame.new(sx * 14, cyTop - 2, z), Color = rgb(55, 55, 75)})
+			part(front, {Name = "ControllerGrip", Shape = Enum.PartType.Ball, Size = Vector3.new(18, 18, 9), CFrame = CFrame.new(sx * 19, cyTop - 2, mid), Color = rgb(55, 55, 75)})
 		end
-		part(front, {Name = "CDPad", Size = Vector3.new(6, 2, 1), CFrame = CFrame.new(-10, cyTop, z - 3.8), Color = rgb(20, 20, 30)})
-		part(front, {Name = "CDPad", Size = Vector3.new(2, 6, 1), CFrame = CFrame.new(-10, cyTop, z - 3.8), Color = rgb(20, 20, 30)})
-		for _, btn in ipairs({{10, 2, rgb(255, 230, 60)}, {12.5, 0, rgb(255, 80, 80)}, {7.5, 0, rgb(70, 170, 255)}, {10, -2, rgb(90, 220, 90)}}) do
-			part(front, {Name = "CButton", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 2.2, 2.2), CFrame = CFrame.new(btn[1], cyTop + btn[2], z - 3.8) * CFrame.Angles(0, math.pi / 2, 0), Color = btn[3]})
+		part(front, {Name = "CDPad", Size = Vector3.new(8, 2.6, 1), CFrame = CFrame.new(-13, cyTop, mid - 5), Color = rgb(20, 20, 30)})
+		part(front, {Name = "CDPad", Size = Vector3.new(2.6, 8, 1), CFrame = CFrame.new(-13, cyTop, mid - 5), Color = rgb(20, 20, 30)})
+		for _, btn in ipairs({{13, 2.6, rgb(255, 230, 60)}, {16.2, 0, rgb(255, 80, 80)}, {9.8, 0, rgb(70, 170, 255)}, {13, -2.6, rgb(90, 220, 90)}}) do
+			part(front, {Name = "CButton", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1, 2.8, 2.8), CFrame = CFrame.new(btn[1], cyTop + btn[2], mid - 5) * CFrame.Angles(0, math.pi / 2, 0), Color = btn[3]})
 		end
 
 		-- Red carpet with gold rope posts
-		part(front, {Name = "Carpet", Size = Vector3.new(EW - 8, 0.3, 60), CFrame = CFrame.new(0, 0.35, z - 32), Color = rgb(215, 35, 50), Material = M.Fabric, CanCollide = false})
+		part(front, {Name = "Carpet", Size = Vector3.new(EW - 8, 0.3, 70), CFrame = CFrame.new(0, 0.35, F - 35), Color = rgb(215, 35, 50), Material = M.Fabric, CanCollide = false})
 		for _, sx in ipairs({-1, 1}) do
 			local px = sx * (EW / 2 - 2)
 			local last
-			for pz = z - 4, z - 60, -8 do
+			for pz = F - 4, F - 68, -8 do
 				cyl(front, 4, 0.8, CFrame.new(px, 2, pz), {Name = "RopePost", Color = Kit.GOLD, Material = M.Metal})
 				part(front, {Name = "PostTop", Shape = Enum.PartType.Ball, Size = Vector3.new(1.4, 1.4, 1.4), CFrame = CFrame.new(px, 4.3, pz), Color = Kit.GOLD, Material = M.Metal})
 				if last then
@@ -971,76 +1502,166 @@ function World.build(C, Kit)
 
 		-- Flags along the main path
 		local fi = 0
-		for pz = z - 70, z - 200, -22 do
+		for pz = F - 82, z - (C.LOOP_R - 10), -22 do
 			for _, sx in ipairs({-1, 1}) do
 				fi += 1
-				local px = sx * 16
+				local px = sx * 18
 				cyl(front, 14, 0.5, CFrame.new(px, 7, pz), {Name = "FlagPole", Color = WHITE})
-				Kit.wedge(front, {Name = "Flag", Size = Vector3.new(0.3, 4, 6), CFrame = CFrame.new(px - sx * 0.2, 12, pz - 3) * CFrame.Angles(0, 0, 0), Color = PALETTE[fi % #PALETTE + 1], CanCollide = false})
+				Kit.wedge(front, {Name = "Flag", Size = Vector3.new(0.3, 4, 6), CFrame = CFrame.new(px - sx * 0.2, 12, pz - 3), Color = PALETTE[fi % #PALETTE + 1], CanCollide = false})
 			end
 		end
 	end
 
 	------------------------------------------------------------------
-	-- TRAIL SHOP (beside the main path, near the vault entrance)
+	-- TRAIL SHOP: a little speed boutique hugging the vault's front, right of the doorway (the Lucky Spin mirrors it
+	-- on the left). Its back wall stands against the facade; swept fins and a sloping canopy with speed stripes give it
+	-- a fast silhouette; a portal of swirling trail ribbons on the back wall and two comet displays show what's sold.
 	------------------------------------------------------------------
 	do
 		local shop = Instance.new("Model")
 		shop.Name = "TrailShop"
 		shop.Parent = lobby
-		-- Beside the vault entrance, facing the same way it does
-		local pos = ENTRANCE + Vector3.new(-(C.ENTRANCE_W / 2 + 46), 0, -16)
+		-- back face flush against the facade (front face at HALL_START_Z - 10), clear of the doorway (x -40) and the tower
+		local pos = ENTRANCE + Vector3.new(-59, 0, -21.5)
 		local cf = CFrame.lookAt(pos, pos + Vector3.new(0, 0, -1))
 		local function at(x, y, z)
 			return cf * CFrame.new(x, y, z)
 		end
-		part(shop, {Name = "Floor", Size = Vector3.new(26, 1, 18), CFrame = at(0, 0.5, 2), Color = rgb(70, 50, 90), Material = M.WoodPlanks})
-		part(shop, {Name = "Counter", Size = Vector3.new(18, 4, 3), CFrame = at(0, 3, -4), Color = rgb(120, 70, 160), Material = M.WoodPlanks})
-		part(shop, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = at(0, 5.2, -4), Color = rgb(255, 120, 230), Material = M.Neon})
-		part(shop, {Name = "Back", Size = Vector3.new(26, 18, 1), CFrame = at(0, 10, 10.5), Color = rgb(60, 40, 80), Material = M.WoodPlanks})
-		for _, sx in ipairs({-1, 1}) do
-			part(shop, {Name = "Post", Size = Vector3.new(1.2, 18, 1.2), CFrame = at(sx * 12.4, 10, -6), Color = rgb(240, 240, 250), Material = M.Marble})
-		end
-		local stripes = {rgb(255, 80, 200), rgb(255, 255, 255)}
-		for i = 0, 12 do
-			part(shop, {Name = "Awning", Size = Vector3.new(2, 0.4, 19), CFrame = at(-12 + i * 2, 19.5, 1.5) * CFrame.Angles(math.rad(-12), 0, 0), Color = stripes[i % 2 + 1]})
-		end
-		local sign = part(shop, {Name = "Sign", Size = Vector3.new(22, 5, 0.6), CFrame = at(0, 23, -6.5), Color = rgb(30, 20, 40)})
-		Kit.surfaceText(sign, Enum.NormalId.Front, "TRAIL SHOP", rgb(255, 150, 240), 30)
-		part(shop, {Name = "SignFrame", Size = Vector3.new(23, 6, 0.4), CFrame = at(0, 23, -6.2), Color = rgb(255, 120, 230), Material = M.Neon})
-		-- Glowing ribbons on the back wall (a hint of what's for sale)
-		local ribbonColors = {rgb(90, 230, 255), rgb(255, 170, 60), rgb(160, 255, 80), rgb(190, 80, 255)}
-		for i, c in ipairs(ribbonColors) do
-			for j = 0, 5 do
-				part(shop, {Name = "Ribbon", Size = Vector3.new(3.2, 0.6, 0.3), CFrame = at(-9 + i * 3.6 + math.sin(j) * 0.8, 8 + j * 1.4, 9.8) * CFrame.Angles(0, 0, math.sin(j * 1.3) * 0.5), Color = c, Material = M.Neon, CanCollide = false})
+		local INDIGO, DEEP = rgb(58, 44, 120), rgb(34, 26, 74)
+		local TEAL, PINK, ORANGE, CYAN = rgb(40, 200, 205), rgb(255, 92, 190), rgb(255, 160, 60), rgb(90, 225, 255)
+		local WHITE = Color3.new(1, 1, 1)
+		-- platform with a white kerb and a chequered start line across the front
+		part(shop, {Name = "Floor", Size = Vector3.new(24, 1, 18), CFrame = at(0, 0.5, 1), Color = DEEP, Material = M.SmoothPlastic})
+		part(shop, {Name = "Kerb", Size = Vector3.new(24.4, 1.1, 0.8), CFrame = at(0, 0.55, -8.2), Color = WHITE, Material = M.SmoothPlastic})
+		for i = 0, 11 do
+			for row = 0, 1 do
+				part(shop, {Name = "StartLine", Size = Vector3.new(1, 0.05, 1), CFrame = at(-5.5 + i, 1.03, -6.6 + row), Color = (i + row) % 2 == 0 and WHITE or rgb(20, 18, 30), Material = M.SmoothPlastic, CanCollide = false})
 			end
 		end
-		local anchor = part(shop, {Name = "ShopAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 6, -5), Transparency = 1, CanCollide = false})
-		Kit.billboard(anchor, 300, 60, 22, '<font color="#ff96f0">TRAIL SHOP</font>\nCool trails for speed!', 200)
+		-- back wall: deep indigo with a lighter band, and the trail portal
+		part(shop, {Name = "Back", Size = Vector3.new(24, 16, 1), CFrame = at(0, 9, 9.5), Color = INDIGO, Material = M.SmoothPlastic})
+		part(shop, {Name = "BackBand", Size = Vector3.new(24, 1.2, 0.2), CFrame = at(0, 3.2, 8.95), Color = TEAL, Material = M.SmoothPlastic})
+		local portalC = at(0, 10.5, 8.85)
+		part(shop, {Name = "PortalDisc", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 10, 10), CFrame = portalC * CFrame.Angles(0, math.pi / 2, 0), Color = rgb(18, 14, 40), Material = M.SmoothPlastic, CanCollide = false})
+		for i = 0, 23 do
+			local ang = i / 24 * math.pi * 2
+			part(shop, {Name = "PortalRing", Size = Vector3.new(1.45, 0.55, 0.35), CFrame = portalC * CFrame.Angles(0, 0, ang) * CFrame.new(0, 5.2, -0.1), Color = WHITE:Lerp(CYAN, (i % 6) / 6), Material = M.SmoothPlastic, CanCollide = false})
+		end
+		-- three trail ribbons swirling out of the portal, each fading as it goes (what a trail looks like behind you)
+		for k, color in ipairs({PINK, CYAN, ORANGE}) do
+			for j = 0, 13 do
+				local f = j / 13
+				local ang = k * 2.1 + f * 3.6
+				local r = 1 + f * 3.4
+				part(shop, {Name = "TrailRibbon", Size = Vector3.new(1.1 - f * 0.5, 0.42 - f * 0.18, 0.12), CFrame = portalC * CFrame.new(math.cos(ang) * r, math.sin(ang) * r, -0.25) * CFrame.Angles(0, 0, ang + math.pi / 2),
+					Color = color, Material = M.Neon, Transparency = 0.05 + f * 0.65, CanCollide = false, CanQuery = false, CastShadow = false})
+			end
+		end
+		-- swept side fins: tall at the back, low at the front, with a white speed stripe along each slope
+		for _, sx in ipairs({-1, 1}) do
+			Kit.wedge(shop, {Name = "Fin", Size = Vector3.new(1, 15, 13), CFrame = at(sx * 11.5, 8.5, 2.5), Color = TEAL})
+			part(shop, {Name = "FinEdge", Size = Vector3.new(1.1, 0.6, 19.7), CFrame = at(sx * 11.5, 8.4, 2.6) * CFrame.Angles(math.atan2(15, 13), 0, 0), Color = WHITE, Material = M.SmoothPlastic, CanCollide = false})
+		end
+		-- the canopy: one sloping slab from the top of the back wall forward, with three speed stripes along it
+		local canopy = at(0, 16.4, 0.6) * CFrame.Angles(math.rad(8), 0, 0)
+		part(shop, {Name = "Canopy", Size = Vector3.new(25.4, 0.8, 19.6), CFrame = canopy, Color = WHITE, Material = M.SmoothPlastic})
+		for k, color in ipairs({PINK, ORANGE, CYAN}) do
+			part(shop, {Name = "CanopyStripe", Size = Vector3.new(1.4, 0.1, 19.6), CFrame = canopy * CFrame.new(-6 + k * 3, 0.45, 0), Color = color, Material = M.SmoothPlastic, CanCollide = false})
+		end
+		part(shop, {Name = "CanopyUnder", Size = Vector3.new(25, 0.2, 19.2), CFrame = canopy * CFrame.new(0, -0.5, 0), Color = rgb(70, 56, 140), Material = M.SmoothPlastic, CanCollide = false})
+		-- the sign along the canopy's front edge, with a lightning bolt at each end
+		local sign = part(shop, {Name = "Sign", Size = Vector3.new(17, 3.6, 0.5), CFrame = at(0, 14.2, -8.6), Color = DEEP, Material = M.SmoothPlastic})
+		Kit.surfaceText(sign, Enum.NormalId.Front, "TRAIL SHOP", rgb(255, 214, 120), 30)
+		part(shop, {Name = "SignEdge", Size = Vector3.new(17.6, 4.2, 0.3), CFrame = at(0, 14.2, -8.3), Color = PINK, Material = M.SmoothPlastic})
+		for _, sx in ipairs({-1, 1}) do
+			Kit.wedge(shop, {Name = "Bolt", Size = Vector3.new(0.3, 2.4, 1.4), CFrame = at(sx * 10, 14.6, -8.8) * CFrame.Angles(0, math.pi / 2, math.rad(sx * 20)), Color = rgb(255, 214, 80), CanCollide = false})
+			Kit.wedge(shop, {Name = "Bolt", Size = Vector3.new(0.3, 2.4, 1.4), CFrame = at(sx * 10.4, 13.2, -8.8) * CFrame.Angles(math.pi, math.pi / 2, math.rad(sx * 20)), Color = rgb(255, 214, 80), CanCollide = false})
+		end
+		-- the counter: white with a teal front, a dark top and one thin light line along its front edge
+		part(shop, {Name = "Counter", Size = Vector3.new(15, 3.6, 2.6), CFrame = at(0, 2.8, -3.6), Color = WHITE, Material = M.SmoothPlastic})
+		part(shop, {Name = "CounterFront", Size = Vector3.new(13.6, 2.2, 0.2), CFrame = at(0, 2.7, -4.95), Color = TEAL, Material = M.SmoothPlastic, CanCollide = false})
+		part(shop, {Name = "CounterTop", Size = Vector3.new(15.6, 0.35, 3.2), CFrame = at(0, 4.75, -3.6), Color = DEEP, Material = M.SmoothPlastic})
+		part(shop, {Name = "CounterLight", Size = Vector3.new(15.6, 0.12, 0.12), CFrame = at(0, 4.6, -5.22), Color = CYAN, Material = M.Neon, CanCollide = false, CastShadow = false})
+		-- two comet displays at the front corners: a glowing orb with its tail streaming behind
+		for k, sx in ipairs({-1, 1}) do
+			local color = k == 1 and PINK or CYAN
+			cyl(shop, 2.4, 3, at(sx * 8.8, 2.2, -6.2), {Name = "Plinth", Color = WHITE, Material = M.SmoothPlastic})
+			part(shop, {Name = "PlinthRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.18, 3.3, 3.3), CFrame = at(sx * 8.8, 3.45, -6.2) * CFrame.Angles(0, 0, math.pi / 2), Color = color, Material = M.Neon, CanCollide = false})
+			local orb = at(sx * 8.8, 5.6, -6.2)
+			part(shop, {Name = "Comet", Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = orb, Color = color:Lerp(WHITE, 0.4), Material = M.Neon, CanCollide = false})
+			for j = 1, 6 do
+				local f = j / 6
+				part(shop, {Name = "CometTail", Shape = Enum.PartType.Ball, Size = Vector3.one * (1.15 - f * 0.8), CFrame = orb * CFrame.new(-sx * f * 2.6, -f * 0.9, f * 0.6), Color = color, Material = M.Neon, Transparency = 0.15 + f * 0.7, CanCollide = false, CanQuery = false, CastShadow = false})
+			end
+		end
+		-- one warm light under the canopy
+		local lamp = part(shop, {Name = "ShopLight", Size = Vector3.new(1, 1, 1), CFrame = at(0, 13.5, -1), Transparency = 1, CanCollide = false, CanQuery = false})
+		local light = Instance.new("PointLight")
+		light.Color = rgb(255, 222, 190)
+		light.Range = 20
+		light.Brightness = 1.2
+		light.Shadows = false
+		light.Parent = lamp
+		local anchor = part(shop, {Name = "ShopAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 6, -6), Transparency = 1, CanCollide = false})
+		Kit.billboard(anchor, 300, 60, 13, '<font color="#ffd678">TRAIL SHOP</font>\nCool trails for speed!', 200)
 
-		-- The Trail Trader stands behind the counter
-		local npc = makeCharacter(rgb(255, 120, 220), rgb(70, 50, 110), Kit.SKIN)
+		-- The Trail Trader: a racer who runs the place. Racing jacket with speed stripes and a bolt on the chest, goggles
+		-- pushed up, swept-back hair, a scarf streaming behind and glowing sneaker soles - all welded to the body parts,
+		-- so they move with him as he idles and waves at people walking by.
+		local npc = makeCharacter(TEAL, rgb(36, 36, 64), Kit.SKIN)
 		if npc then
 			npc.Name = "Trail Trader"
 			npc.Parent = shop
-			part(shop, {Name = "Step", Size = Vector3.new(8, 2.4, 5), CFrame = at(0, 2.2, 1.8), Color = rgb(90, 60, 120), Material = M.WoodPlanks})
-			npc:PivotTo(at(0, 6.5, 1.8))
-			local head = npc:FindFirstChild("Head")
-			if head then
-				local cap = part(npc, {Name = "Cap", Size = Vector3.new(1.3, 0.45, 1.3), CFrame = head.CFrame * CFrame.new(0, 0.6, 0), Color = rgb(90, 230, 255), CanCollide = false})
-				local brim = part(npc, {Name = "CapBrim", Size = Vector3.new(1.2, 0.12, 0.8), CFrame = head.CFrame * CFrame.new(0, 0.45, -0.75), Color = rgb(90, 230, 255), CanCollide = false})
-				Kit.billboard(head, 240, 50, 2.6, '<font color="#ff96f0">TRAIL TRADER</font>', 80)
-				-- welded on so the cap moves with his head when he animates
-				for _, p in ipairs({cap, brim}) do
-					p.Anchored = false
-					p.Massless = true
-					local w = Instance.new("WeldConstraint")
-					w.Part0 = head
-					w.Part1 = p
-					w.Parent = p
-				end
-				animateNpc(npc)
+			part(shop, {Name = "Step", Size = Vector3.new(8, 2, 4), CFrame = at(0, 2, 1.4), Color = INDIGO, Material = M.SmoothPlastic})
+			npc:PivotTo(at(0, 6.1, 1.4))
+			local function gear(attachTo, props, offset)
+				local p = part(npc, props)
+				p.CFrame = attachTo.CFrame * offset
+				p.Anchored = false
+				p.CanCollide = false
+				p.CanQuery = false
+				p.Massless = true
+				local wc = Instance.new("WeldConstraint")
+				wc.Part0 = attachTo
+				wc.Part1 = p
+				wc.Parent = p
+				return p
 			end
+			local head, chest = npc:FindFirstChild("Head"), npc:FindFirstChild("UpperTorso")
+			if chest then
+				for _, sx in ipairs({-1, 1}) do
+					gear(chest, {Name = "JacketStripe", Size = Vector3.new(0.18, 1.5, 1.08), Color = WHITE}, CFrame.new(sx * 0.62, -0.05, 0))
+				end
+				gear(chest, {Name = "ChestBolt", Size = Vector3.new(0.5, 0.75, 0.05), Color = rgb(255, 214, 80)}, CFrame.new(0.32, 0.18, -0.53) * CFrame.Angles(0, 0, math.rad(-18)))
+				gear(chest, {Name = "Collar", Size = Vector3.new(1.3, 0.26, 1.15), Color = WHITE}, CFrame.new(0, 0.72, 0))
+				-- the scarf, streaming back from his neck
+				for k, color in ipairs({PINK, ORANGE}) do
+					gear(chest, {Name = "Scarf", Size = Vector3.new(0.34, 0.14, 1.9 - k * 0.3), Color = color}, CFrame.new(-0.25 + k * 0.28, 0.62 - k * 0.12, 1.1 + k * 0.1) * CFrame.Angles(math.rad(-22 - k * 6), math.rad(k * 8 - 12), 0))
+				end
+			end
+			if head then
+				gear(head, {Name = "Hair", Size = Vector3.new(1.25, 0.42, 1.3), Color = rgb(70, 40, 120)}, CFrame.new(0, 0.55, 0.12) * CFrame.Angles(math.rad(-12), 0, 0))
+				gear(head, {Name = "HairSweep", Size = Vector3.new(1.05, 0.3, 0.75), Color = rgb(90, 52, 150)}, CFrame.new(0, 0.48, 0.72) * CFrame.Angles(math.rad(-28), 0, 0))
+				gear(head, {Name = "GoggleBand", Size = Vector3.new(1.3, 0.16, 1.3), Color = rgb(30, 30, 40)}, CFrame.new(0, 0.32, 0))
+				for _, sx in ipairs({-1, 1}) do
+					gear(head, {Name = "GoggleLens", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.12, 0.42, 0.42), Color = CYAN, Material = M.Neon, Transparency = 0.25}, CFrame.new(sx * 0.27, 0.36, -0.62) * CFrame.Angles(0, math.pi / 2, 0))
+				end
+				Kit.billboard(head, 240, 50, 2.7, '<font color="#ffd678">TRAIL TRADER</font>', 80)
+			end
+			for _, footName in ipairs({"LeftFoot", "RightFoot"}) do
+				local foot = npc:FindFirstChild(footName)
+				if foot then
+					gear(foot, {Name = "Sole", Size = Vector3.new(foot.Size.X + 0.06, 0.12, foot.Size.Z + 0.08), Color = footName == "LeftFoot" and PINK or CYAN, Material = M.Neon}, CFrame.new(0, -foot.Size.Y / 2, 0))
+				end
+			end
+			for _, handName in ipairs({"LeftHand", "RightHand"}) do
+				local hand = npc:FindFirstChild(handName)
+				if hand then
+					gear(hand, {Name = "Wristband", Size = Vector3.new(hand.Size.X + 0.08, 0.2, hand.Size.Z + 0.08), Color = ORANGE}, CFrame.new(0, hand.Size.Y / 2 - 0.05, 0))
+				end
+			end
+			-- a gentle idle, and a welcoming wave every few seconds
+			animateNpc(npc, 7)
 			W.ShopPrompt = Kit.prompt(anchor, "Talk", "Trail Trader", 0, 14)
 		else
 			W.ShopPrompt = Kit.prompt(anchor, "Browse Trails", "Trail Shop", 0, 14)
@@ -1066,7 +1687,10 @@ function World.build(C, Kit)
 		local spin = Instance.new("Model")
 		spin.Name = "LuckySpin"
 		spin.Parent = lobby
-		local pos = ENTRANCE + Vector3.new(C.ENTRANCE_W / 2 + 46, 0, -16)
+		-- left of the doorway (as you walk up to the vault), in front of the left facade pillar, mirroring the Trail Shop
+		-- on the right; scaled to SPIN_SCALE once built
+		local pos = ENTRANCE + Vector3.new(59, 0, -24)
+		local SPIN_SCALE = 0.72
 		local cf = CFrame.lookAt(pos, pos + Vector3.new(0, 0, -1))
 		local function at(x, y, z)
 			return cf * CFrame.new(x, y, z)
@@ -1214,6 +1838,14 @@ function World.build(C, Kit)
 		-- Walk up to the front of the stage to spin
 		local anchor = part(spin, {Name = "SpinAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 4, -12), Transparency = 1, CanCollide = false})
 		W.SpinPrompt = Kit.prompt(anchor, "Spin!", "Lucky Spin", 0, 16)
+		-- a little smaller than it was built, about its own feet: the wheel's spin axis moves with it
+		spin.WorldPivot = CFrame.new(pos)
+		spin:ScaleTo(SPIN_SCALE)
+		local wheelModel = spin:FindFirstChild("SpinWheel")
+		local axis = wheelModel and wheelModel:GetAttribute("Axis")
+		if axis then
+			wheelModel:SetAttribute("Axis", pos + (axis - pos) * SPIN_SCALE)
+		end
 	end
 
 	------------------------------------------------------------------
@@ -1223,7 +1855,8 @@ function World.build(C, Kit)
 		local lb = Instance.new("Model")
 		lb.Name = "Leaderboard"
 		lb.Parent = lobby
-		local pos = ENTRANCE + Vector3.new(-34, 0, -75)
+		-- out on the grass, clear of the line of sight from the main path to the Trail Shop
+		local pos = ENTRANCE + Vector3.new(-110, 0, -95)
 		local cf = CFrame.lookAt(pos, pos + Vector3.new(0.7, 0, -0.7))
 		local function at(x, y, z)
 			return cf * CFrame.new(x, y, z)
@@ -1248,7 +1881,7 @@ function World.build(C, Kit)
 		local inviteModel = Instance.new("Model")
 		inviteModel.Name = "InviteFriend"
 		inviteModel.Parent = lobby
-		local pos = ENTRANCE + Vector3.new(30, 0, -75)
+		local pos = ENTRANCE + Vector3.new(46, 0, -118)
 		local faceCF = CFrame.lookAt(pos, Vector3.new(0, 0, pos.Z))
 		local pad = part(inviteModel, {Name = "InvitePad", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 14, 14), CFrame = CFrame.new(pos + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, 0, math.pi / 2), Color = Kit.GOLD, Material = M.Neon, Transparency = 0.15, CanCollide = false})
 		pad:SetAttribute("InvitePad", true)
@@ -1338,11 +1971,18 @@ function World.build(C, Kit)
 				end
 				copy.Name = tostring(L.ZoneIndex)
 				copy:SetAttribute("Z0", segStart(L.Index))
-				copy:SetAttribute("SegLen", C.SEG_LEN)
+				copy:SetAttribute("SegLen", L.Len)
 				copy.Parent = previews
 			end
 		end
 		previews.Parent = ReplicatedStorage
+	end
+
+	-- The Pet Hatchery (built by Pets) stands just outside the left console tower (the Lucky Spin side), turned 45
+	-- degrees so it faces out toward the bases: you see it as you walk up, and it doesn't crowd the doorway
+	do
+		local pos = ENTRANCE + Vector3.new(128, 0, -20)
+		W.HatcheryCF = CFrame.lookAt(pos, pos + Vector3.new(1, 0, -1))
 	end
 
 	------------------------------------------------------------------

@@ -278,6 +278,7 @@ local MOTIONS = {
 function K.window(gui, opts)
 	local W, H = opts.W, opts.H
 	local holder = new("Frame", {Name = opts.Name, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = gui})
+	holder:SetAttribute("SelfFit", true) -- fits itself to the real screen (UIKit's HUD canvas leaves it alone)
 	local fit = new("Frame", {Name = "Fit", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(W, H), BackgroundTransparency = 1, Parent = holder})
 	local fitScale = new("UIScale", {Parent = fit})
 	-- the opening motion moves this frame, so the fitted position itself never drifts
@@ -311,19 +312,23 @@ function K.window(gui, opts)
 	end
 
 	-- fit inside the screen minus the top bar and the HUD's side columns, centred in what's left
-	-- this game's HUD: cash/speed pills and the menu buttons reach ~310 px on the left, the side buttons ~154 px on the right
+	-- this game's HUD (at 1440p): cash/speed pills and the menu buttons reach ~310 px on the left, the side buttons
+	-- ~154 px on the right. Both, and the largest size a window may take, follow UI.hudScale(), so a window covers the
+	-- same share of a 1080p screen as of a 1440p one instead of growing to the same pixel size on both.
 	local safe = opts.Safe or {Left = 326, Right = 156}
 	local function refit()
 		local cam = workspace.CurrentCamera
 		local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+		local hud = UI.hudScale()
 		local top = GuiService:GetGuiInset().Y + 10
 		local availH = vp.Y - top - 12
-		local left, right = safe.Left, safe.Right
-		local s = math.min((vp.X - left - right) / W, availH / H, opts.MaxScale or 1.2)
-		if s < 0.8 then
+		local left, right = safe.Left * hud, safe.Right * hud
+		local cap = (opts.MaxScale or 1.2) * hud
+		local s = math.min((vp.X - left - right) / W, availH / H, cap)
+		if s < 0.8 * hud then
 			-- a small screen: keeping the HUD clear would make the window unreadable, so it covers the HUD instead
 			left, right = 12, 12
-			s = math.min((vp.X - 24) / W, availH / H, opts.MaxScale or 1.2)
+			s = math.min((vp.X - 24) / W, availH / H, cap)
 		end
 		fitScale.Scale = s
 		fit.Position = UDim2.fromOffset(left + (vp.X - left - right) / 2, top + availH / 2)
@@ -400,8 +405,11 @@ end
 function K.sideTabs(props)
 	local z = props.ZIndex or 3
 	local accent = props.Accent or K.C.Violet
+	-- each tab's border is drawn just outside the tab, and the column usually sits in a clipping scroller: an inset a
+	-- little wider than the selected border on every side keeps every tab's border whole
 	local list = new("Frame", {Position = props.Position, Size = props.Size, BackgroundTransparency = 1, ZIndex = z, Parent = props.Parent},
-		{new("UIListLayout", {Padding = UDim.new(0, props.Gap or 8), SortOrder = Enum.SortOrder.LayoutOrder})})
+		{new("UIListLayout", {Padding = UDim.new(0, props.Gap or 8), SortOrder = Enum.SortOrder.LayoutOrder}),
+		new("UIPadding", {PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4)})})
 	local tabs, current = {}, 0
 	local api = {Frame = list}
 	local function paint(i)
@@ -429,6 +437,10 @@ function K.sideTabs(props)
 			props.OnSelect(i)
 		end
 	end
+	-- a red count dot on the tab's icon (0 hides it)
+	function api.dot(i, n)
+		tabs[i].Dot.set(n)
+	end
 	function api.note(i, text, color)
 		tabs[i].Note.Text = text
 		tabs[i].NoteColor = color or K.C.Muted
@@ -442,7 +454,9 @@ function K.sideTabs(props)
 		new("TextLabel", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 12, 0.5, 0), Size = UDim2.fromOffset(30, 30), BackgroundTransparency = 1, Text = it.Icon or "", TextScaled = true, ZIndex = z + 1, Parent = b})
 		local lbl = K.text({Text = it.Text, TextSize = props.TextSize or 17, TextColor3 = K.C.Text2, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(50, 0), Size = UDim2.new(1, -112, 1, 0), ZIndex = z + 1, Parent = b})
 		local note = K.text({Text = "", TextSize = 14, TextColor3 = K.C.Muted, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0), Size = UDim2.new(0, 60, 1, 0), ZIndex = z + 1, Parent = b})
-		tabs[i] = {Button = b, Stroke = st, Label = lbl, Note = note, Bar = bar, Color = it.Color}
+		-- on the icon's corner, like an app badge: clear of the name and the progress note
+		local dot = UI.dot(b, {Size = 18, Count = true, Position = UDim2.new(0, 46, 0, 3), ZIndex = z + 3})
+		tabs[i] = {Button = b, Stroke = st, Label = lbl, Note = note, Bar = bar, Color = it.Color, Dot = dot}
 		b.MouseEnter:Connect(function()
 			tabs[i].Hover = true
 			paint(i)

@@ -2,7 +2,7 @@
 	PetModels
 	PetModels.build(pet)        -> a copy of the pet's premium model (ReplicatedStorage.PetAssets), Root at the origin
 	PetModels.egg(egg)           -> a copy of the egg's premium model (ReplicatedStorage.EggAssets, built by PetLab EggForge)
-	The old chibi pet builder was removed on Oct 27 2026 (copy in ServerStorage.Backups.Before_Oct27_ChibiRemoval).
+	The old chibi pet builder was removed on Oct 27 2026 (the old code is in the Git history, commits before Oct 28 2026).
 ]]
 
 local M = {}

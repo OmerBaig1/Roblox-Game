@@ -262,6 +262,17 @@ local THEMES = {
 	Bargain = {Font = F.FredokaOne, Fill = {WHITE, rgb(255, 222, 125)}, Edge = rgb(50, 30, 10), Grade = rgb(45, 30, 15)},
 	-- chrome gothic letters with a blood-red edge
 	Chrome = {Font = F.GrenzeGotisch, Fill = {WHITE, rgb(150, 160, 178)}, Edge = rgb(130, 0, 15), Grade = rgb(50, 10, 40)},
+	-- the expansion's ten areas
+	Atlantis = {Font = F.Fantasy, Fill = {rgb(170, 250, 255), rgb(255, 205, 70)}, Edge = rgb(5, 40, 70), Grade = rgb(5, 45, 90)},
+	Desert = {Font = F.Antique, Fill = {rgb(255, 240, 170), rgb(235, 140, 40)}, Edge = rgb(50, 25, 5), Grade = rgb(90, 45, 10)},
+	Candy = {Font = F.Cartoon, Fill = {WHITE, rgb(255, 160, 210)}, Edge = rgb(120, 20, 70), Grade = rgb(110, 30, 80)},
+	Frozen = {Font = F.DenkOne, Fill = {WHITE, rgb(160, 220, 255)}, Edge = rgb(10, 35, 80), Grade = rgb(20, 50, 100)},
+	West = {Font = F.SpecialElite, Fill = {rgb(255, 235, 190), rgb(210, 140, 70)}, Edge = rgb(50, 25, 10), Grade = rgb(80, 40, 15)},
+	Jungle = {Font = F.PermanentMarker, Fill = {rgb(220, 255, 170), rgb(80, 200, 110)}, Edge = rgb(10, 40, 15), Grade = rgb(15, 55, 25)},
+	Carnival = {Font = F.Bangers, Fill = {rgb(255, 240, 120), rgb(255, 90, 120)}, Edge = rgb(50, 10, 40), Grade = rgb(60, 15, 70)},
+	Steampunk = {Font = F.Garamond, Fill = {rgb(255, 230, 170), rgb(200, 140, 60)}, Edge = rgb(45, 25, 10), Grade = rgb(60, 35, 20)},
+	Crystal = {Font = F.Jura, Fill = {WHITE, rgb(220, 160, 255)}, Edge = rgb(40, 10, 70), Grade = rgb(45, 20, 80)},
+	Cosmic = {Font = F.SciFi, Fill = {rgb(255, 240, 180), rgb(120, 255, 220)}, Edge = rgb(10, 5, 30), Grade = rgb(25, 10, 60)},
 }
 local THEME_FOR = {["Five Nights at Teddy's"] = "Haunted", ["Devil May Nubs V"] = "Chrome"}
 local PLAIN = {Font = F.FredokaOne, Fill = {WHITE, rgb(220, 225, 240)}, Edge = rgb(10, 10, 20), Grade = rgb(20, 20, 40)}

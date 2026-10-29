@@ -46,12 +46,18 @@ local PUBLISHER = {
 	Arcade = "Bitwise Arcade Co.", Ninja = "Kumo Interactive", Haunted = "Hollow Lantern Games", Robots = "Ironclad Works",
 	Toys = "Toybox Studios", Cyber = "Neon Circuit", Pirate = "Saltwater Games", Space = "Far Orbit Studios",
 	Dragon = "Ember Crown Games", Bargain = "Bargain Bin Software",
+	Atlantis = "Deep Current Studios", Desert = "Sunstone Games", Candy = "Sugarloaf Interactive", Frozen = "Polar Byte",
+	West = "Dust Devil Software", Jungle = "Canopy Games", Carnival = "Big Top Interactive", Steampunk = "Cogsworth & Co.",
+	Crystal = "Prismatic Works", Cosmic = "Infinite Loop Studios",
 }
 -- when a game has no row of its own below
 local FAMILY_DEFAULT = {
 	Arcade = {"RETRO", "E", "platformer"}, Ninja = {"NOVA", "T", "fighting"}, Haunted = {"PC", "M", "horror"}, Robots = {"XENO", "T", "mech"},
 	Toys = {"SWITCHBACK", "E", "party"}, Cyber = {"PC", "T", "shooter"}, Pirate = {"XENO", "T", "sea"}, Space = {"NOVA", "T", "space"},
 	Dragon = {"NOVA", "T", "rpg"}, Bargain = {"POCKET", "E", "party"},
+	Atlantis = {"SWITCHBACK", "E", "sea"}, Desert = {"PC", "T", "adventure"}, Candy = {"POCKET", "E", "party"}, Frozen = {"NOVA", "E", "sports"},
+	West = {"XENO", "T", "adventure"}, Jungle = {"NOVA", "E10+", "platformer"}, Carnival = {"SWITCHBACK", "E", "party"},
+	Steampunk = {"NOVA", "T", "rpg"}, Crystal = {"PC", "E10+", "puzzle"}, Cosmic = {"NOVA", "T", "rpg"},
 }
 
 local RATING_NAME = {E = "EVERYONE", ["E10+"] = "EVERYONE 10+", T = "TEEN", M = "MATURE 17+"}
@@ -564,6 +570,137 @@ G("Tetrus", "POCKET", "E", "puzzle", "1-2 PLAYERS • LINK", "Every line counts.
 G("Monopawly", "PC", "E", "party", "2-6 PLAYERS", "Do not pass go. Do not collect paws.", "Buy streets, build houses and bankrupt your friends in the classic board game, now with pets.", "2-6 players|House rules|Pet tokens")
 G("Trollercoaster Tycoon", "PC", "E", "sim", "1 PLAYER", "Build the ride. Trap the guests.", "Design rollercoasters, run a theme park and keep your guests happy. Or don't.", "Coaster designer|Park management|Scenarios")
 G("Animal Bossing", "SWITCHBACK", "E", "sim", "1 PLAYER • ONLINE", "Your island. Your loans.", "Move to a deserted island, decorate your home and pay off a very patient raccoon.", "Island life|Real-time seasons|Visit friends")
+
+-- Sunken Atlantis
+G("Finding Nemoji", "SWITCHBACK", "E", "adventure", "1 PLAYER", "Just keep smiling.", "A clownfish who only speaks in emoji crosses the whole reef to find his dad.", "Emoji dialogue|Reef exploring|Sea turtle rides")
+G("Subway Sharks", "POCKET", "E10+", "runner", "1 PLAYER", "Swim fast. Bite faster.", "Surf the sunken subway tracks, dodge eels and grab coins before the coral cops catch you.", "Endless swimmer|Fin boards|Daily reefs")
+G("Bioshark Infinite", "XENO", "M", "shooter", "1 PLAYER", "Would you kindly swim?", "Dive into a drowned city of brass and glass where every citizen is a very polite shark.", "Underwater city|Plasmid fins|Big Daddies")
+G("Abzoo", "PC", "E", "sea", "1 PLAYER", "The ocean has a zoo.", "Glide with whale sharks through a silent sea that's secretly the world's biggest aquarium.", "No words|Meditate on fish|Zoo keys")
+G("Ecco the Dolphone", "SWITCHBACK", "E", "sea", "1 PLAYER", "Sonar. Now with 5G.", "A dolphin with a smartphone sends messages across time to save the ocean from aliens.", "Echolocation|Texting|Time travel")
+G("Feeding Frenzy Fries", "POCKET", "E", "sea", "1-2 PLAYERS", "Eat. Grow. Supersize.", "Gobble smaller fish and stray fries to grow big enough to rule the reef.", "Food chain|Boss fish|Combo meals")
+G("God of Water", "NOVA", "M", "fighting", "1 PLAYER", "The sea is his weapon.", "An angry sea god carves his way through monsters with tidal waves and a very big trident.", "Trident combos|Tidal waves|Titan bosses")
+G("Trident Turismo", "NOVA", "E", "racing", "1-2 PLAYERS", "The real sea racing simulator.", "Race 400 lovingly modelled sea-cars across the waves of the seven seas.", "400 sea-cars|Licence tests|Photo mode")
+G("Kraken Krossing", "POCKET", "E", "sea", "1 PLAYER", "Hop, hop... tentacle.", "Hop your little boat from tentacle to tentacle without waking the kraken.", "Endless hopping|Tentacle traffic|Unlockable boats")
+G("Assassin's Greed: Odd-yssey", "XENO", "M", "adventure", "1 PLAYER", "Steal from the gods.", "Climb Greek temples, leap into haystacks and pocket every coin in ancient Greece.", "Open world|Ship battles|Coin heists")
+G("Tide Hunter Online", "PC", "T", "sea", "MASSIVELY MULTIPLAYER", "The tide always comes back.", "Team up with thousands of heroes to hunt the monster waves that wash over the coast.", "Raids|Guilds|Wave tiers")
+G("Tsunami Dash", "POCKET", "E10+", "runner", "1 PLAYER", "Outrun the ocean.", "A wave is coming. Sprint down the pier, leap the gaps and don't look back.", "Endless runner|Power-ups|Wave meter")
+-- Desert Pyramids
+G("Prince of Pursia", "PC", "T", "platformer", "1 PLAYER", "Rewind time. Keep the purse.", "Leap across palace rooftops with a stolen purse and a dagger that turns back time.", "Wall running|Time rewind|Sand traps")
+G("Tomb Rater", "XENO", "T", "adventure", "1 PLAYER", "Five stars. Would raid again.", "An explorer reviews ancient tombs one treasure at a time. Traps lose a star.", "Tomb raiding|Star ratings|Booby traps")
+G("Camel Kart", "SWITCHBACK", "E", "racing", "1-4 PLAYERS", "One hump or two?", "Race camels in go-karts around the pyramids and spit at the leader.", "12 desert tracks|Spit shells|4-player split")
+G("Desert Strife", "PC", "T", "sim", "1-8 PLAYERS ONLINE", "Command the dunes.", "Build a base, harvest spice and send tank armies through the sandstorm.", "Real-time strategy|3 factions|Sandworms")
+G("Oasis Odyssey", "NOVA", "E", "adventure", "1 PLAYER", "Follow the stars.", "Lead a caravan across the desert by moonlight to the hidden oasis at the edge of the map.", "Caravan trading|Night travel|Map making")
+G("Assassin's Greed: Oranges", "XENO", "M", "adventure", "1 PLAYER", "Nothing is true. Everything is citrus.", "A hooded fruit thief climbs obelisks and juggles stolen oranges across old Egypt.", "Parkour|Fruit heists|Eagle vision")
+G("The Mummy's Cursor", "PC", "T", "horror", "1 PLAYER", "Don't click. Don't click.", "A mummy wakes up and wants your mouse. Solve the tomb's puzzles before it catches the pointer.", "Point and click|Curses|Sarcophagus escapes")
+G("Pharaoh Phone", "POCKET", "E", "sim", "1 PLAYER", "Text like an Egyptian.", "Run a pyramid empire from a golden smartphone with apps written in hieroglyphs.", "Pyramid builder|Glyph apps|Nile notifications")
+G("Pyramid Head Start", "SWITCHBACK", "E", "sports", "1-4 PLAYERS", "On your marks. Get set. Ra!", "Sprint, jump and hurdle your way up a pyramid in the ancient Olympics.", "Track events|Pyramid climb|4-player")
+G("Age of Mythologee", "PC", "T", "sim", "1-8 PLAYERS ONLINE", "Pick your gods. Wreck their cities.", "Build a city, worship your gods and call down lightning on your neighbours.", "Godly powers|Myth units|Wonder victories")
+G("Scarab Smash", "POCKET", "E", "party", "1 PLAYER", "Roll the sun. Squash the rest.", "A golden scarab rolls the sun across the sky, flattening everything in its way.", "Rolling physics|Sun powers|Combo smashes")
+G("Sunsinger of Ra", "NOVA", "E10+", "rhythm", "1-2 PLAYERS", "Sing up the sunrise.", "Hit every note in time to raise the sun over the desert, song by song.", "Rhythm tracks|Sun choir|Duet mode")
+-- Candy Kingdom
+G("Candy Crash Saga", "POCKET", "E", "puzzle", "1 PLAYER", "Sweet. Delicious. Crash.", "Swap sweets to match three and set off sugar explosions across thousands of levels.", "Match-3|Sugar bombs|Thousands of levels")
+G("Cookie Crunch Run", "POCKET", "E", "runner", "1 PLAYER", "Run, run, as fast as you can.", "A gingerbread hero escapes the oven and dashes over cookie bridges before he's dunked.", "Endless runner|Sprinkle power-ups|Milk hazards")
+G("Sugar Rush Racers", "SWITCHBACK", "E", "racing", "1-4 PLAYERS", "Glitch your way to the finish.", "Bake your own kart and race it down candy-cane tracks in a kingdom made of sweets.", "Kart baking|Candy tracks|4-player split")
+G("Gummy Bear Grylls", "NOVA", "T", "adventure", "1 PLAYER", "Improvise. Adapt. Chew.", "A gummy bear survivalist braves the jelly jungle with a knife and a lot of confidence.", "Survival|Crafting|Questionable snacks")
+G("Lollipop Chainsoar", "XENO", "M", "fighting", "1 PLAYER", "Sweet. Sharp. Airborne.", "A cheerleader soars through a zombie prom on a giant lollipop with a candy chainsaw.", "Combo cheers|Lollipop flight|Zombie prom")
+G("Kirbo's Snack Land", "SWITCHBACK", "E", "platformer", "1-4 PLAYERS", "Inhale the whole buffet.", "A hungry pink puffball swallows cakes, copies their flavours and floats across Snack Land.", "Copy flavours|Float|Co-op")
+G("Willy's Wonka Kart", "SWITCHBACK", "E", "racing", "1-4 PLAYERS", "Pure imagination. Pure speed.", "Race purple karts across chocolate rivers and through the everlasting gobstopper loop.", "Chocolate river|Golden tickets|Oompa shells")
+G("Overbaked", "SWITCHBACK", "E", "party", "1-4 PLAYERS", "Too many chefs. Too much fire.", "Bake cakes as a team in kitchens that move, split and catch fire. Shout a lot.", "Co-op cooking|Chaos kitchens|4-player")
+G("Choco Bombo", "POCKET", "E", "puzzle", "1-2 PLAYERS", "Light the candle. Run.", "Drop chocolate bombs through a sweet maze to blast your way to the exit.", "Maze blasting|Sprinkle chains|Versus mode")
+G("Marshmallow Mayhem", "PC", "E10+", "party", "1-4 PLAYERS", "Toast or be toasted.", "A herd of marshmallows stampedes through the campsite. Keep them out of the fire.", "Herding|Campfire hazards|4-player")
+G("Sweet Tooth Twisted", "XENO", "M", "racing", "1-8 PLAYERS ONLINE", "The tooth bites back.", "Car combat in a candy city, led by a molar who hates cavities and loves explosions.", "Car combat|Candy weapons|Online mayhem")
+G("Donut Countee", "PC", "E", "puzzle", "1 PLAYER", "Swallow the town. Ring by ring.", "A donut hole that grows as it swallows sweets, then houses, then the whole county.", "Hole physics|Growing|Silly story")
+-- Frozen Tundra
+G("Frostpunch", "PC", "T", "sim", "1 PLAYER", "Keep the fire burning. Punch the cold.", "Run the last warm city on a frozen planet, deciding who keeps the heat and who punches ice.", "City survival|Tough choices|Heat tower")
+G("Ice Slippers", "RETRO", "E", "platformer", "1-2 PLAYERS", "Climb in comfort.", "Two climbers in fluffy slippers smash their way up an icy mountain, sliding everywhere.", "Co-op climbing|Ice smashing|Bonus stages")
+G("The Long Darkish", "PC", "T", "adventure", "1 PLAYER", "It's not that dark.", "A lone hiker survives a snowy forest where night only gets a little dim. Still cold, though.", "Survival|Crafting|Wolves")
+G("Snowboard Dudes", "NOVA", "E", "sports", "1-2 PLAYERS", "Shred the gnar, dude.", "Pull huge tricks off huge jumps on huge mountains while yelling 'dude' a lot.", "Trick combos|Big air|Avalanche runs")
+G("Club Pengwin", "PC", "E", "rpg", "MASSIVELY MULTIPLAYER", "Waddle on in.", "Dress up your penguin, throw snowball parties and dance on the iceberg with friends.", "Penguin fashion|Igloo homes|Mini-games")
+G("Glacier Glide", "POCKET", "E", "party", "1 PLAYER", "Slide. Spin. Shine.", "Slide a seal down a glittering glacier, grabbing fish and dodging icebergs.", "Endless sliding|Fish combos|Ice tricks")
+G("Celestay", "PC", "E10+", "platformer", "1 PLAYER", "Just stay. Climb the mountain.", "A climber with red hair faces a tough mountain and her own doubts, one dash at a time.", "Precise platforming|Strawberries|Assist mode")
+G("Steep Slopes", "XENO", "E10+", "sports", "1-8 PLAYERS ONLINE", "The mountain is yours.", "Ski, snowboard and wingsuit down an open mountain range with friends.", "Open mountain|Wingsuits|Trick tours")
+G("Yeti Spaghetti", "SWITCHBACK", "E", "party", "1-4 PLAYERS", "Slurp responsibly.", "A yeti chef runs the coziest lodge on the mountain. Keep the spaghetti coming.", "Cooking rush|Lodge upgrades|4-player")
+G("Frozen Throne Wars", "PC", "T", "sim", "1-8 PLAYERS ONLINE", "The snowmen march.", "Command armies of snowmen against the ice king in a war for the frozen throne.", "Real-time strategy|Heroes|Map editor")
+G("Avalanche Ave", "POCKET", "E10+", "runner", "1 PLAYER", "Rush hour, but snow.", "Sprint down the village street as an avalanche fills it behind you.", "Endless runner|Snow surfing|Village upgrades")
+G("Abominable Snowball", "SWITCHBACK", "E", "party", "1-2 PLAYERS", "Roll it bigger.", "Roll a snowball down the mountain until it's big enough to pick up a yeti.", "Rolling physics|Growing|Yeti surprises")
+-- Wild West
+G("Red Dead Redemp-chin", "XENO", "M", "adventure", "1 PLAYER", "The west was won by a chin.", "An outlaw with a legendary jawline rides across the frontier settling scores.", "Open world|Horseback|Chin duels")
+G("Gun Slinger Slinky", "SWITCHBACK", "E", "platformer", "1 PLAYER", "Fastest coil in the west.", "A slinky sheriff flops down stairs and across rooftops to bring outlaws to justice.", "Stair flops|Spring physics|Bounty posters")
+G("Oregon Trail Mix", "PC", "E", "sim", "1 PLAYER", "You have died of snacks.", "Lead a wagon of nuts and raisins west. Ford rivers. Ration the chocolate.", "Wagon travel|Trail events|River crossings")
+G("Tumbleweed Tycoon", "PC", "E", "sim", "1 PLAYER", "Roll into riches.", "Build a frontier empire from one tumbleweed and a lot of determination.", "Town building|Rail roads|Gold rush")
+G("Wild Gun Fun", "SWITCHBACK", "E", "party", "1-4 PLAYERS", "Draw! (water pistols only)", "Water-pistol showdowns at high noon. First to splash wins.", "Quick draws|Splash duels|4-player")
+G("Saloon Showdown", "NOVA", "T", "fighting", "1-2 PLAYERS", "Swing the doors. Swing the chairs.", "A saloon brawl fighting game with chairs, bottles and a very brave piano player.", "Bar brawls|Prop combat|Story mode")
+G("Gold Digger Deluxe", "POCKET", "E", "party", "1 PLAYER", "Dig deep. Get rich.", "Dig down through the mine for gold, gems and the odd dinosaur bone.", "Dig and upgrade|Gem hunting|Deep layers")
+G("Minecart Mania", "RETRO", "E", "racing", "1 PLAYER", "Mind the gap.", "Ride a runaway minecart down twisting rails, jumping gaps and ducking beams.", "Rail riding|Jump timing|Secret tracks")
+G("Dig Dug Deeper", "RETRO", "E", "party", "1-2 PLAYERS", "Pump. Pop. Dig.", "Tunnel through the earth and pump up the monsters before they get you.", "Classic digging|Rock drops|2-player turns")
+G("Deep Rock Garlic", "PC", "T", "shooter", "1-4 PLAYERS ONLINE", "Rock and stone and garlic.", "Space dwarves mine glowing garlic deep underground and fight off the vampire bugs.", "Co-op mining|Dig anywhere|Vampire bugs")
+G("Steamworld Digg", "SWITCHBACK", "E10+", "platformer", "1 PLAYER", "Full steam down.", "A steam-powered robot cowboy digs ever deeper below a little mining town.", "Digging|Upgrades|Robot town")
+G("Prospector's Paradise", "POCKET", "E", "sim", "1 PLAYER", "Pan for gold. Strike it rich.", "Pan the river, stake your claims and build the richest town in the gold rush.", "Gold panning|Claims|Town upgrades")
+-- Jungle Temple
+G("Jungle Jumble", "POCKET", "E", "puzzle", "1 PLAYER", "Stack the animals.", "Tumble carved temple blocks into place before the vines pull them down.", "Block puzzles|Animal carvings|Vine timer")
+G("Pitfall Panic", "RETRO", "E", "platformer", "1 PLAYER", "Swing. Jump. Don't fall.", "Swing on vines over crocodiles and tar pits to find the jungle's treasures.", "Vine swings|Croc hops|Hidden treasure")
+G("Far Cry Baby", "XENO", "M", "shooter", "1 PLAYER", "Welcome to the island. Waaah.", "A very upset giant baby rules a jungle island. Stop the tantrum before the tears flood everything.", "Open island|Tantrum bosses|Outposts")
+G("Snake Pass-word", "PC", "E", "puzzle", "1 PLAYER", "Slither the right letters.", "A snake must coil through padlocks in the right order to spell each password.", "Snake puzzles|Coiling|Lock logic")
+G("Banjo-Kazoomie", "SWITCHBACK", "E", "platformer", "1 PLAYER", "Strum. Toot. Jump.", "A bear with a banjo and a bird with a kazoo jam their way across a musical jungle.", "Musical moves|Note collecting|Jigsaw worlds")
+G("Tarzan Tumble", "NOVA", "E", "platformer", "1 PLAYER", "Swing first. Ask later.", "Tumble, swing and somersault through the treetops with the monkeys cheering you on.", "Vine swinging|Tree surfing|Monkey friends")
+G("Indiana Bones", "XENO", "T", "adventure", "1 PLAYER", "Snakes. Why'd it have to be snakes?", "A skeleton archaeologist with a whip and a hat raids temples full of traps.", "Whip swinging|Puzzle temples|Boulder runs")
+G("Golden Idol Grab", "POCKET", "E10+", "party", "1 PLAYER", "Grab it. Run.", "Swap the idol for a bag of sand and outrun the boulder. Every time.", "Boulder chases|Quick swaps|Leaderboards")
+G("Tiki Torch Tag", "SWITCHBACK", "E", "party", "1-4 PLAYERS", "You're it. And you're on fire.", "A flaming game of tag around the tiki torches. Last one lit wins.", "Tag rounds|Torch power-ups|4-player")
+G("Shadow of the Tomb Rater", "XENO", "M", "adventure", "1 PLAYER", "Four stars. The fifth is cursed.", "The tomb reviewer returns to a vast jungle temple that refuses a good rating.", "Tomb raiding|Stealth|Ancient puzzles")
+G("Aztec Attack", "PC", "T", "sim", "1-4 PLAYERS", "The serpent rises.", "Defend your stepped pyramid from a feathered serpent and its jungle army.", "Tower defence|Serpent bosses|Temple upgrades")
+G("Jungle Juice Jam", "SWITCHBACK", "E", "rhythm", "1-4 PLAYERS", "Squeeze the beat.", "Fruit with faces drum on coconuts. Keep the rhythm and make the juice.", "Rhythm drumming|Fruit band|4-player")
+-- Midnight Carnival
+G("Carnival Clash", "SWITCHBACK", "E", "party", "1-8 PLAYERS ONLINE", "Bonk your friends.", "Bumper cars, bumper boats and bumper everything in a midnight carnival brawl.", "Bumper battles|Arena modes|8-player")
+G("Whack-a-Moe", "POCKET", "E", "party", "1 PLAYER", "Moe is back. Again.", "Moe the mole keeps popping up. Bonk him faster than ever.", "Whack rounds|Speed-ups|Golden Moe")
+G("Funhouse Frenzy", "NOVA", "T", "horror", "1-4 PLAYERS", "Smile. It's a funhouse.", "Escape a funhouse where the floors tilt, the mirrors lie and the clown keeps laughing.", "Co-op escape|Trick rooms|Clown chases")
+G("Cotton Candy Crush", "POCKET", "E", "puzzle", "1 PLAYER", "Fluffy. Pink. Dangerous.", "Spin cotton candy clouds and drop them to squash the right booths.", "Fluffy physics|Booth puzzles|Sugar stars")
+G("Ring Toss Royale", "PC", "E10+", "shooter", "100 PLAYERS ONLINE", "Last ring standing.", "A hundred players, a thousand bottles, one crown. Toss your way to the top.", "Battle royale|Ring weapons|Carnival map")
+G("Mirror Maze Madness", "SWITCHBACK", "E", "puzzle", "1-2 PLAYERS", "Which one is you?", "Find your way out of a maze of mirrors when all your reflections move on their own.", "Mirror puzzles|Reflection tricks|Co-op")
+G("Circus Charlie Horse", "RETRO", "E", "platformer", "1 PLAYER", "Balance is everything.", "A horse in a tutu balances on a ball through a circus full of hoops and hazards.", "Ball balancing|Hoop jumps|Classic stages")
+G("Clown Car Kart", "SWITCHBACK", "E", "racing", "1-4 PLAYERS", "Always room for one more.", "Race a tiny car stuffed with clowns. Every clown that falls out slows you down.", "Clown counting|Pie shells|4-player split")
+G("Trapeze Tycoon", "PC", "E", "sim", "1 PLAYER", "Fly high. Earn higher.", "Build a circus, hire acrobats and keep the money raining from the big top.", "Circus building|Acrobat acts|Ticket sales")
+G("Juggle Juggernaut", "NOVA", "E10+", "fighting", "1 PLAYER", "Keep it all in the air.", "A strongman juggles cannonballs, pianos and enemies in the circus ring.", "Juggling combat|Heavy props|Ring bosses")
+G("Lion Tamer Legends", "PC", "T", "rpg", "1 PLAYER", "The lion is the hero.", "A lion who leaps through flaming hoops sets out to free the whole circus.", "Hoop skills|Circus quests|Animal party")
+G("Human Cannonball Club", "POCKET", "E", "party", "1 PLAYER", "Fire! (yourself)", "Launch a daredevil from a cannon and see how far the club record can go.", "Distance launches|Bounce pads|Club records")
+-- Steampunk Skyway
+G("Sky Pirates of Arcadia", "NOVA", "T", "rpg", "1 PLAYER", "The sky is the sea.", "Sail a pirate airship between floating islands, plundering merchant zeppelins.", "Airship battles|Floating islands|Crew building")
+G("Steamworld Sky", "SWITCHBACK", "E10+", "adventure", "1 PLAYER", "Full steam up.", "A little steam robot drifts between sky towns under a red balloon.", "Balloon flight|Cog collecting|Sky towns")
+G("Airship Armada", "PC", "T", "sim", "1-8 PLAYERS ONLINE", "Command the clouds.", "Build a fleet of airships and battle for the skies in grand formations.", "Fleet battles|Ship design|Sky campaign")
+G("Cloud Crusher", "NOVA", "T", "fighting", "1 PLAYER", "Punch the weather.", "A brass giant punches through storm clouds to save the sky city.", "Brass fists|Storm bosses|Cloud smashing")
+G("Gear Grinder", "POCKET", "E", "runner", "1 PLAYER", "Keep the cogs turning.", "Run on giant spinning gears without falling into the machine.", "Gear runs|Spark power-ups|Clockwork bosses")
+G("Clockwork Clash", "SWITCHBACK", "E10+", "fighting", "1-2 PLAYERS", "Wind up. Strike.", "Clockwork knights duel on the face of the great clock tower.", "Wind-up combos|Clock arenas|Versus")
+G("Zeppelin Zoom", "NOVA", "E", "racing", "1-4 PLAYERS", "Rockets on a balloon. What could go wrong?", "Race rocket-powered zeppelins through floating rings in the sky.", "Sky racing|Rocket boosts|4-player")
+G("Aerostat Ace", "PC", "E", "sim", "1 PLAYER", "Up, up and away.", "Pilot a hot-air balloon around the world, reading the winds.", "Wind flying|World tour|Balloon builder")
+G("Sky Captain Smash", "XENO", "T", "fighting", "1-2 PLAYERS", "Ram the storm.", "A daring sky captain steers the airship straight through storms and enemy fleets.", "Ship ramming|Storm flying|Co-op")
+G("Pilotwings Pro", "SWITCHBACK", "E", "sim", "1 PLAYER", "Wings of brass.", "Glide brass mechanical wings over patchwork fields and land on the target.", "Flight school|Glide tests|Landing targets")
+G("Star Fax", "RETRO", "E10+", "shooter", "1 PLAYER", "Do a barrel roll. Send a fax.", "A fox pilot delivers urgent faxes across the galaxy in his biplane.", "Rail shooter|Barrel rolls|Fax delivery")
+G("Ace Combat Wombat", "NOVA", "T", "shooter", "1-8 PLAYERS ONLINE", "Wombat one, engaging.", "Dogfight in tiny brass planes as the bravest wombat pilot in the sky.", "Dogfights|Plane upgrades|Squadrons")
+-- Crystal Caverns
+G("Crystal Clash", "NOVA", "T", "fighting", "1-2 PLAYERS", "Shatter them.", "Crystal golems collide in a fighting game where every hit chips them smaller.", "Shatter combat|Crystal golems|Versus")
+G("Gem Miner Gem", "POCKET", "E", "sim", "1 PLAYER", "Mine gems with gems.", "Mine the caverns with a pickaxe made of gems, then upgrade it with more gems.", "Mining|Upgrades|Gem crafting")
+G("Spelunky Spunk", "PC", "T", "platformer", "1 PLAYER", "Every cave is new. Every cave is deadly.", "Dive into ever-changing caves with a rope, a whip and plenty of spunk.", "Random caves|Traps|Shopkeepers")
+G("Mole Mania", "RETRO", "E", "puzzle", "1 PLAYER", "Dig, think, push.", "A short-sighted mole digs between holes to push boulders into place.", "Hole puzzles|Two layers|Boss moles")
+G("Geode Golf", "SWITCHBACK", "E", "sports", "1-4 PLAYERS", "Hole in one. Hole in rock.", "Play mini-golf through glittering geode caves where the walls bounce your ball.", "Cave courses|Crystal bounces|4-player")
+G("Diamond Dash Deluxe", "POCKET", "E", "runner", "1 PLAYER", "Shine and run.", "A diamond with legs sprints out of the mine, leaving sparkles behind it.", "Endless runner|Sparkle trails|Mine escapes")
+G("Prismatic Palace", "PC", "E", "puzzle", "1 PLAYER", "Bend the light.", "Turn prisms to split light into rainbows and open the palace's crystal doors.", "Light puzzles|Rainbows|Palace secrets")
+G("Hollow Knite", "PC", "T", "platformer", "1 PLAYER", "A tiny knight. A huge cave.", "A masked little knight explores a vast ruined kingdom of glowing crystal caves.", "Explore|Charms|Tough bosses")
+G("Ori and the Bland Forest", "XENO", "E", "platformer", "1 PLAYER", "Bring back the colour.", "A glowing spirit restores colour to a forest that has gone very, very beige.", "Spirit dashes|Colour restoring|Moving story")
+G("Crystal Chronicles", "SWITCHBACK", "E10+", "rpg", "1-4 PLAYERS", "Carry the chalice.", "Escort a glowing crystal chalice through dangerous lands with your friends.", "Co-op RPG|Chalice escort|Myrrh hunting")
+G("Monument Valet", "POCKET", "E", "puzzle", "1 PLAYER", "Park it on the impossible.", "A valet parks cars on impossible staircases that twist when you turn them.", "Impossible geometry|Parking puzzles|Calm music")
+G("Kaleidoscope Kingdom", "NOVA", "E", "puzzle", "1-2 PLAYERS", "Turn the world.", "Rotate a kaleidoscope kingdom to line up crystals and crown its ruler.", "Rotation puzzles|Crystal crowns|Versus")
+-- Cosmic Nexus
+G("Chrono Trigger Happy", "SWITCHBACK", "E10+", "rpg", "1 PLAYER", "Every era. One hero.", "Leap through time portals to save the future from the past.", "Time travel|Combo techs|Multiple endings")
+G("Braid Braid", "PC", "E10+", "platformer", "1 PLAYER", "Rewind. Retie.", "Climb a golden braid tied through time, rewinding your mistakes.", "Time puzzles|Rewind|Painterly worlds")
+G("Superhot Sauce", "PC", "T", "shooter", "1 PLAYER", "Time moves when you move. The sauce burns either way.", "Dodge hot sauce in slow motion. Time only moves when you do.", "Time-stop action|Shattering foes|Spicy")
+G("Life is Strange-r", "XENO", "T", "adventure", "1 PLAYER", "Rewind. It's getting weirder.", "A girl with a camera rewinds time to stop a tornado that keeps getting stranger.", "Rewind choices|Photography|Story")
+G("Quantum Breaker", "XENO", "T", "fighting", "1 PLAYER", "Break time.", "A hero with time powers punches through frozen moments and shattered seconds.", "Time powers|Frozen moments|Cinematic")
+G("Timesplitters Splat", "NOVA", "T", "shooter", "1-4 PLAYERS", "Every era. Every splat.", "A paint-splat shooter across a dozen eras, from caves to space.", "Era maps|Paint guns|Split-screen")
+G("Infinity Gauntlet Run", "NOVA", "T", "runner", "1 PLAYER", "Six stones. One run.", "Chase the infinity gauntlet across the cosmos, collecting all six stones.", "Cosmic runner|Stone powers|Snap boss")
+G("The Last of Uz", "XENO", "M", "adventure", "1 PLAYER", "The last two players.", "Two survivors cross a ruined, overgrown arcade, looking for one machine that still works.", "Story|Survival|Arcade ruins")
+G("Mind Craft Infinite", "PC", "E10+", "sandbox", "1-8 PLAYERS ONLINE", "Build worlds with your mind.", "A floating block brain builds endless worlds out of pure thought.", "Infinite worlds|Thought building|Online")
+G("Final Boss Rush", "NOVA", "T", "fighting", "1 PLAYER", "Every boss. No breaks.", "Face every boss there has ever been, one after another, with one life.", "Boss rush|One life|Legend mode")
+G("Game of the Year Edition", "NOVA", "E10+", "party", "1-8 PLAYERS ONLINE", "It won everything.", "A party game made only of other award winners. The trophy is a controller.", "Award mini-games|Trophy hunt|8-player")
+G("Steal a Game 2", "PC", "E10+", "adventure", "1-8 PLAYERS ONLINE", "The vault is back. And it's in space.", "The sequel: break into a Game Vault floating in space and run home with the rarest game of all.", "Space vault|Giant shopkeepers|Online heists")
 
 ------------------------------------------------------------------
 -- BUILDING THE CASE

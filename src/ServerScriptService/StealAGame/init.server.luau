@@ -33,6 +33,7 @@ local C = require(script.Config)
 local Kit = require(script.Kit)
 local World = require(script.World)
 local Guards = require(script.Guards)
+local GuardCatch = require(script.GuardCatch)
 local Base = require(script.Base)
 local TreadModels = require(script.TreadModels)
 local Pets = require(script.Pets)
@@ -282,13 +283,27 @@ end
 local function newGame(level, gi, forcedRarity)
 	local L = C.LEVELS[level]
 	local r = forcedRarity or rollRarity(level)
-	-- Random multiplier around the level's typical income (bell curve, clamped)
-	local z = math.sqrt(-2 * math.log(math.max(math.random(), 1e-6))) * math.cos(2 * math.pi * math.random())
-	local mult = math.clamp(math.exp(z * C.INCOME_SPREAD), C.INCOME_MIN_MULT, C.INCOME_MAX_MULT)
-	local income = math.max(1, math.floor(L.IncomeBase * mult * C.RARITY_INCOME_MULT ^ (r - 1) + 0.5))
+	-- income comes from the level's band and the rarity only (C.gameIncome), so deeper always means richer
+	local income = C.gameIncome(level, r)
 	local chanceFactor = (40 / L.Games[gi].Chance) ^ 0.3
-	local installTime = math.max(5, math.floor(L.InstallBase * chanceFactor * mult ^ 0.6 * C.RARITY_INSTALL_MULT ^ (r - 1) + 0.5))
+	local installTime = math.max(5, math.floor(L.InstallBase * chanceFactor * C.RARITY_INSTALL_MULT ^ (r - 1) + 0.5))
 	return makeRecord(level, gi, income, installTime, 0, r)
+end
+
+-- A save from before the expansion (no V) stored games as (old level 1-50, game 1-4): look the game up by name
+-- and give it its new (level, game). Its income, rarity and install progress are kept as they were.
+local function migrateGame(g)
+	local names = C.LEGACY[tonumber(g.L)]
+	local name = names and names[tonumber(g.G)]
+	local level = name and C.GAME_LEVEL[name]
+	if not level then return nil end
+	for gi, def in ipairs(C.LEVELS[level].Games) do
+		if def.Name == name then
+			g.L, g.G = level, gi
+			return g
+		end
+	end
+	return nil
 end
 
 -- mode: "vault" (on a pedestal), "case" (in one of your cases) or "held" (over your head)
@@ -303,6 +318,10 @@ local function labelText(rec, mode)
 	end
 	if rec.Installed then
 		return head .. '\n<font color="#5aff78">+$' .. fmt(rec.Income) .. '/s</font>'
+	end
+	-- installing only ever happens inside a case: in your hands it's just carried
+	if mode == "held" then
+		return head .. '\n<font color="#9fd8ff">Carrying \u{2022} put it in a case to install</font>'
 	end
 	return head .. '\n<font color="#ffd23c">Installing...</font>'
 end
@@ -700,7 +719,21 @@ end
 
 local function spawnSpot(spot)
 	if spot.Item or spot.Carried then return end
-	local rec = newGame(spot.Level, pickGame(spot.Level))
+	-- a different game on each of the level's slots whenever it has enough (every level has 6-8)
+	local shown = {}
+	for _, other in ipairs(spots) do
+		if other ~= spot and other.Level == spot.Level and other.Data then
+			shown[other.Data.G] = true
+		end
+	end
+	local gi = pickGame(spot.Level)
+	for _ = 1, 20 do
+		if not shown[gi] then
+			break
+		end
+		gi = pickGame(spot.Level)
+	end
+	local rec = newGame(spot.Level, gi)
 	putOnSpot(spot, createItem(rec, true), rec)
 end
 
@@ -757,8 +790,9 @@ local function dropStolen(player, onlyLevel)
 	return dropped
 end
 
--- A stolen game reached its new home
-local function finalizeStolen(player, entry)
+-- A stolen game reached its new home. placed = it went straight into one of your cases (so it's installing); otherwise
+-- you're carrying it until you put it in a case
+local function finalizeStolen(player, entry, placed)
 	if entry.Kind == "vault" then
 		entry.Spot.Carried = false
 		-- The deepest vault level you've stolen from decides how much stolen games can earn you
@@ -767,7 +801,7 @@ local function finalizeStolen(player, entry)
 			data.BestLevel = entry.Spot.Level
 			player:SetAttribute("BestLevel", data.BestLevel)
 		end
-		notify(player, "You got " .. entry.Data.Name .. "! It's installing now.", GREEN)
+		notify(player, "You got " .. entry.Data.Name .. "! " .. (placed and "It's installing now." or "Put it in a case to install it."), GREEN)
 	elseif entry.Kind == "base" then
 		entry.FromSlot.Reserved = false
 		if entry.FromPlot.Slots[entry.FromSlot.Index] == entry.FromSlot then
@@ -813,7 +847,7 @@ local function onCase(player, plot, slot)
 				local item, rec = takeFromSlot(plot, slot)
 				table.insert(list, {Item = item, Data = rec, Kind = "own"})
 				if e.Kind ~= "own" then
-					finalizeStolen(player, e)
+					finalizeStolen(player, e, true)
 				end
 				placeInSlot(plot, slot, e.Item, e.Data)
 				syncHeld(player)
@@ -831,7 +865,7 @@ local function onCase(player, plot, slot)
 			end
 			local e = table.remove(list, 1)
 			if e.Kind ~= "own" then
-				finalizeStolen(player, e)
+				finalizeStolen(player, e, true)
 			end
 			placeInSlot(plot, slot, e.Item, e.Data)
 			syncHeld(player)
@@ -1142,26 +1176,31 @@ end)
 -- SHOPKEEPERS
 ------------------------------------------------------------------
 -- PETS: eggs, hatching, and the Pet Hatchery beside the Trail Shop (pets speed up installs)
-Pets.init({Kit = Kit, fmt = fmt, lobby = workspace:FindFirstChild("StealAGameMap") and workspace.StealAGameMap:FindFirstChild("Lobby")})
+Pets.init({Kit = Kit, fmt = fmt, lobby = workspace:FindFirstChild("StealAGameMap") and workspace.StealAGameMap:FindFirstChild("Lobby"), cf = world.HatcheryCF})
 
 local function guardLabelText(g)
-	return string.format('<font color="#%s">%s</font>', C.LEVELS[g.Level].Accent:ToHex(), string.upper(g.Title))
+	return string.format('<font color="#%s">%s</font> <font color="#ffffff">• %s</font>', C.LEVELS[g.Level].Accent:ToHex(), string.upper(g.Name), string.upper(g.Title))
 end
 
 for level = 1, C.NUM_LEVELS do
 	task.spawn(function()
-		local post = Vector3.new(-42, 0, world.segStart(level) + C.SEG_LEN * 0.36)
+		local L = C.LEVELS[level]
+		local post = Vector3.new(-(L.Width / 2 - 18), 0, world.segStart(level) + L.Len * 0.3)
 		local model, hum, root, head, look, actions = Guards.create(C, Kit, level, world.GuardsFolder, post)
 		local scale = model:GetAttribute("Scale") or 1
 		post = Vector3.new(post.X, model:GetAttribute("StandY") or 4, post.Z)
 		local g = {
-			Level = level, Model = model, Humanoid = hum, Root = root, Post = post, Title = look.Title, Actions = actions,
+			Level = level, Model = model, Humanoid = hum, Root = root, Post = post, Title = look.Title, Name = look.Name, Actions = actions,
 			Scale = scale, StandY = post.Y, StepDist = 0, LastPos = root.Position,
 			Points = C.guardPoints(level), Target = nil, ChaseAt = 0, ChaseStart = 0, PauseUntil = 0,
-			CheckPos = root.Position, CheckTime = os.clock(),
+			CheckPos = root.Position, CheckTime = os.clock(), Hist = {},
 		}
 		g.RealSpeed = C.realSpeed(g.Points)
 		g.MustBeat = C.recommendedSpeed(level) -- speed points, the exact number on the level's sign
+		-- how far its hands reach (its body's front + a grab, capped) and how briskly it walks home
+		g.Reach = GuardCatch.reach(C, root.CFrame, model:FindFirstChild("Torso"))
+		g.Standoff = GuardCatch.standoff(GuardCatch.front(root.CFrame, model:FindFirstChild("Torso")))
+		g.ReturnSpeed = math.clamp(g.RealSpeed * C.GUARD_RETURN_FACTOR, C.GUARD_RETURN_MIN, C.GUARD_RETURN_MAX) * (Guards.ROSTER[level].Pace or 1)
 		g.IdleText = guardLabelText(g)
 		-- float the name above the tallest hat/helmet piece (a Toy Soldier's shako and plume covered it)
 		local top = head and head.Size.Y / 2 or 2
@@ -1195,16 +1234,21 @@ local function setGuardTarget(g, player, now)
 		chaseEvent:FireClient(g.Target, false)
 	end
 	g.Target = player
+	if g.Grab then
+		-- a lunge in progress ends with the chase
+		g.Grab = nil
+		g.Actions.Act("")
+	end
+	-- the players' games pick the chase gait or the walk home from these
+	g.Model:SetAttribute("Chasing", player ~= nil)
 	if player then
+		g.ReturnStart = nil
+		g.Model:SetAttribute("Returning", false)
 		g.ChaseAt = now + C.GUARD_REACTION
 		g.ChaseStart = now
+		g.SpeedNow = 0
 		chaseEvent:FireClient(player, true, g.Title)
-		-- the giant points right at you before charging
-		local tr = getRoot(player)
-		if tr then
-			local p = g.Root.Position
-			g.Model:PivotTo(CFrame.lookAt(p, Vector3.new(tr.Position.X, p.Y, tr.Position.Z)))
-		end
+		-- the giant turns to face you (updateGuard, during its reaction time) and points before charging
 		g.Actions.Taunt()
 	end
 end
@@ -1219,15 +1263,22 @@ local function catchPlayer(g, player)
 		local away = tr.Position - g.Root.Position
 		away = Vector3.new(away.X, 0, away.Z)
 		if away.Magnitude < 0.1 then
-			away = Vector3.new(0, 0, -1)
+			away = g.Root.CFrame.LookVector
 		end
-		-- The shopkeeper lunges right up to you so the grab is obvious (then laughs)
-		local grabPos = Vector3.new(tr.Position.X, g.Root.Position.Y, tr.Position.Z) - away.Unit * (1.5 + g.Scale * 1.2)
-		g.Model:PivotTo(CFrame.lookAt(grabPos, Vector3.new(tr.Position.X, grabPos.Y, tr.Position.Z)))
+		-- knocked away from the guard's hands, which are right on you: no teleport, the grab only lands in reach
 		knockEvent:FireClient(player, away.Unit * 50 + Vector3.new(0, 30, 0))
 	end
 	g.Actions.Laugh()
-	g.PauseUntil = os.clock() + 1.5
+	g.PauseUntil = os.clock() + C.GUARD_LAUGH_TIME
+end
+
+-- Recovery only (see Config: stuck, out too long, or far away with nobody to see): back at the post in a puff
+local function sendHome(g, now)
+	g.Model:PivotTo(CFrame.lookAt(g.Post, g.Post + Vector3.new(0, 0, -1)))
+	g.Humanoid:MoveTo(g.Post)
+	g.ReturnStart = nil
+	g.SpeedNow = 0
+	g.CheckPos, g.CheckTime = g.Post, now
 end
 
 local function insideHall(p)
@@ -1238,6 +1289,67 @@ end
 -- you stand on the ground plan - height is ignored, so a big jump never counts.
 local function outOfVault(p)
 	return p.Z < C.HALL_START_Z - 4 or math.abs(p.X) > C.ROOM_W / 2 + 8 or p.Z > world.HallEnd + 8
+end
+
+local function approach(x, target, step)
+	if x < target then
+		return math.min(target, x + step)
+	end
+	return math.max(target, x - step)
+end
+
+-- Turns a standing guard toward a point, no faster than GUARD_TURN_RATE (no snapping round). True once facing it.
+local function turnToward(g, point, dt)
+	local root = g.Root
+	local p = root.Position
+	local want = Vector3.new(point.X - p.X, 0, point.Z - p.Z)
+	if want.Magnitude < 0.5 then
+		return true
+	end
+	local look = root.CFrame.LookVector
+	local cur = math.atan2(-look.X, -look.Z)
+	local d = (math.atan2(-want.X, -want.Z) - cur + math.pi) % (2 * math.pi) - math.pi
+	local turn = math.clamp(d, -C.GUARD_TURN_RATE * dt, C.GUARD_TURN_RATE * dt)
+	root.CFrame = CFrame.new(p) * CFrame.Angles(0, cur + turn, 0)
+	return math.abs(d - turn) < 0.03
+end
+
+local function seenByAnyone(pos, dist)
+	for _, p in ipairs(Players:GetPlayers()) do
+		local r = getRoot(p)
+		if r and (r.Position - pos).Magnitude < dist then
+			return true
+		end
+	end
+	return false
+end
+
+-- The catch check, decided here on the server (GuardCatch explains the why): within the guard's reach both where
+-- you are now and on your own screen, feet at the same height, and nothing solid between you
+local catchRay = RaycastParams.new()
+catchRay.FilterType = Enum.RaycastFilterType.Exclude
+catchRay.RespectCanCollide = true
+local function canCatch(g, player, tRoot, slack)
+	local root = g.Root
+	local gp, tp = root.Position, tRoot.Position
+	-- compare feet, since a giant's middle is far above yours
+	if math.abs((tp.Y - 3) - (gp.Y - g.StandY)) >= 6 then
+		return false
+	end
+	local ping = player:GetNetworkPing()
+	local shown = GuardCatch.shown(g.Hist, os.clock() - GuardCatch.delay(C, ping)) or gp
+	if not GuardCatch.inReach(C, g.Reach, gp, shown, tp, tRoot.AssemblyLinearVelocity, ping, slack) then
+		return false
+	end
+	local ignore = {world.GuardsFolder}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(ignore, p.Character)
+		end
+	end
+	catchRay.FilterDescendantsInstances = ignore
+	local from = Vector3.new(gp.X, tp.Y, gp.Z)
+	return workspace:Raycast(from, tp - from, catchRay) == nil
 end
 
 local function updateGuard(g, now)
@@ -1251,9 +1363,14 @@ local function updateGuard(g, now)
 		g.StepDist = 0
 		g.Actions.Stomp()
 	end
+	-- where it has been over the last moment: what players' screens are still showing (GuardCatch.shown)
+	table.insert(g.Hist, {T = now, P = pos})
+	while #g.Hist > 2 and now - g.Hist[1].T > 0.8 do
+		table.remove(g.Hist, 1)
+	end
 	if now < g.PauseUntil then
 		hum:MoveTo(root.Position)
-		-- standing still on purpose (laughing) is not "stuck", so don't teleport them home after
+		-- standing still on purpose (laughing, recovering from a missed grab) is not "stuck"
 		g.CheckPos, g.CheckTime = root.Position, now
 		return
 	end
@@ -1302,12 +1419,14 @@ local function updateGuard(g, now)
 	end
 
 	if t then
-		g.Label.Text = '<font color="#ff4040">!!! ' .. string.upper(g.Title) .. ' !!!</font>'
+		g.Label.Text = '<font color="#ff4040">!!! ' .. string.upper(g.Name) .. ' !!!</font>'
+		local tRoot = getRoot(t)
 		if now < g.ChaseAt then
+			-- reaction time: stands, turns to face you and points
 			hum:MoveTo(root.Position)
+			turnToward(g, tRoot.Position, 0.05)
 			return
 		end
-		local tRoot = getRoot(t)
 		-- slower than the level's recommended speed: the shopkeeper always out-runs you.
 		-- Judged on speed points, not WalkSpeed: WalkSpeed is a float32 (a player exactly at the
 		-- recommended speed read a hair under it) and is capped at MAX_REAL_SPEED.
@@ -1317,39 +1436,92 @@ local function updateGuard(g, now)
 		if tHum and points < g.MustBeat then
 			speed = math.max(speed, tHum.WalkSpeed * 1.25)
 		end
-		hum.WalkSpeed = speed
-		local tp = tRoot.Position
-		-- Aim a little ahead of a moving player, and only catch when actually touching
-		local ahead = tp + tRoot.AssemblyLinearVelocity * 0.1
-		hum:MoveTo(insideHall(ahead))
-		local reach = 2.6 + g.Scale * 1.1 + g.RealSpeed * 0.008
-		local flat = Vector3.new(tp.X - root.Position.X, 0, tp.Z - root.Position.Z)
-		-- compare feet, since a giant's middle is far above yours
-		if flat.Magnitude <= reach and math.abs((tp.Y - 3) - (root.Position.Y - g.StandY)) < 6 then
-			catchPlayer(g, t)
+		-- it stops just in front of someone standing still; someone fleeing pulls away from any point it aims short of,
+		-- so the faster they run the more it aims right at them (measured: at 80 studs/s any standoff left it trailing
+		-- out of reach). The lunge adds a burst of speed while the hands go out
+		local tVel = tRoot.AssemblyLinearVelocity
+		local standoff = g.Standoff * math.clamp(1 - Vector3.new(tVel.X, 0, tVel.Z).Magnitude / 60, 0, 1)
+		if g.Grab then
+			speed *= C.GUARD_LUNGE_BOOST
+			standoff -= 1
+		end
+		-- momentum: from standing to full speed over GUARD_ACCEL_TIME
+		g.SpeedNow = approach(g.SpeedNow or 0, speed, speed * 0.05 / C.GUARD_ACCEL_TIME)
+		hum.WalkSpeed = g.SpeedNow
+		-- run at where you'll be by the time this movement reaches your screen, stopping just in front of you (the
+		-- giant's body never runs through you)
+		local aim = GuardCatch.aim(C, tRoot.Position, tRoot.AssemblyLinearVelocity, t:GetNetworkPing())
+		local to = Vector3.new(aim.X - root.Position.X, 0, aim.Z - root.Position.Z)
+		if to.Magnitude > standoff then
+			hum:MoveTo(insideHall(aim - to.Unit * standoff))
+		else
+			hum:MoveTo(root.Position)
+			turnToward(g, tRoot.Position, 0.05)
+		end
+		if g.Grab then
+			-- mid-lunge: the hands arrive GRAB_TIME after it began. Still in reach = caught; slipped away = a stumble
+			if now - g.Grab >= C.GUARD_GRAB_TIME then
+				g.Grab = nil
+				if canCatch(g, t, tRoot, C.GUARD_GRAB_SLACK) then
+					catchPlayer(g, t)
+				else
+					-- a stumble: it loses speed and can't grab again until it has recovered, but keeps coming
+					g.Actions.Act("whiff")
+					g.NoGrabUntil = now + C.GUARD_WHIFF_TIME
+					g.SpeedNow = speed * 0.4
+				end
+			end
+		elseif now >= (g.NoGrabUntil or 0) and canCatch(g, t, tRoot, 1) then
+			g.Grab = now
+			g.Actions.Act("grab")
 		end
 	else
 		g.Label.Text = g.IdleText
 		local flat = Vector3.new(g.Post.X - root.Position.X, 0, g.Post.Z - root.Position.Z)
-		-- hurrying home: a fixed fast pace, whatever their chase speed
-		hum.WalkSpeed = flat.Magnitude > 2 and math.max(C.GUARD_RETURN_SPEED, g.RealSpeed) or C.GUARD_IDLE_REAL_SPEED
-		if flat.Magnitude > 2 then
+		local dist = flat.Magnitude
+		if dist > 2 then
 			g.Settled = false
+			g.ReturnStart = g.ReturnStart or now
+			g.Model:SetAttribute("Returning", true)
+			-- a deliberate walk home at its own pace (slowing down out of the chase); far outside its own level it
+			-- hurries, so it covers the rest of the way in about GUARD_FAR_TIME
+			local speed = g.ReturnSpeed
+			if dist > C.GUARD_FAR_DIST then
+				speed = math.max(speed, (dist - C.GUARD_FAR_DIST) / C.GUARD_FAR_TIME)
+			end
+			g.SpeedNow = approach(g.SpeedNow or 0, speed, math.max(speed, g.SpeedNow or 0) * 0.05 / C.GUARD_ACCEL_TIME)
+			hum.WalkSpeed = g.SpeedNow
 			hum:MoveTo(g.Post)
-			if now - g.CheckTime > 3 then
-				if (root.Position - g.CheckPos).Magnitude < 1 then
-					-- stuck: put them back at their post, facing the entrance
-					g.Model:PivotTo(CFrame.lookAt(g.Post, g.Post + Vector3.new(0, 0, -1)))
-				end
+			-- recovery (Config): stuck even after a jump, out too long, or far from home with nobody to see it
+			if now - g.CheckTime > C.GUARD_STUCK_TIME then
+				local stuck = (root.Position - g.CheckPos).Magnitude < 1.5
 				g.CheckPos, g.CheckTime = root.Position, now
+				if stuck and not g.TriedJump then
+					g.TriedJump = true
+					hum.Jump = true
+					stuck = false
+				end
+				if stuck or now - g.ReturnStart > C.GUARD_RETURN_TIMEOUT
+					or (dist > C.GUARD_FAR_DIST and not seenByAnyone(root.Position, C.GUARD_UNSEEN_DIST)) then
+					g.Actions.Poof()
+					sendHome(g, now)
+				end
 			end
 		elseif not g.Settled then
-			-- arrived: stop walking completely and face the entrance again
-			g.Settled = true
-			hum:Move(Vector3.zero)
-			hum:MoveTo(root.Position)
-			local p = root.Position
-			g.Model:PivotTo(CFrame.lookAt(p, p + Vector3.new(0, 0, -1)))
+			if g.Model:GetAttribute("Returning") then
+				-- arrived: stop walking completely
+				g.ReturnStart = nil
+				g.TriedJump = false
+				g.SpeedNow = 0
+				g.Model:SetAttribute("Returning", false)
+				hum:Move(Vector3.zero)
+				hum:MoveTo(root.Position)
+				hum.WalkSpeed = C.GUARD_IDLE_REAL_SPEED
+			end
+			-- then turn back to face the entrance at a natural pace
+			if turnToward(g, root.Position + Vector3.new(0, 0, -10), 0.05) then
+				g.Settled = true
+			end
 		end
 	end
 end
@@ -1713,7 +1885,7 @@ do
 	local admin = ServerStorage:FindFirstChild("AdminCommand") or Instance.new("BindableFunction")
 	admin.Name = "AdminCommand"
 	admin.Parent = ServerStorage
-	admin.OnInvoke = function(command, player)
+	admin.OnInvoke = function(command, player, ...)
 		local data = player and playerData[player]
 		if not data then
 			return "player not found"
@@ -1728,6 +1900,17 @@ do
 			end
 			pushIndex(player)
 			return "added " .. n .. " games to the index"
+		elseif command == "grab" then
+			-- Studio testing: steal the first game on display in this vault level, as if the player held E on it
+			local level = tonumber((...)) or 1
+			for _, spot in ipairs(spots) do
+				if spot.Level == level and spot.Item then
+					local name = spot.Data.Name
+					grabFromVault(player, spot)
+					return "grabbed " .. name
+				end
+			end
+			return "nothing on display in level " .. level
 		end
 		return "unknown command"
 	end
@@ -2223,9 +2406,11 @@ local function grantReward(player, reward)
 			-- boost for anyone - never a jackpot for a new player or a dud for a rich one.
 			-- Capped at the levels you can earn fully from.
 			local target = math.max(1, player.leaderstats.Cash.Value / 5000)
-			local perLevel = C.INCOME_BASE * C.RARITY_INCOME_MULT ^ (r - 1)
-			local L = 1 + math.log(math.max(1, target / perLevel)) / math.log(C.INCOME_GROWTH)
-			L = math.clamp(math.floor(L + 0.5), 1, math.min(C.NUM_LEVELS, top + C.STEAL_LEVEL_GRACE))
+			local cap = math.min(C.NUM_LEVELS, top + C.STEAL_LEVEL_GRACE)
+			local L = 1
+			while L < cap and C.gameIncome(L + 1, r) <= target do
+				L += 1
+			end
 			lo, hi = math.max(1, L - 1), L
 		end
 		local rec = giveGame(player, lo, hi, r)
@@ -2501,6 +2686,7 @@ local function collectSave(player)
 		BestLevel = data.BestLevel,
 		Pets = Pets.save(player),
 		SavedAt = os.time(),
+		V = C.SAVE_VERSION, -- games and BestLevel use the 40-level vault
 	}
 end
 
@@ -2681,6 +2867,43 @@ end
 ------------------------------------------------------------------
 -- SLAP
 ------------------------------------------------------------------
+-- You can't slap while you're carrying a game or standing inside the Vault. The server decides (the hotbar tool is
+-- switched off to match, but a client that ignores that is still refused), using the same held list and the same
+-- Vault boundary the guards use. The cooldown belongs to the player, so a respawn doesn't reset it.
+local slapNext = {} -- player -> os.clock() when their next slap is allowed
+local function slapBlock(player)
+	if #heldList(player) > 0 then
+		return "carrying"
+	end
+	local root = getRoot(player)
+	if root and not outOfVault(root.Position) then
+		return "vault"
+	end
+	return nil
+end
+Players.PlayerRemoving:Connect(function(player)
+	slapNext[player] = nil
+end)
+-- keep every player's hotbar slap (and its "why not" hint on their screen) in step with the rule
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+		for _, player in ipairs(Players:GetPlayers()) do
+			local block = slapBlock(player) or ""
+			if player:GetAttribute("SlapBlock") ~= block then
+				player:SetAttribute("SlapBlock", block)
+			end
+			local char = player.Character
+			local tool = char and char:FindFirstChild("Slap")
+			local backpack = player:FindFirstChildOfClass("Backpack")
+			tool = tool or (backpack and backpack:FindFirstChild("Slap"))
+			if tool and tool.Enabled ~= (block == "") then
+				tool.Enabled = block == ""
+			end
+		end
+	end
+end)
+
 local function giveSlap(player)
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack or backpack:FindFirstChild("Slap") then return end
@@ -2720,26 +2943,36 @@ local function giveSlap(player)
 	piece("Thumb", Vector3.new(0.38, 0.42, 0.9), CFrame.new(0.95, 0, -0.2) * CFrame.Angles(0, math.rad(-40), 0))
 	piece("Cuff", Vector3.new(1.8, 0.7, 0.5), CFrame.new(0, 0, 1.0))
 	tool:FindFirstChild("Cuff").Color = Kit.rgb(255, 80, 80)
-	local lastSlap = 0
 	tool.Activated:Connect(function()
-		if os.clock() - lastSlap < C.SLAP_COOLDOWN then return end
-		lastSlap = os.clock()
+		local now = os.clock()
+		-- a click landing a hair early (network jitter) still counts; the client waits the same cooldown
+		if now < (slapNext[player] or 0) - 0.08 or slapBlock(player) then
+			return
+		end
+		slapNext[player] = now + C.SLAP_COOLDOWN
 		-- everyone else sees your arm swing too (the swinger animates their own on click)
 		for _, other in ipairs(Players:GetPlayers()) do
 			if other ~= player then
 				slapSwingEvent:FireClient(other, player)
 			end
 		end
-		-- the hit lands when the swinging arm reaches the front (matches the client's swing)
+		-- the hit lands when the swinging arm reaches the front (matches the client's swing); picking up a game or
+		-- stepping into the Vault during the swing still cancels it
 		task.wait(C.SLAP_HIT_DELAY)
 		local root = getRoot(player)
-		if not root then return end
+		if not root or slapBlock(player) then return end
+		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit
 		for _, other in ipairs(Players:GetPlayers()) do
 			if other ~= player then
 				local otherRoot = getRoot(other)
 				if otherRoot and not otherRoot.Anchored then
+					-- judged on the ground plan (a jump doesn't dodge it, a different floor does); the target's
+					-- position reaches the server a moment late, so allow for a little of their own movement
 					local offset = otherRoot.Position - root.Position
-					if offset.Magnitude <= C.SLAP_RANGE and root.CFrame.LookVector:Dot(offset.Unit) > 0.2 then
+					local flat = Vector3.new(offset.X, 0, offset.Z)
+					local v = otherRoot.AssemblyLinearVelocity
+					local reach = C.SLAP_RANGE + math.min(Vector3.new(v.X, 0, v.Z).Magnitude * 0.1, 3)
+					if flat.Magnitude <= reach and math.abs(offset.Y) < 6 and (flat.Magnitude < 1.5 or look:Dot(flat.Unit) > 0.2) then
 						soundEvent:FireClient(player, "slap")
 						soundEvent:FireClient(other, "slap")
 						knockEvent:FireClient(other, root.CFrame.LookVector * 70 + Vector3.new(0, 35, 0))
@@ -2807,6 +3040,7 @@ local function onPlayerAdded(player)
 	speedStat.Parent = stats
 	stats.Parent = player
 	player:SetAttribute("SpeedPoints", C.START_SPEED)
+	player:SetAttribute("SlapCooldown", C.SLAP_COOLDOWN)
 	player:SetAttribute("TreadLevel", 0)
 	player:SetAttribute("TrailsOwned", "[]")
 	player:SetAttribute("TrailEquipped", 0)
@@ -2849,7 +3083,23 @@ local function onPlayerAdded(player)
 			data.LastSpin = tonumber(saved.LastSpin)
 			data.ExtraSpins = tonumber(saved.ExtraSpins) or 0
 			data.TutorialDone = saved.TutorialDone == true
+			local legacy = saved.V ~= C.SAVE_VERSION
+			if legacy and type(saved.Games) == "table" then
+				local kept = {}
+				for _, g in ipairs(saved.Games) do
+					if type(g) == "table" and migrateGame(g) then
+						table.insert(kept, g)
+					end
+				end
+				saved.Games = kept
+			end
 			data.BestLevel = tonumber(saved.BestLevel)
+			if data.BestLevel and legacy then
+				data.BestLevel = C.LEGACY_BEST[math.clamp(math.floor(data.BestLevel), 1, 50)]
+			end
+			if data.BestLevel then
+				data.BestLevel = math.clamp(math.floor(data.BestLevel), 1, C.NUM_LEVELS)
+			end
 			if not data.BestLevel then
 				-- older saves: trust the deepest game they already own
 				data.BestLevel = 1
@@ -3132,6 +3382,8 @@ local function libraryEntry(rec, where)
 		Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color:ToHex(), Level = rec.L, Where = where,
 		Income = rec.Installed and math.floor(rec.Income * (rec.Factor or 1)) or nil,
 		Progress = math.floor(rec.Progress), InstallTime = rec.InstallTime,
+		-- in your hands: not installing (that only happens in a case), just waiting for one
+		Carrying = where == "In your hands" or nil,
 	}
 end
 
@@ -3341,11 +3593,11 @@ RunService.Heartbeat:Connect(function(dt)
 						local slot = freeSlot(myPlot)
 						if slot then
 							table.remove(list, i)
-							finalizeStolen(player, e)
+							finalizeStolen(player, e, true)
 							placeInSlot(myPlot, slot, e.Item, e.Data)
 							changed = true
 						else
-							finalizeStolen(player, e) -- now an ordinary game in your hands: place it in a case when one is free
+							finalizeStolen(player, e, false) -- now an ordinary game in your hands: place it in a case when one is free
 							changed = true
 							if clock - (fullWarned[player] or 0) > 5 then
 								fullWarned[player] = clock

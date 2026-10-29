@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "SerializedOverrides": {
+      "BinaryString": ""
+    }
+  },
+  "attributes": {
+    "Keys": "[[\"security chief\",\"L01\"],[\"warthog\",\"L02\"],[\"jackal DJ\",\"L04\"],[\"tin toy soldier\",\"L05\"],[\"teddy bear\",\"L06\"],[\"pirate captain\",\"L07\"],[\"hammerhead\",\"L08\"],[\"crypt keeper\",\"L09\"],[\"vampire\",\"L10\"],[\"riot enforcer\",\"L11\"],[\"wolf\",\"L12\"],[\"ninja\",\"L13\"],[\"oni samurai\",\"L14\"],[\"security mech\",\"L15\"],[\"android\",\"L16\"],[\"dragon knight\",\"L17\"],[\"lava golem\",\"L18\"],[\"space ranger\",\"L19\"],[\"alien overlord\",\"L20\"],[\"diver\",\"L21\"],[\"sea king\",\"L22\"],[\"mummy\",\"L23\"],[\"Anubis\",\"L24\"],[\"candy cane knight\",\"L25\"],[\"gingerbread\",\"L26\"],[\"penguin\",\"L27\"],[\"yeti\",\"L28\"],[\"sheriff\",\"L29\"],[\"rattlesnake\",\"L30\"],[\"tiki\",\"L31\"],[\"jaguar\",\"L32\"],[\"clown\",\"L33\"],[\"minotaur\",\"L34\"],[\"aviator\",\"L35\"],[\"automaton\",\"L36\"],[\"mole\",\"L37\"],[\"sorceress\",\"L38\"],[\"time wizard\",\"L39\"],[\"overlord\",\"L40\"]]"
+  }
+}
