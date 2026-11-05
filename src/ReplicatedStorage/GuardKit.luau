@@ -281,8 +281,9 @@ end
 local function run(p, ph, r, o)
 	local a, c = sin(ph), cos(ph)
 	local spread = o.Spread or 0.03
-	p.LH = V((o.Hip or 0.8) * a * r + 0.06, 0, -spread)
-	p.RH = V(-(o.Hip or 0.8) * a * r + 0.06, 0, spread)
+	local toe = o.Toe or 0 -- feet the mesh turns out, brought back to point the way he is running
+	p.LH = V((o.Hip or 0.8) * a * r + 0.06, -toe, -spread)
+	p.RH = V(-(o.Hip or 0.8) * a * r + 0.06, toe, spread)
 	local kb, kk = o.KneeBase or 0.2, (o.Knee or 1.2) * r
 	p.LK = kb + kk * max(0, c) ^ 1.5
 	p.RK = kb + kk * max(0, -c) ^ 1.5
@@ -565,7 +566,7 @@ M.calico = {Stride = 4.6,
 -- he slaps his knee laughing. He swims home the same way.
 M.brine = {Stride = 9, Dive = true,
 	Gait = function(p, ph, s)
-		-- he dives like the predator he is: arcs over nose first and is gone, only the fin and the moving earth left
+		-- he dives like the predator he is: arcs over nose first and is gone, only the fin left cutting the surface
 		p.Sink = 8
 		p.Root = V(-1.95, 0, 0.05 * sin(ph))
 		arms(p, V(-0.5, 0, -0.35), V(-0.5, 0, 0.35))
@@ -586,7 +587,7 @@ M.brine = {Stride = 9, Dive = true,
 		p.Off = V(0, 0.9 * arc, 0)
 		p.Root = V(0.35 * arc - 0.3 * ease((a - 0.3) / 0.2), 0, 0)
 		p.Neck = V(0.4 * arc, 0, 0)
-		arms(p, V(1.2 * up, 0, -0.9 * arc - 0.2), V(1.2 * up, 0, 0.9 * arc + 0.2))
+		arms(p, V(0.75 * up, 0, -1.15 * arc - 0.25), V(0.75 * up, 0, 1.15 * arc + 0.25))
 		p.LH, p.RH = V(-0.3 * arc, 0, -0.1), V(-0.3 * arc, 0, 0.1)
 		p.Free = 1
 	end,
@@ -695,9 +696,10 @@ M.fangula = {Stride = 9.5,
 -- small counter-twist of the torso with each stride and a clean flight phase. At rest the visor sweeps the hall.
 -- An arrest of a grab; a clipped, synthetic laugh.
 M.vex = {Stride = 7.5,
-	Gait = function(p, ph, s)
-		-- a trained sprinter: tall, balanced, knees driving, arms pumping hard from the shoulder with the elbows bent
-		run(p, ph, s.Run, {Hip = 0.82, Knee = 1.4, Arm = 0.8, ArmBase = 0.18, Elbow = 1.35, ElbowSwing = 0.35, Lean = 0.2, Twist = 0.13, Roll = 0.02, Bounce = 0.1})
+Gait = function(p, ph, s)
+		-- a trained sprinter: legs drawn in under the body so each one drives straight back and forth (his armoured stance
+		-- is wide, and left wide the legs swing like compasses out to the sides), knees driving, arms pumping from the shoulder
+		run(p, ph, s.Run, {Hip = 0.82, Knee = 1.4, Arm = 0.8, ArmBase = 0.18, Elbow = 1.35, ElbowSwing = 0.35, Lean = 0.2, Twist = 0.05, Roll = 0.015, Bounce = 0.1, Spread = -0.13, Toe = 0.2})
 	end,
 	Idle = function(p, t)
 		p.LH, p.RH = V(0, 0, -0.05), V(0, 0, 0.05)
@@ -752,13 +754,13 @@ M.vapor = {Stride = 10,
 	end}
 
 
--- 13 Kage: an assassin. At rest he stands poised and still, the katana sheathed across his back, handle between his
+-- 13 Kage: an assassin. Runs with the blade trailing from his swept-back arm. At rest he stands poised and still, the katana sheathed across his back, handle between his
 -- shoulders. When a chase starts he reaches back, takes the handle and draws that same sword straight out of
 -- the sheath (K.draw: the one katana, moved by the hand that holds it; the sheath stays on his back, empty), then runs
 -- low and fast, left arm swept behind, blade held out ahead. It goes back the same way when the chase is over. A
 -- lightning slash of a grab; a silent shoulder-shaking chuckle.
 M.kage = {Stride = 8,
-	Carry = {Joint = "Gear_KatanaJoint", Draw = true},
+	Carry = {Joint = "Gear_KatanaJoint", Draw = true, Held = 0.1},
 	Taunt = function(p, age)
 		local k = ease(age / 0.2) * (1 - ease((age - 0.7) / 0.2))
 		p.LS = V(0.5 * k, 0, -0.35 * k - 0.1)
@@ -767,12 +769,14 @@ M.kage = {Stride = 8,
 		p.Neck = V(0.08 * k, -0.2 * k, 0)
 		p.LH, p.RH = V(0.3 * k, 0, -0.04), V(-0.22 * k, 0, 0.04)
 	end,
-	Gait = function(p, ph, s)
-		-- a ninja's run: low, long and quiet, the knees folding high behind him; the left arm pumps with the stride and
-		-- the right holds the blade out ahead, moving with the shoulders (its elbow is K.draw's)
+Gait = function(p, ph, s)
+		-- the shinobi sprint, unlike anyone else's run: bent nearly flat, knees folding high, both arms swept straight back
+		-- behind him and the blade trailing off his right arm like a tail, with a low snake-like weave from side to side
 		local r = s.Run
-		run(p, ph, r, {Hip = 0.86, Knee = 1.55, Arm = 0.7, ArmBase = -0.05, Elbow = 1.2, ElbowSwing = 0.4, Lean = 0.36, Twist = 0.14, Roll = 0.03, Bounce = 0.14, Head = 0.3})
-		p.RS = V(0.6 + 0.16 * sin(ph) * r, -0.2, 0.25)
+		local a = sin(ph)
+		run(p, ph, r, {Hip = 0.8, Knee = 1.75, KneeBase = 0.5, Arm = 0, Elbow = 0.1, ElbowSwing = 0, Lean = 0.72, Twist = 0.05, Roll = 0.09, Bounce = 0.07, Spread = -0.04, Head = 0.62})
+		p.LS = V(-1.15 + 0.1 * a * r, 0.05, -0.34)
+		p.RS = V(-1.15 - 0.1 * a * r, -0.05, 0.34)
 	end,
 	Idle = function(p, t)
 		p.LH, p.RH = V(0.04, 0, -0.08), V(-0.04, 0, 0.08)
@@ -802,22 +806,41 @@ M.kage = {Stride = 8,
 -- and the whole body drops and rolls over that foot, then drives forward off it; armoured shoulders swing against the
 -- hips, the free arm pumps hard, the club stays high in his right fist, the head low and thrust forward. At rest: a
 -- wide planted stance, club held ready, huge slow breaths. The grab is an overhead club slam; he laughs with the club raised.
-M.oni = {Stride = 9,
-	Gait = function(p, ph, s)
-		-- all weight: wide heavy strides, the body drops and rolls over each planted foot and the armoured shoulders swing
-		-- against the hips; the free arm pumps hard and the club rides with the shoulder, ready to come down
+M.oni = {Stride = 6.6, Stomp = {Rings = {Color3.fromRGB(150, 110, 90)}, RingSize = 5},
+	-- when a chase starts he roars: the club goes up, the head goes back
+	Taunt = function(p, a)
+		local k = ease(a / 0.2) * (1 - ease((a - 0.72) / 0.18))
+		p.RS = V(2.6 * k, 0, 0.2)
+		p.LS = V(0.5 * k, 0, -0.5 * k - 0.18)
+		p.LE = 0.8 * k
+		p.Root = V(0.12 * k, 0, 0)
+		p.Neck = V(-0.28 * k + 0.05 * sin(a * 30) * k, 0, 0)
+		p.LH, p.RH = V(0.1 * k, 0, -0.18), V(-0.1 * k, 0, 0.18)
+	end,
+Gait = function(p, ph, s)
+		-- the war march: nothing like a run. Enormous, wide, stiff-legged strides with the whole armoured body heaving from
+		-- side to side over each planted foot, shoulders swinging, head thrust low and locked on you and never moving with
+		-- the rest of him. The kanabo is held high overhead, rocking with every stomp, the free arm clawing at the air ahead
 		local r = s.Run
 		local a = sin(ph)
-		run(p, ph, r, {Hip = 0.62, Knee = 0.95, KneeBase = 0.3, Arm = 0.68, ArmBase = 0.25, Elbow = 0.95, ElbowSwing = 0.3, Lean = 0.2, Twist = 0.17, Roll = 0.1, Bounce = 0.05, Spread = 0.1, Head = 0.14, Out = 0.2})
-		p.RS = V(0.35 + 0.25 * a * r, 0, 0.12)
-		p.RE = 0.8 + 0.2 * a * r
-		p.Off = V(0, 0.09 * r * cos(ph) ^ 4, 0)
+		p.LH = V(0.62 * a * r, 0, -0.2)
+		p.RH = V(-0.62 * a * r, 0, 0.2)
+		p.Root = V(-0.36 * r, 0.24 * a * r, 0.2 * a * r)
+		p.Neck = V(0.32 * r, -0.24 * a * r, -0.2 * a * r)
+		p.RS = V(2.55 + 0.16 * a * r, 0, 0.24)
+		p.RE = 0.35
+		p.LS = V(0.95 - 0.5 * a * r, 0, -0.32)
+		p.LE = 0.35 - 0.2 * a * r
+		-- planted hard on each foot, heaved up between them
+		p.Off = V(0, 0.2 * r * cos(ph) ^ 2, 0)
 	end,
-	Idle = function(p, t)
+Idle = function(p, t)
 		p.LH, p.RH = V(0, 0, -0.18), V(0, 0, 0.18)
 		p.RS = V(0.05 + 0.02 * sin(t * 0.9), 0, 0.02)
 		p.LS = V(0.15, 0, -0.18)
+		p.Root = V(-0.08, 0, 0)
 		breathe(p, t, 2.2, 0.8)
+		p.Neck += V(0.12, 0, 0)
 		scan(p, t, 0.35, 14)
 	end,
 	Grab = function(p, a)
@@ -1114,7 +1137,7 @@ M.tridentus = {Stride = 14, Foot = 0,
 			rs = V(1.3 + 0.1 * sin(t * 2), 0, 0.15)
 		elseif cyc < 0.6 then
 			local k = sin(((cyc - 0.35) / 0.25) * pi)
-			rs = V(1.3 + 1.4 * k, 0.5 * sin(t * 3) * k, 0.15 + 0.1 * k)
+			rs = V(1.3 + 0.35 * k, 0.35 * sin(t * 3) * k, 0.15 + 0.1 * k)
 		else
 			local k = sin(clamp((cyc - 0.6) / 0.28, 0, 1) * pi)
 			rs = V(1.3 + 0.45 * k, 0, 0.1)
@@ -1141,7 +1164,7 @@ M.tridentus = {Stride = 14, Foot = 0,
 	Laugh = function(p, a)
 		local inn = laugh(p, a, {Back = 0.18, Shake = 0.04, Rate = 9, Head = 0.5})
 		seated(p)
-		p.RS = V(0.3 + 2.5 * inn, 0, 0.12)
+		p.RS = V(0.3 + 0.55 * inn, 0, 0.2) -- raised to the side, tines up, clear of his face
 	end}
 
 
@@ -1196,20 +1219,32 @@ M.anubis = {Stride = 6.2,
 		p.RS = V(0.25 + 0.16 * a * r, 0, 0.14)
 	end,
 	Idle = function(p, t)
-		p.LH, p.RH = V(0, 0, -0.05), V(0, 0, 0.05)
-		p.RS = V(0.25, 0, 0.18)
-		p.LS = V(0.05, 0, -0.12)
-		breathe(p, t, 0.9, 0.9)
-		scan(p, t, 0.35, 15)
+		-- staff upright at his side, free hand low: he waits
+		p.LH, p.RH = V(0, 0, -0.03), V(0, 0, 0.03)
+		p.RS = V(0.04, 0, 0.08)
+		p.LS = V(0.08, 0, -0.1)
+		p.LE = 0.25
+		breathe(p, t, 0.8, 0.9)
+		scan(p, t, 0.3, 12)
 	end,
 	Grab = function(p, a)
-		local k = grab(p, a, {Reach = 1.5, Lean = 0.3, Out = 0.15})
-		p.RS = V(0.3 + 1.1 * k, 0, 0.2)
+		-- the staff stays planted out to his right; the free hand comes down on you
+		local k = ease((a - 0.03) / 0.16)
+		p.LS = V(1.3 * k, 0, -0.1)
+		p.LE = 0.3 * k
+		p.RS = V(0.2 * k, 0, 0.16)
+		p.Root = V(-0.28 * k, 0, 0)
+		p.LH, p.RH = V(0.32 * k, 0, -0.03), V(-0.22 * k, 0, 0.03)
+		p.RK = 0.25 * k
+		p.Neck = V(0.12 * k, 0, 0)
 	end,
 	Laugh = function(p, a)
-		local inn = laugh(p, a, {Back = 0.15, Shake = 0.03, Rate = 8, Head = 0.5})
-		p.RS = V(0.3 + 1.6 * inn, 0, 0.2)
-		p.LS = V(0.25 * inn, 0, -0.15 - 0.2 * inn)
+		-- a slow growl of a laugh, staff planted, free hand open at his side
+		local inn, k = laugh(p, a, {Back = 0.08, Shake = 0.015, Rate = 7, Head = 0.25})
+		p.RS = V(0.08, 0, 0.1)
+		p.LS = V(0.35 * inn, 0, -0.35 * inn - 0.1)
+		p.LE = 0.5 * inn
+		p.LH, p.RH = V(0, 0, -0.03), V(0, 0, 0.03)
 	end}
 
 
@@ -1476,9 +1511,10 @@ M.itza = {Stride = 9,
 		p.Neck = V(0.8, 0.05 * sin(ph) * r, 0)
 		p.Off = V(0, 0.2 * max(0, sin(ph * 2 - 0.5)) * r, 0)
 	end,
-	Idle = function(p, t)
+Idle = function(p, t)
+		-- forearm forward, staff standing upright through his fist
 		p.LH, p.RH = V(0.05, 0, -0.07), V(-0.05, 0, 0.07)
-		p.RS = V(0.15, 0, 0.12)
+		p.RS = V(1.05, 0, 0.1)
 		p.LS = V(0.1, 0, -0.15)
 		breathe(p, t, 1.0, 1.2)
 		p.Neck += V(0.12, 0.3 * sin(t * 2 * pi / 8), 0)
@@ -1492,11 +1528,12 @@ M.itza = {Stride = 9,
 		p.Neck = V(0.8, 0, 0)
 		p.Off = V(0, 0.6 * arc, 0)
 	end,
-	Laugh = function(p, a)
+Laugh = function(p, a)
 		local inn = laughIn(a)
 		local k = sin(a * 9)
 		p.Root = V(0.05 * inn, 0, 0)
 		p.Neck = V((0.35 + 0.05 * k) * inn, 0, 0)
+		-- the staff stays stowed through a catch; the hands are free
 		arms(p, V(0.5 * inn, 0, -0.35), V(0.5 * inn, 0, 0.35))
 	end}
 
@@ -1683,9 +1720,24 @@ M.ironclad = {Stride = 6,
 -- off he digs straight down and tunnels after you: the whole body is under the floor and a travelling hump of
 -- churned earth (FX "mound": loose soil, pebbles and dust thrown up along its path) is all you see. The grab: he
 -- bursts up out of the ground in a spray of dirt, claws first; he laughs, dusting himself off. He tunnels home too.
-M.moe = {Stride = 9, Dive = true,
-	Gait = function(p, ph, s)
-		-- diving head first: as this pose blends in (slowly: Dive) the body tips over its claws and goes in nose down
+M.moe = {Stride = 9, Dive = true, DiveRate = 6,
+	-- the dive when a chase starts: drops into a crouch with his claws up, springs into a little arc, tips right over
+	-- and goes in head first, legs last. All of it before he starts to move, so he never slides along half buried
+	Taunt = function(p, a)
+		local crouch = ease(a / 0.16) * (1 - ease((a - 0.16) / 0.1))
+		local tip = ease((a - 0.14) / 0.26)
+		local arc = sin(clamp((a - 0.14) / 0.36, 0, 1) * pi)
+		p.Root = V(-0.35 * crouch - 2.15 * tip, 0, 0)
+		arms(p, V(1.9 * crouch + 2.6 * tip, 0, -0.4), V(1.9 * crouch + 2.6 * tip, 0, 0.4))
+		p.Neck = V(0.3 * crouch - 0.2 * tip, 0, 0)
+		p.LH, p.RH = V(0.5 * crouch, 0, -0.1), V(0.5 * crouch, 0, 0.1)
+		p.LK, p.RK = 0.6 * crouch, 0.6 * crouch
+		p.Off = V(0, 0.9 * arc, 0)
+		p.Sink = 7.5 * ease((a - 0.36) / 0.34)
+		p.Free = 1
+	end,
+Gait = function(p, ph, s)
+		-- under the floor, claws working: the mound on the surface shows where he is
 		p.Sink = 7.5
 		p.Root = V(-2.15, 0, 0.06 * sin(ph))
 		arms(p, V(2.5 + 0.35 * sin(ph * 2), 0, -0.3), V(2.5 - 0.35 * sin(ph * 2), 0, 0.3))
@@ -1875,8 +1927,9 @@ M.gamemaster = {Stride = 12,
 -- (violet motes), embers (sparks), aura (violet energy round a flying body), wave (foam boiling up round the feet, on
 -- the floor), fin (the shark's dorsal fin and its wake, on the water), mound (the mole's travelling hump of earth).
 K.FX = {
-	brine = {{Kind = "finmound"}},
-	fangula = {{Kind = "redmist", Part = "Gear_Coat", At = V(0, -0.5, 0.1)}},
+	brine = {{Kind = "fin"}},
+	oni = {{Kind = "embers", Part = "Torso", At = V(0, 0.3, 0.5)}},
+	fangula = {{Kind = "redmist", Part = "Torso", At = V(0, -0.5, 0.2)}},
 	chronos = {{Kind = "clock", Part = "Torso", At = V(0, 0.1, -0.2)}},
 	taurus = {{Kind = "gust", Part = "Torso", At = V(0, 0.2, -0.5), Charge = true}},
 	mortimer = {{Kind = "wisps", Part = "Torso", At = V(0, -0.5, 0)}},
@@ -2004,6 +2057,45 @@ function K.draw(d, armPose, p)
 end
 
 ------------------------------------------------------------------
+-- WHEN THEY CATCH YOU
+------------------------------------------------------------------
+-- CATCH[key]: the high-level guards land a catch with something of their own (GuardMotion.catchFx), where the thief is.
+-- Bolts = lightning from the sky; Rings = shockwaves on the floor; Shards = pieces flung out; Blast = a cloud of particles.
+-- FlashPower = light brightness, default 7; bright rooms need less or the guard washes out to white.
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+K.CATCH = {
+	gamemaster = {Bolts = 6, BoltColor = rgb(120, 50, 255), Bolt2 = rgb(255, 170, 40), Rings = {rgb(170, 90, 255), rgb(255, 210, 110)}, Blast = {rgb(220, 180, 255), rgb(90, 30, 190)}, Spark = true, Thunder = true, Flash = rgb(200, 150, 255)},
+	chronos = {Rings = {rgb(255, 225, 140), rgb(130, 180, 255), rgb(255, 225, 140)}, Blast = {rgb(255, 235, 170), rgb(90, 140, 255)}, Spark = true, Spokes = rgb(255, 225, 140), Flash = rgb(255, 225, 150)},
+	lumina = {Shards = 14, ShardColor = rgb(190, 120, 255), ShardMat = Enum.Material.Glass, Rings = {rgb(200, 130, 255)}, Blast = {rgb(240, 210, 255), rgb(150, 80, 255)}, Spark = true, Flash = rgb(205, 150, 255)},
+	ironclad = {Blast = {rgb(255, 255, 255), rgb(190, 195, 205)}, Big = true, Shards = 10, ShardColor = rgb(255, 150, 50), ShardMat = Enum.Material.Neon, Flash = rgb(255, 160, 80)},
+	taurus = {Rings = {rgb(215, 195, 165), rgb(170, 145, 115)}, Shards = 14, ShardColor = rgb(120, 92, 70), ShardMat = Enum.Material.Slate, Blast = {rgb(205, 185, 155), rgb(130, 110, 90)}, Big = true},
+	jenny = {Blast = {rgb(255, 200, 90), rgb(255, 70, 20)}, Fire = true, Rings = {rgb(255, 150, 50)}, Flash = rgb(255, 150, 60)},
+	moe = {Shards = 18, ShardColor = rgb(100, 74, 50), ShardMat = Enum.Material.Ground, Blast = {rgb(150, 118, 84), rgb(96, 74, 52)}, Big = true},
+	wobbles = {Confetti = 40, Rings = {rgb(230, 50, 60)}},
+	tiki = {Blast = {rgb(255, 220, 90), rgb(255, 90, 20)}, Fire = true, Rings = {rgb(120, 230, 90)}, Flash = rgb(255, 170, 70)},
+	itza = {Shards = 14, ShardColor = rgb(60, 210, 150), ShardMat = Enum.Material.Glass, Rings = {rgb(70, 230, 160)}, Blast = {rgb(170, 255, 210), rgb(30, 150, 100)}},
+	yuki = {Shards = 18, ShardColor = rgb(190, 235, 255), ShardMat = Enum.Material.Ice, Rings = {rgb(200, 240, 255)}, Blast = {rgb(255, 255, 255), rgb(170, 225, 255)}, Big = true, Flash = rgb(190, 235, 255)},
+	anubis = {Blast = {rgb(255, 225, 130), rgb(190, 140, 50)}, Big = true, Spark = true, Rings = {rgb(255, 210, 100)}, Flash = rgb(255, 215, 120)},
+	sheriff = {Blast = {rgb(205, 170, 120), rgb(140, 105, 70)}, Big = true, Rings = {rgb(255, 205, 90)}, Spark = true, Flash = rgb(255, 210, 120)}, -- a burst of desert dust and a gold flash off the star
+	rattler = {Shards = 12, ShardColor = rgb(120, 220, 70), ShardMat = Enum.Material.Glass, Blast = {rgb(170, 255, 90), rgb(50, 130, 40)}, Rings = {rgb(130, 230, 70)}}, -- a spray of venom
+	pemberton = {Shards = 12, ShardColor = rgb(215, 240, 255), ShardMat = Enum.Material.Ice, Blast = {rgb(255, 255, 255), rgb(190, 225, 245)}, Rings = {rgb(210, 240, 255)}},
+	bonbon = {Confetti = 34, ConfettiColors = {rgb(255, 120, 170), rgb(120, 220, 255), rgb(255, 225, 110), rgb(255, 255, 255), rgb(160, 110, 70)}, Blast = {rgb(235, 190, 140), rgb(160, 105, 60)}}, -- icing, sprinkles, crumbs
+	peppermint = {Shards = 16, ShardColor = rgb(235, 50, 60), ShardMat = Enum.Material.SmoothPlastic, Shard2 = rgb(255, 255, 255), Rings = {rgb(240, 60, 70), rgb(255, 255, 255)}}, -- shattered candy
+	mumbles = {Blast = {rgb(225, 200, 150), rgb(150, 120, 80)}, Big = true, Spark = true, Rings = {rgb(255, 215, 110)}}, -- a tomb's worth of dust
+	tridentus = {Blast = {rgb(235, 250, 255), rgb(90, 190, 230)}, Big = true, Shards = 14, ShardColor = rgb(120, 215, 245), ShardMat = Enum.Material.Glass, Rings = {rgb(150, 230, 255), rgb(70, 170, 230)}, Bolts = 3, BoltColor = rgb(90, 220, 255), Bolt2 = rgb(255, 225, 120), Flash = rgb(120, 220, 255)}, -- the sea rises, the trident answers
+	dex = {Blast = {rgb(220, 245, 255), rgb(130, 200, 235)}, Spark = true, Rings = {rgb(170, 230, 255)}},
+	zorp = {Rings = {rgb(130, 255, 160), rgb(190, 110, 255)}, Blast = {rgb(170, 255, 190), rgb(120, 50, 200)}, Spark = true, Bolts = 3, BoltColor = rgb(110, 255, 150), Bolt2 = rgb(190, 110, 255), Flash = rgb(140, 255, 170)}, -- the abduction beam
+	nova = {Rings = {rgb(110, 190, 255), rgb(255, 255, 255)}, Blast = {rgb(200, 235, 255), rgb(50, 110, 240)}, Spark = true, Flash = rgb(130, 200, 255), FlashPower = 2},
+	magmor = {Shards = 16, ShardColor = rgb(255, 110, 30), ShardMat = Enum.Material.Neon, Shard2 = rgb(45, 38, 36), Blast = {rgb(255, 180, 70), rgb(120, 40, 15)}, Fire = true, Big = true, Rings = {rgb(255, 120, 30)}, Flash = rgb(255, 130, 50)}, -- the floor erupts
+	scorch = {Blast = {rgb(255, 210, 100), rgb(220, 40, 20)}, Fire = true, Big = true, Rings = {rgb(255, 110, 30), rgb(255, 200, 80)}, Spark = true, Flash = rgb(255, 120, 50)}, -- dragon fire
+	model7 = {Bolts = 3, BoltColor = rgb(70, 170, 255), Bolt2 = rgb(200, 235, 255), Rings = {rgb(90, 190, 255)}, Spark = true, Blast = {rgb(190, 230, 255), rgb(50, 120, 230)}, Flash = rgb(100, 190, 255), FlashPower = 2}, -- a discharge
+	sb9000 = {Blast = {rgb(255, 255, 255), rgb(190, 195, 205)}, Big = true, Shards = 10, ShardColor = rgb(255, 205, 60), ShardMat = Enum.Material.Metal, Spark = true, Flash = rgb(255, 210, 110), FlashPower = 2},
+	oni = {Rings = {rgb(255, 60, 40), rgb(60, 15, 15)}, Shards = 12, ShardColor = rgb(70, 60, 60), ShardMat = Enum.Material.Slate, Blast = {rgb(255, 90, 50), rgb(50, 15, 15)}, Fire = true, Big = true, Flash = rgb(255, 70, 40)}, -- the club comes down and the ground gives way
+}
+
+------------------------------------------------------------------
 -- RUNNING SOUNDS
 ------------------------------------------------------------------
 -- Every sound used, cut to one footfall: Id, base Volume (evens out their loudness), Off/Len = the slice to play.
@@ -2044,7 +2136,8 @@ K.SOUNDS = {
 	-- loops for the ones that float
 	flutter = {Id = 9114499799, Vol = 3.0, Loop = true},
 	nightwind = {Id = 9125602736, Vol = 1.0, Loop = true}, -- Heavenly Presence, Eerie Choral Tones, Dark (Pro Sound Effects)
-	clockloop = {Id = 8140501675, Vol = 2.0, Loop = true},
+	thunder = {Id = 4961088919, Vol = 0.17, Len = 3}, -- close lightning impact (a very loud take: loudness 935)
+	timewarp = {Id = 9125602882, Vol = 1.2, Loop = true}, -- Heavenly Presence, Eerie Choral Tones 2: a drifting, otherworldly hum
 	spectral = {Id = 9114625545, Vol = 0.4, Loop = true}, -- Gods Wind, Spooky, Eerie (Pro Sound Effects); a loud take (loudness 177 at Vol 1), kept as ambience
 	plasma = {Id = 9125742262, Vol = 2.5, Loop = true},
 	rocket = {Id = 135314203986462, Vol = 0.6, Loop = true},
@@ -2093,7 +2186,7 @@ K.AUDIO = {
 	ironclad = {Steps = {"rattlebody", "rattlebody"}, Pitch = 0.7, Vol = 1.0, Layer = {"servo", 0.6, 0.4, 1}},
 	moe = {Loop = {"dig", 0.8, 0.8}},
 	lumina = {Loop = {"plasma", 1.6, 0.3}},
-	chronos = {Loop = {"clockloop", 0.6, 0.6}},
+	chronos = {Loop = {"timewarp", 1.15, 1}},
 	gamemaster = {Loop = {"plasma", 0.6, 0.6}},
 }
 

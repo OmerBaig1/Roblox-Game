@@ -135,7 +135,7 @@ Guards.ROSTER = {
 		Concept = "A diver in a brass helmet who wades along as if underwater",
 		Silhouette = "round brass helmet, bulky suit, heavy boots",
 		Face = "round porthole faceplate", Palette = "brass, worn canvas"},
-	{Key = "tridentus", Name = "King Tridentus", Title = "Lord of the Sea", Size = 0.76, Step = 0, Laugh = laugh(9116239130, 0.7),
+	{Key = "tridentus", Name = "King Tridentus", Title = "Lord of the Sea", Size = 1.0, Step = 0, Laugh = laugh(9116239130, 0.7),
 		Concept = "The sea king from the throne room reference, surging after you behind his trident",
 		Silhouette = "god-like musculature, crown, flowing beard, trident",
 		Face = "golden crown, flowing blue beard and hair", Palette = "teal sash, gold jewellery"},
@@ -234,7 +234,7 @@ local AIR = {fangula = 1.25, chronos = 1.1, mortimer = 0.5, sb9000 = 1.1, scorch
 	jenny = 1.8, lumina = 0.4, gamemaster = 2.6}
 -- Riders and stilt-walkers: how far (same units) their body is raised at rest so that what they stand on - Wobbles'
 -- pogo stick, Tridentus' seahorse - is what touches the floor (added to the HipHeight in Guards.create)
-local LIFT = {wobbles = 0.75, tridentus = 4.2}
+local LIFT = {wobbles = 0.75, tridentus = 2.40}
 for _, R in ipairs(Guards.ROSTER) do
 	R.Pace = PACE[R.Key] or 1
 	R.Air = AIR[R.Key] or 0
@@ -259,8 +259,8 @@ function Guards.create(C, Kit, level, parent, post)
 	model:SetAttribute("StepPitch", R.Step)
 	model:SetAttribute("Chasing", false)
 	model:SetAttribute("Returning", false)
-	-- streamed to players whole, so their game never animates a half-arrived body
-	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+	-- always on every player's screen, however far away (Atomic streamed them out, so a distant guard vanished)
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	local root = model.PrimaryPart
 	local hip = hum.HipHeight

@@ -600,14 +600,11 @@ local TILE_STYLES = {
 			end
 		end,
 	},
-	-- an arrow that keeps dropping into its tray; the burst is chevrons and data bits raining down the sides
+	-- an arrow that keeps dropping; the burst is chevrons and data bits raining down the sides
 	downloads = {
 		Top = Color3.fromRGB(70, 216, 255), Low = Color3.fromRGB(44, 86, 232), Glow = Color3.fromRGB(150, 236, 255), Chime = 1.05,
 		Build = function(model)
-			local white, tray, rim = Color3.fromRGB(245, 252, 255), Color3.fromRGB(28, 44, 120), Color3.fromRGB(120, 230, 255)
-			tilePart(model, "Part", {Size = Vector3.new(2.1, 0.3, 0.9), CFrame = CFrame.new(0, -1.05, 0), Color = tray})
-			tilePart(model, "Part", {Size = Vector3.new(0.3, 0.72, 0.9), CFrame = CFrame.new(-1.05, -0.84, 0), Color = rim})
-			tilePart(model, "Part", {Size = Vector3.new(0.3, 0.72, 0.9), CFrame = CFrame.new(1.05, -0.84, 0), Color = rim})
+			local white = Color3.fromRGB(245, 252, 255)
 			local arrow = Instance.new("Model")
 			arrow.Name = "Arrow"
 			local shaft = tilePart(arrow, "Part", {Name = "Shaft", Size = Vector3.new(0.62, 1.05, 0.5), CFrame = CFrame.new(0, 0.62, 0), Color = white})
@@ -643,7 +640,7 @@ local TILE_STYLES = {
 	},
 	-- a game cartridge with a green tick; the burst is ticks, gold stars and green confetti
 	installed = {
-		Top = Color3.fromRGB(150, 236, 90), Low = Color3.fromRGB(16, 150, 96), Glow = Color3.fromRGB(190, 255, 150), Chime = 1.5,
+		Top = Color3.fromRGB(150, 236, 90), Low = Color3.fromRGB(16, 150, 96), Glow = Color3.fromRGB(190, 255, 150), Chime = 1.5, Cam = 13.5,
 		Build = function(model)
 			local body, label, gold = Color3.fromRGB(232, 238, 246), Color3.fromRGB(30, 54, 92), Color3.fromRGB(255, 202, 72)
 			tilePart(model, "Part", {Size = Vector3.new(1.75, 2.1, 0.42), CFrame = CFrame.new(-0.14, 0.04, 0), Color = body})
@@ -730,7 +727,8 @@ function UI.tileButton(props)
 	model.Parent = view
 	style.Build(model)
 	local cam = new("Camera", {FieldOfView = 28, Parent = view})
-	cam.CFrame = CFrame.lookAt(Vector3.new(0, 0.2, -7.4), Vector3.new(0, 0, 0))
+	-- far enough back that the whole model, moving, stays inside the gem's diamond
+	cam.CFrame = CFrame.lookAt(Vector3.new(0, 0.2, -(style.Cam or 10.5)), Vector3.new(0, 0, 0))
 	view.CurrentCamera = cam
 	local parts = {}
 	for _, p in ipairs(model:GetChildren()) do
@@ -738,11 +736,7 @@ function UI.tileButton(props)
 			parts[p] = p.CFrame
 		end
 	end
-	-- the ribbon: tails folded behind, then the label bar over the bottom of the gem
-	for _, sx in ipairs({-1, 1}) do
-		new("Frame", {Name = "Tail", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, sx * size * 0.45, 0.875, 2), Size = UDim2.fromOffset(size * 0.14, size * 0.14), Rotation = 45,
-			BackgroundColor3 = style.Low:Lerp(UI.BLACK, 0.45), ZIndex = 9, Parent = face})
-	end
+	-- the ribbon: the label bar over the bottom of the gem
 	local ribbon = new("Frame", {Name = "Ribbon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.86), Size = UDim2.new(1, 0, 0.235, 0), BackgroundColor3 = UI.WHITE, ZIndex = 10, Parent = face}, {UI.corner(math.floor(size * 0.07))})
 	local ribbonGrad = new("UIGradient", {Rotation = 90, Parent = ribbon})
 	local ribbonRim = new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.25, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ribbon})

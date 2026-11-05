@@ -1,0 +1,1059 @@
+--[[
+	GuardMotion: draws every shopkeeper on this screen and plays its running sounds. What each guard does is in
+	ReplicatedStorage.GuardKit (MOTION, AUDIO, FX, and the solver that keeps feet on the floor); this script feeds it.
+
+	The server moves the giants and names what they're doing through attributes: Motion (the guard's key), Chasing,
+	Returning, Act + ActAt (a one-off reaction: "taunt", "grab", "laugh", "whiff"). Every frame, for each guard near the
+	camera:
+	  idle      always running underneath; the head turns toward the nearest player who comes close
+	  gait      blended in by real ground speed with hysteresis (on above MOVE_ON body lengths a second, off below
+	            MOVE_OFF), so a guard standing at its post never runs on the spot. The stride phase advances by the
+	            distance really covered, so feet never slide. Walking home is a calmer version of the chase (s.Run).
+	  lean      into turns and with changes of speed
+	  act       the grab, laugh, whiff or taunt takes over the whole body while it lasts (crossfading from one to the
+	            next) and hands back smoothly when it ends
+	  gear      wings (LeftWing/RightWing joints) follow the pose's Wing/Fold; a guard with a Carry (Kage's katana,
+	            Itza's staff) moves that ONE item between its storage slot and its hand: the item's joint is blended
+	            between rest (the slot) and the grip, which follows the arm's own pose every frame; Swish joints
+	            (a mount's tail) sway
+	  effects   GuardKit.FX: jets, water, wisps... scaled by how much the guard is moving or flying; the shark's fin
+	            and wake ride the water while its body is under the deck, and the mole's mound of earth the floor
+	Footfalls land where the stride says a foot comes down; each guard has its own sounds (GuardKit.AUDIO). Nothing
+	plays while a guard stands, laughs or grabs; the flying and floating ones hum only while they move.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local K = require(ReplicatedStorage:WaitForChild("GuardKit"))
+
+local V = Vector3.new
+local sin, abs, pi, clamp, max, min, exp, atan2, floor = math.sin, math.abs, math.pi, math.clamp, math.max, math.min, math.exp, math.atan2, math.floor
+local NEAR = 260 -- studs from the camera within which guards are heard, and animated even when standing
+local FAR_ANIM = 2500 -- a guard that is chasing or walking home keeps its animation out to here: you can see it down the hall
+-- body lengths a second. Low enough that the walk home (45+ studs/s, ~2 body lengths) always strides: at 1.2 a giant
+-- walking home at 22-30 studs/s never switched its gait on and glided back to its post
+local MOVE_ON, MOVE_OFF = 0.35, 0.15
+local ACT_LEN = {grab = 0.6, laugh = 2.0, whiff = 0.55, taunt = 0.9, windup = 1.0, recover = 0.6}
+local CROSSFADE = 0.2
+local LOOK_RANGE = 16 -- body lengths: a guard turns its head toward a player this close
+local FLOOR_Y = 0.2 -- top of the vault floor
+local WATER_Y = 0.42 -- top of the flooded deck's water (World: Flooded levels)
+
+local guards = {} -- model -> state
+-- what this screen really shows of a guard chasing you: the server takes this over any estimate of it (GuardCatch)
+local gapRemote = ReplicatedStorage:WaitForChild("StealAGameRemotes"):WaitForChild("GuardGap")
+local GAP_EVERY, GAP_RANGE = 0.05, 40
+local nextGap = 0
+
+local function actPose(m, name, age, p)
+	if name == "grab" then
+		m.Grab(p, age)
+	elseif name == "laugh" then
+		m.Laugh(p, age)
+	elseif name == "whiff" then
+		K.whiff(p, age)
+	elseif name == "taunt" then
+		(m.Taunt or K.taunt)(p, age)
+	elseif name == "windup" and m.Windup then
+		m.Windup(p, age)
+	elseif name == "recover" and m.Recover then
+		m.Recover(p, age)
+	end
+end
+
+------------------------------------------------------------------
+-- SOUND
+------------------------------------------------------------------
+local cutToken = {} -- voice -> latest play, so an old cut never stops a newer footfall
+local function makeVoice(def, root)
+	local s = Instance.new("Sound")
+	s.SoundId = "rbxassetid://" .. def.Id
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 18
+	s.RollOffMaxDistance = NEAR
+	s.Volume = 0
+	s.Looped = def.Loop == true
+	s.Parent = root
+	return s
+end
+local function makeAudio(st)
+	local prof = K.AUDIO[st.Key]
+	local root = st.Model.PrimaryPart
+	if not prof or not root then return end
+	local a = {Prof = prof, Pool = {}, Count = 0}
+	local function voices(name)
+		if a.Pool[name] then return end
+		local def = K.SOUNDS[name]
+		a.Pool[name] = {Def = def, Voices = {makeVoice(def, root), makeVoice(def, root)}, I = 1}
+	end
+	if prof.Steps then
+		voices(prof.Steps[1])
+		voices(prof.Steps[2])
+	end
+	if prof.Layer then
+		voices(prof.Layer[1])
+	end
+	if prof.Loop then
+		a.Loop = makeVoice(K.SOUNDS[prof.Loop[1]], root)
+	end
+	st.Audio = a
+end
+local function cut(entry, pitch, volume)
+	local v = entry.Voices[entry.I]
+	entry.I = entry.I % #entry.Voices + 1
+	local def = entry.Def
+	v.PlaybackSpeed = pitch * (0.95 + math.random() * 0.1)
+	v.Volume = def.Vol * volume
+	v.TimePosition = def.Off or 0
+	v:Play()
+	local token = (cutToken[v] or 0) + 1
+	cutToken[v] = token
+	local len = (def.Len or 0.6) / v.PlaybackSpeed
+	task.delay(len, function()
+		if cutToken[v] == token then
+			v:Stop()
+		end
+	end)
+end
+local function footfall(st, loud)
+	local a = st.Audio
+	if not a or not a.Prof.Steps then return end
+	a.Count += 1
+	local prof = a.Prof
+	cut(a.Pool[prof.Steps[a.Count % 2 + 1]], prof.Pitch, prof.Vol * loud)
+	local layer = prof.Layer
+	if layer and a.Count % layer[4] == 0 then
+		cut(a.Pool[layer[1]], layer[2], layer[3] * loud)
+	end
+end
+local function silence(st)
+	local a = st.Audio
+	if a and a.Loop and a.Loop.IsPlaying then
+		a.Loop:Stop()
+	end
+end
+
+------------------------------------------------------------------
+-- EFFECTS (GuardKit.FX)
+------------------------------------------------------------------
+local SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local FIRE = "rbxasset://textures/particles/fire_main.dds"
+local SPARK = "rbxasset://textures/particles/sparkles_main.dds"
+local function C3(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+local function emitter(parent, props)
+	local e = Instance.new("ParticleEmitter")
+	e.Rate = 0
+	e.LockedToPart = false
+	for k, v in pairs(props) do
+		e[k] = v
+	end
+	e.Parent = parent
+	return e
+end
+local function NS(a, b)
+	return NumberSequence.new(a, b)
+end
+
+-- each kind returns its emitters as {Emitter, full rate} pairs (and lights as {Light, full brightness})
+local KINDS = {}
+function KINDS.jet(att, s)
+	return {
+		{emitter(att, {Texture = FIRE, Color = ColorSequence.new(C3(255, 230, 140), C3(255, 90, 20)), LightEmission = 0.7, Size = NS(0.38 * s, 0.06 * s),
+			Transparency = NS(0.1, 1), Lifetime = NumberRange.new(0.12, 0.22), Speed = NumberRange.new(7 * s, 9 * s), SpreadAngle = Vector2.new(6, 6),
+			EmissionDirection = Enum.NormalId.Bottom}), 90},
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(150, 150, 150), C3(90, 90, 90)), Size = NS(0.4 * s, 1.6 * s),
+			Transparency = NS(0.55, 1), Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(4 * s, 5 * s), SpreadAngle = Vector2.new(14, 14),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 3}), 22},
+	}, {C3(255, 150, 60), 0.6}
+end
+function KINDS.puff(att, s)
+	return {
+		{emitter(att, {Texture = FIRE, Color = ColorSequence.new(C3(190, 230, 255), C3(80, 140, 255)), LightEmission = 1, Size = NS(0.3 * s, 0.05 * s),
+			Transparency = NS(0.2, 1), Lifetime = NumberRange.new(0.1, 0.18), Speed = NumberRange.new(4 * s, 5 * s), SpreadAngle = Vector2.new(10, 10),
+			EmissionDirection = Enum.NormalId.Back}), 40},
+	}, {C3(140, 190, 255), 0.5}
+end
+function KINDS.water(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(235, 250, 255), C3(160, 215, 240)), Size = NS(0.25 * s, 1.0 * s),
+			Transparency = NS(0.25, 1), Lifetime = NumberRange.new(0.25, 0.45), Speed = NumberRange.new(6 * s, 8 * s), SpreadAngle = Vector2.new(8, 8),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 2}), 70},
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(200, 240, 255)), Size = NS(0.12 * s, 0.2 * s), Transparency = NS(0.2, 1),
+			Lifetime = NumberRange.new(0.8, 1.4), Speed = NumberRange.new(0.5 * s, 1.5 * s), SpreadAngle = Vector2.new(60, 60),
+			Acceleration = V(0, 2 * s, 0), EmissionDirection = Enum.NormalId.Bottom}), 18},
+	}
+end
+function KINDS.wisps(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(110, 255, 160), C3(10, 30, 20)), LightEmission = 0.6, Size = NS(0.6 * s, 1.7 * s),
+			Transparency = NS(0.55, 1), Lifetime = NumberRange.new(1.0, 1.6), Speed = NumberRange.new(0.3 * s, 0.8 * s), SpreadAngle = Vector2.new(70, 70),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 1.5, Acceleration = V(0, 0.3 * s, 0)}), 16},
+	}, {C3(110, 255, 160), 0.45}
+end
+function KINDS.crystal(att, s)
+	return {
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(240, 200, 255), C3(170, 90, 255)), LightEmission = 1, Size = NS(0.3 * s, 0.05 * s),
+			Transparency = NS(0.1, 1), Lifetime = NumberRange.new(0.8, 1.3), Speed = NumberRange.new(0.4 * s, 1 * s), SpreadAngle = Vector2.new(90, 90),
+			EmissionDirection = Enum.NormalId.Bottom, Acceleration = V(0, 0.8 * s, 0), Rotation = NumberRange.new(0, 360)}), 26},
+	}, {C3(200, 140, 255), 0.5}
+end
+function KINDS.embers(att, s)
+	return {
+		{emitter(att, {Texture = FIRE, Color = ColorSequence.new(C3(255, 210, 120), C3(255, 70, 20)), LightEmission = 1, Size = NS(0.18 * s, 0.02 * s),
+			Transparency = NS(0, 1), Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(1 * s, 2 * s), SpreadAngle = Vector2.new(50, 50),
+			EmissionDirection = Enum.NormalId.Back, Acceleration = V(0, 1.5 * s, 0)}), 22},
+	}
+end
+function KINDS.wave(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(240, 252, 255), C3(150, 220, 235)), Size = NS(0.9 * s, 2.2 * s),
+			Transparency = NS(0.35, 1), Lifetime = NumberRange.new(0.5, 0.8), Speed = NumberRange.new(2 * s, 3.5 * s), SpreadAngle = Vector2.new(75, 75),
+			EmissionDirection = Enum.NormalId.Top, Drag = 2, Acceleration = V(0, -3 * s, 0)}), 45},
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(200, 245, 255)), Size = NS(0.15 * s, 0.25 * s), Transparency = NS(0.2, 1),
+			Lifetime = NumberRange.new(0.6, 1.0), Speed = NumberRange.new(1 * s, 2 * s), SpreadAngle = Vector2.new(80, 80),
+			EmissionDirection = Enum.NormalId.Top}), 20},
+	}
+end
+
+function KINDS.bubbles(att, s)
+	return {
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(215, 245, 255)), Size = NS(0.18 * s, 0.32 * s), Transparency = NS(0.15, 1),
+			Lifetime = NumberRange.new(1.0, 1.6), Speed = NumberRange.new(0.6 * s, 1.2 * s), SpreadAngle = Vector2.new(25, 25),
+			EmissionDirection = Enum.NormalId.Top, Acceleration = V(0, 1.2 * s, 0), Drag = 1}), 22},
+	}
+end
+function KINDS.aura(att, s)
+	return {
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(225, 200, 255), C3(140, 70, 255)), LightEmission = 1, Size = NS(0.35 * s, 0.05 * s),
+			Transparency = NS(0.15, 1), Lifetime = NumberRange.new(0.6, 1.0), Speed = NumberRange.new(0.8 * s, 1.6 * s), SpreadAngle = Vector2.new(180, 180),
+			Drag = 3, Rotation = NumberRange.new(0, 360)}), 30},
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(170, 120, 255), C3(60, 20, 120)), LightEmission = 0.8, Size = NS(0.8 * s, 2.2 * s),
+			Transparency = NS(0.7, 1), Lifetime = NumberRange.new(0.6, 0.9), Speed = NumberRange.new(0.5 * s, 1 * s), SpreadAngle = Vector2.new(180, 180),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 2}), 10},
+	}, {C3(170, 120, 255), 0.6}
+end
+
+-- steam from a nozzle: a hard white jet that billows out and hangs in the air where it was
+function KINDS.steam(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(255, 255, 255), C3(205, 212, 220)), Size = NS(0.3 * s, 1.9 * s),
+			Transparency = NS(0.15, 1), Lifetime = NumberRange.new(0.45, 0.85), Speed = NumberRange.new(5 * s, 8 * s), SpreadAngle = Vector2.new(9, 9),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 4}), 60},
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(230, 235, 240)), Size = NS(0.9 * s, 2.6 * s),
+			Transparency = NS(0.6, 1), Lifetime = NumberRange.new(0.8, 1.4), Speed = NumberRange.new(1 * s, 2 * s), SpreadAngle = Vector2.new(40, 40),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 2, Acceleration = V(0, 0.8 * s, 0)}), 14},
+	}
+end
+-- a low crimson mist bleeding from the hem of Dracula's coat
+function KINDS.redmist(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(170, 20, 40), C3(30, 0, 8)), LightEmission = 0.2, Size = NS(0.5 * s, 1.7 * s),
+			Transparency = NS(0.6, 1), Lifetime = NumberRange.new(0.8, 1.3), Speed = NumberRange.new(0.3 * s, 0.7 * s), SpreadAngle = Vector2.new(60, 60),
+			EmissionDirection = Enum.NormalId.Bottom, Drag = 1.5}), 12},
+	}, {C3(200, 30, 50), 0.35}
+end
+-- gold motes of slowed time turning in the air around the wizard
+function KINDS.clock(att, s)
+	return {
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(255, 230, 150), C3(120, 170, 255)), LightEmission = 1, Size = NS(0.28 * s, 0.05 * s),
+			Transparency = NS(0.1, 1), Lifetime = NumberRange.new(1.2, 1.9), Speed = NumberRange.new(0.5 * s, 1.1 * s), SpreadAngle = Vector2.new(180, 180),
+			Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-90, 90), Drag = 2}), 18},
+	}, {C3(255, 225, 150), 0.4}
+end
+-- the charge cutting through the air: long streaks going back past him, and dust torn up behind (only while he charges)
+function KINDS.gust(att, s)
+	return {
+		{emitter(att, {Texture = SPARK, Color = ColorSequence.new(C3(255, 255, 255), C3(205, 225, 240)), LightEmission = 0.5, Size = NS(0.5 * s, 0.1 * s),
+			Squash = NumberSequence.new(-2.6), Transparency = NS(0.25, 1), Lifetime = NumberRange.new(0.18, 0.32), Speed = NumberRange.new(22 * s, 34 * s), SpreadAngle = Vector2.new(24, 24),
+			EmissionDirection = Enum.NormalId.Back, Orientation = Enum.ParticleOrientation.VelocityParallel}), 75},
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(190, 175, 150)), Size = NS(0.8 * s, 2.6 * s), Transparency = NS(0.55, 1),
+			Lifetime = NumberRange.new(0.5, 0.8), Speed = NumberRange.new(4 * s, 7 * s), SpreadAngle = Vector2.new(30, 30), EmissionDirection = Enum.NormalId.Back, Drag = 3}), 22},
+	}
+end
+-- a slow bright stream of current trailing the seahorse
+function KINDS.current(att, s)
+	return {
+		{emitter(att, {Texture = SMOKE, Color = ColorSequence.new(C3(160, 240, 255), C3(40, 130, 200)), LightEmission = 0.5, Size = NS(0.5 * s, 1.5 * s),
+			Transparency = NS(0.62, 1), Lifetime = NumberRange.new(0.7, 1.1), Speed = NumberRange.new(2 * s, 3.5 * s), SpreadAngle = Vector2.new(22, 22),
+			EmissionDirection = Enum.NormalId.Back, Drag = 2, Acceleration = V(0, 0.6 * s, 0)}), 16},
+	}
+end
+
+-- an expanding ring on the water (the wake and the shark's surge)
+local function ripple(pos, d, life)
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+	ring.CastShadow = false
+	ring.Material = Enum.Material.SmoothPlastic
+	ring.Color = C3(225, 245, 255)
+	ring.Transparency = 0.62
+	ring.Size = V(0.06, d, d)
+	ring.CFrame = CFrame.new(pos.X, WATER_Y + 0.03, pos.Z) * CFrame.Angles(0, 0, pi / 2)
+	ring.Parent = workspace
+	TweenService:Create(ring, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = V(0.06, d * 2.6, d * 2.6), Transparency = 1}):Play()
+	Debris:AddItem(ring, life + 0.1)
+end
+
+-- the shark's dorsal fin standing out of the water, with spray off its leading edge: the fin mesh in
+-- ReplicatedStorage.GuardFx (leading edge toward -Z); a plain wedge only if that is missing
+local fxAssets = ReplicatedStorage:WaitForChild("GuardFx", 10)
+local DIRT_A, DIRT_B = C3(150, 118, 84), C3(96, 74, 52)
+-- the earth a burrower pushes up: the Mound mesh (its long side is X, turned along the way it travels)
+local function moundPart(st, s, size)
+	local src = fxAssets and fxAssets:FindFirstChild("Mound")
+	local mound
+	if src then
+		mound = src:Clone()
+		mound.Size = src.Size * s * size * V(1, 1.35, 1)
+		-- plain earth, whatever level it's in (a texture still loading showed it grey)
+		mound.TextureID = ""
+		mound.Material = Enum.Material.Ground
+		mound.Color = C3(92, 66, 42)
+	else
+		mound = Instance.new("Part")
+		mound.Shape = Enum.PartType.Ball
+		mound.Material = Enum.Material.Ground
+		mound.Color = C3(104, 78, 54)
+		mound.Size = V(3.3, 1.2, 2.4) * s * size
+	end
+	mound.Name = "GuardMound"
+	mound.Anchored = true
+	mound.CanCollide = false
+	mound.CanQuery = false
+	mound.CanTouch = false
+	mound.CastShadow = false
+	mound.Transparency = 1
+	mound.Parent = workspace
+	table.insert(st.FxObjects, mound)
+	local front = Instance.new("Attachment")
+	front.Position = V(mound.Size.X * 0.4, mound.Size.Y * 0.1, 0)
+	front.Parent = mound
+	local soil = emitter(front, {Texture = SMOKE, Color = ColorSequence.new(DIRT_A, DIRT_B), Size = NS(0.5 * s, 1.7 * s),
+		Transparency = NS(0.35, 1), Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(1.5 * s, 3 * s), SpreadAngle = Vector2.new(70, 40),
+		EmissionDirection = Enum.NormalId.Top, Drag = 2, Acceleration = V(0, -3 * s, 0)})
+	local pebbles = emitter(front, {Texture = SPARK, Color = ColorSequence.new(C3(80, 62, 44)), LightEmission = 0, Size = NS(0.2 * s, 0.12 * s),
+		Transparency = NS(0, 0.3), Lifetime = NumberRange.new(0.5, 0.8), Speed = NumberRange.new(2 * s, 4 * s), SpreadAngle = Vector2.new(55, 55),
+		EmissionDirection = Enum.NormalId.Top, Acceleration = V(0, -14 * s, 0)})
+	return mound, soil, pebbles
+end
+-- the furrow of broken earth left behind it: a Trail between two points either side, so it follows every turn it really makes
+local function furrow(st, s, width)
+	local holder = Instance.new("Part")
+	holder.Name = "GuardFurrow"
+	holder.Anchored = true
+	holder.CanCollide = false
+	holder.CanQuery = false
+	holder.CanTouch = false
+	holder.Transparency = 1
+	holder.Size = V(1, 1, 1)
+	holder.Parent = workspace
+	table.insert(st.FxObjects, holder)
+	local w0, w1 = Instance.new("Attachment"), Instance.new("Attachment")
+	w0.Position, w1.Position = V(-width * s, 0, 0), V(width * s, 0, 0)
+	w0.Parent, w1.Parent = holder, holder
+	local trail = Instance.new("Trail")
+	trail.Attachment0, trail.Attachment1 = w0, w1
+	trail.FaceCamera = false
+	trail.Texture = SMOKE
+	trail.TextureMode = Enum.TextureMode.Stretch
+	trail.Color = ColorSequence.new(C3(112, 86, 60), C3(78, 60, 44))
+	trail.Transparency = NS(0.1, 1)
+	trail.WidthScale = NS(1, 1.6)
+	trail.Lifetime = 2
+	trail.MinLength = 0.3
+	trail.Enabled = false
+	trail.Parent = holder
+	return holder, trail
+end
+
+local function makeFin(st, s)
+	local src = fxAssets and fxAssets:FindFirstChild("Fin")
+	local fin
+	if src then
+		fin = src:Clone()
+		fin.Size = src.Size * s * 1.5 -- in proportion to the 38-stud shark under it
+	else
+		fin = Instance.new("WedgePart")
+		fin.Color = C3(78, 98, 116)
+		fin.Size = V(0.32 * s, 1.5 * s, 1.9 * s)
+	end
+	fin.Name = "GuardFin"
+	fin.Anchored = true
+	fin.CanCollide = false
+	fin.CanQuery = false
+	fin.CanTouch = false
+	fin.CastShadow = false
+	fin.Transparency = 1
+	fin.Parent = workspace
+	local front = Instance.new("Attachment")
+	front.Position = V(0, -fin.Size.Y * 0.45, -fin.Size.Z * 0.45)
+	front.Parent = fin
+	local spray = emitter(front, {Texture = SMOKE, Color = ColorSequence.new(C3(240, 252, 255), C3(170, 220, 235)), Size = NS(0.35 * s, 1.0 * s),
+		Transparency = NS(0.45, 1), Lifetime = NumberRange.new(0.3, 0.5), Speed = NumberRange.new(1.2 * s, 2 * s), SpreadAngle = Vector2.new(50, 25),
+		EmissionDirection = Enum.NormalId.Top, Drag = 2, Acceleration = V(0, -4 * s, 0)})
+	local bubbles = emitter(front, {Texture = SPARK, Color = ColorSequence.new(C3(200, 240, 255)), Size = NS(0.15 * s, 0.25 * s), Transparency = NS(0.2, 1),
+		Lifetime = NumberRange.new(0.7, 1.1), Speed = NumberRange.new(0.5 * s, 1 * s), SpreadAngle = Vector2.new(80, 80), EmissionDirection = Enum.NormalId.Top})
+	st.Fin = {Part = fin, Spray = spray, Bubbles = bubbles, Next = 0, Kind = "fin"}
+	table.insert(st.FxObjects, fin)
+end
+
+-- the mole's mound: a low hump of churned earth that travels along the floor over him, throwing up soil and pebbles
+local function makeMound(st, s)
+	local mound, soil, pebbles = moundPart(st, s, 1.5) -- big and tall: no missing where he is
+	local holder, trail = furrow(st, s, 0.65)
+	st.Fin = {Part = mound, Spray = soil, Bubbles = pebbles, Next = 0, Kind = "mound", Wake = holder, Foam = trail}
+end
+
+-- what a high-level guard's catch looks like (GuardKit.CATCH): every piece is thrown away by itself
+local function fxPart(props)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	for k, v in pairs(props) do
+		p[k] = v
+	end
+	p.Parent = workspace
+	return p
+end
+local function lightningBolt(from, to, width, color, life)
+	local segments, jag = 12, (from - to).Magnitude * 0.09
+	local last = from
+	for i = 1, segments do
+		local point = from:Lerp(to, i / segments)
+		if i < segments then
+			point += V((math.random() - 0.5) * jag, 0, (math.random() - 0.5) * jag)
+		end
+		local len = (point - last).Magnitude
+		local seg = fxPart({Size = V(width, width, len), CFrame = CFrame.lookAt((last + point) / 2, point), Color = color})
+		TweenService:Create(seg, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Transparency = 1, Size = V(width * 0.3, width * 0.3, len)}):Play()
+		Debris:AddItem(seg, life + 0.05)
+		last = point
+	end
+end
+local function catchFx(spec, at, s)
+	local ground = V(at.X, FLOOR_Y + 0.15, at.Z)
+	if spec.Bolts then
+		for i = 1, spec.Bolts do
+			task.delay((i - 1) * 0.11, function()
+				local a = math.random() * 2 * pi
+				local land = ground + V(math.cos(a), 0, math.sin(a)) * (i == 1 and 0 or s * (1 + math.random() * 2.5))
+				local sky = land + V((math.random() - 0.5) * s * 4, s * 16, (math.random() - 0.5) * s * 4)
+				lightningBolt(sky, land, s * 0.09, i % 2 == 0 and spec.Bolt2 or spec.BoltColor, 0.34)
+				lightningBolt(sky:Lerp(land, 0.45), land + V(math.random(-6, 6), 0, math.random(-6, 6)) * s * 0.3, s * 0.04, spec.BoltColor, 0.24)
+				ripple(land, s * 1.2, 0.45)
+			end)
+		end
+	end
+	if spec.Rings then
+		for i, color in ipairs(spec.Rings) do
+			task.delay((i - 1) * 0.12, function()
+				local d = s * 1.2
+				local ring = fxPart({Shape = Enum.PartType.Cylinder, Size = V(0.2, d, d), CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, pi / 2), Color = color, Transparency = 0.6})
+				TweenService:Create(ring, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = V(0.05, s * 9, s * 9), Transparency = 1}):Play()
+				Debris:AddItem(ring, 0.75)
+			end)
+		end
+	end
+	if spec.Spokes then
+		-- the hands of a great clock sweeping round on the floor
+		for i = 1, 2 do
+			local len = s * (i == 1 and 3.4 or 2.2)
+			local hand = fxPart({Size = V(s * 0.16, 0.12, len), Color = spec.Spokes, Transparency = 0.1})
+			local start = math.random() * 2 * pi
+			local speed = i == 1 and 7 or 2.5
+			local born = os.clock()
+			local conn
+			conn = RunService.PreRender:Connect(function()
+				local age = os.clock() - born
+				if age > 1.1 or not hand.Parent then
+					conn:Disconnect()
+					return
+				end
+				local a = start + age * speed
+				hand.CFrame = CFrame.new(ground + V(math.sin(a), 0, math.cos(a)) * len / 2) * CFrame.Angles(0, a, 0)
+				hand.Transparency = 0.1 + 0.9 * clamp((age - 0.6) / 0.5, 0, 1)
+			end)
+			Debris:AddItem(hand, 1.2)
+		end
+	end
+	if spec.Shards then
+		for _ = 1, spec.Shards do
+			local a = math.random() * 2 * pi
+			local size = s * (0.25 + math.random() * 0.5)
+			local shard = fxPart({Size = V(size, size * 1.7, size), CFrame = CFrame.new(ground + V(0, s * 0.5, 0)) * CFrame.Angles(math.random() * 6, a, math.random() * 6), Color = spec.ShardColor, Material = spec.ShardMat})
+			local out = V(math.cos(a), 0, math.sin(a)) * s * (2.5 + math.random() * 3.5)
+			local up = TweenService:Create(shard, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {CFrame = CFrame.new(ground + out * 0.55 + V(0, s * (1.5 + math.random() * 1.5), 0)) * CFrame.Angles(math.random() * 6, a, math.random() * 6)})
+			up:Play()
+			up.Completed:Once(function()
+				if shard.Parent then
+					TweenService:Create(shard, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {CFrame = CFrame.new(ground + out) * CFrame.Angles(math.random() * 6, a, math.random() * 6), Transparency = 1}):Play()
+				end
+			end)
+			Debris:AddItem(shard, 0.8)
+		end
+	end
+	if spec.Confetti then
+		local colors = {C3(230, 50, 60), C3(255, 215, 70), C3(80, 200, 120), C3(90, 150, 255), C3(245, 245, 245)}
+		for i = 1, spec.Confetti do
+			local a = math.random() * 2 * pi
+			local bit = fxPart({Size = V(s * 0.3, 0.1, s * 0.16), CFrame = CFrame.new(ground + V(0, s * 0.6, 0)), Color = colors[i % #colors + 1], Material = Enum.Material.SmoothPlastic})
+			TweenService:Create(bit, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {CFrame = CFrame.new(ground + V(math.cos(a), 0, math.sin(a)) * s * (1.5 + math.random() * 4) + V(0, s * (1 + math.random() * 2.5), 0)) * CFrame.Angles(math.random() * 9, math.random() * 9, math.random() * 9), Transparency = 1}):Play()
+			Debris:AddItem(bit, 0.95)
+		end
+	end
+	if spec.Blast or spec.Flash or spec.Thunder then
+		local holder = fxPart({Size = V(1, 1, 1), CFrame = CFrame.new(ground + V(0, s, 0)), Transparency = 1})
+		local att = Instance.new("Attachment")
+		att.Parent = holder
+		if spec.Blast then
+			local big = spec.Big and 1.5 or 1
+			local cloud = emitter(att, {Texture = spec.Fire and FIRE or SMOKE, Color = ColorSequence.new(spec.Blast[1], spec.Blast[2]), LightEmission = spec.Fire and 0.8 or 0.3,
+				Size = NS(s * 0.9 * big, s * 2.6 * big), Transparency = NS(0.15, 1), Lifetime = NumberRange.new(0.5, 0.95), Speed = NumberRange.new(s * 2, s * 5), SpreadAngle = Vector2.new(180, 180), Drag = 3})
+			cloud:Emit(spec.Big and 30 or 22)
+		end
+		if spec.Spark then
+			local sparks = emitter(att, {Texture = SPARK, Color = ColorSequence.new(spec.Blast and spec.Blast[1] or C3(255, 255, 255)), LightEmission = 1, Size = NS(s * 0.45, s * 0.05),
+				Transparency = NS(0, 1), Lifetime = NumberRange.new(0.5, 1), Speed = NumberRange.new(s * 3, s * 7), SpreadAngle = Vector2.new(180, 180), Rotation = NumberRange.new(0, 360), Drag = 3})
+			sparks:Emit(36)
+		end
+		if spec.Flash then
+			local light = Instance.new("PointLight")
+			light.Color = spec.Flash
+			light.Range = s * 9
+			light.Brightness = 7
+			light.Shadows = false
+			light.Parent = holder
+			TweenService:Create(light, TweenInfo.new(0.7), {Brightness = 0}):Play()
+		end
+		if spec.Thunder and K.SOUNDS.thunder then
+			local boom = Instance.new("Sound")
+			boom.SoundId = "rbxassetid://" .. K.SOUNDS.thunder.Id
+			boom.Volume = K.SOUNDS.thunder.Vol
+			boom.RollOffMode = Enum.RollOffMode.InverseTapered
+			boom.RollOffMinDistance = 40
+			boom.RollOffMaxDistance = 500
+			boom.Parent = holder
+			boom:Play()
+		end
+		Debris:AddItem(holder, 3.2)
+	end
+end
+
+local function makeFx(st)
+	st.FxObjects = {}
+	st.Fx = {}
+	local list = K.FX[st.Key]
+	if not list then return end
+	local model, s = st.Model, st.Rig.Scale
+	for _, f in ipairs(list) do
+		if f.Kind == "fin" then
+			makeFin(st, s)
+		elseif f.Kind == "mound" then
+			makeMound(st, s)
+		elseif f.Kind == "wave" then
+			-- on the floor under the guard, not on the body
+			local holder = Instance.new("Part")
+			holder.Name = "GuardWave"
+			holder.Anchored = true
+			holder.CanCollide = false
+			holder.CanQuery = false
+			holder.CanTouch = false
+			holder.Transparency = 1
+			holder.Size = V(1, 1, 1)
+			holder.Parent = workspace
+			local att = Instance.new("Attachment")
+			att.Parent = holder
+			table.insert(st.FxObjects, holder)
+			st.Wave = holder
+			for _, e in ipairs(KINDS.wave(att, s)) do
+				table.insert(st.Fx, e)
+			end
+		else
+			local part = model:FindFirstChild(f.Part, true)
+			if part and part:IsA("BasePart") and KINDS[f.Kind] then
+				local att = Instance.new("Attachment")
+				att.Name = "Fx_" .. f.Kind
+				att.Position = f.At * part.Size
+				att.Parent = part
+				table.insert(st.FxObjects, att)
+				local emitters, light = KINDS[f.Kind](att, s)
+				for _, e in ipairs(emitters) do
+					e.Charge, e.Burst = f.Charge, f.Burst
+					table.insert(st.Fx, e)
+				end
+				if light then
+					local l = Instance.new("PointLight")
+					l.Color = light[1]
+					l.Range = 3 * s -- a local glow on the equipment, never a floodlight on the whole body
+					l.Brightness = 0
+					l.Shadows = false
+					l.Parent = att
+					table.insert(st.Fx, {l, light[2], Light = true})
+				end
+			end
+		end
+	end
+end
+
+------------------------------------------------------------------
+-- TRACKING
+------------------------------------------------------------------
+local function track(model)
+	if guards[model] or not model:IsA("Model") then return end
+	guards[model] = {Model = model, Phase = 0, MoveW = 0, ActW = 0, Speed = 0, Moving = false, Seed = math.random() * 100,
+		Run = 1, Lean = 0, Pitch = 0, Look = V(), Out = {}}
+end
+local function untrack(model)
+	local st = guards[model]
+	if st and st.Rig then
+		for _, j in pairs(st.Rig.J) do
+			if j.Parent then
+				j.Transform = CFrame.identity
+			end
+		end
+	end
+	if st and st.Audio then
+		for _, e in pairs(st.Audio.Pool) do
+			for _, v in ipairs(e.Voices) do
+				v:Destroy()
+			end
+		end
+		if st.Audio.Loop then
+			st.Audio.Loop:Destroy()
+		end
+	end
+	if st and st.FxObjects then
+		for _, o in ipairs(st.FxObjects) do
+			o:Destroy()
+		end
+	end
+	if st and st.DrawVoice then
+		st.DrawVoice:Destroy()
+	end
+	guards[model] = nil
+end
+
+-- the nearest player's root for each guard, refreshed a few times a second (heads turn toward people nearby)
+local lookTargets = {}
+task.spawn(function()
+	while true do
+		local roots = {}
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local r = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+			if r then
+				table.insert(roots, r)
+			end
+		end
+		for model, st in pairs(guards) do
+			local root = model.PrimaryPart
+			local best, bestD = nil, (st.Rig and st.Rig.Scale or 4) * 5.2 * LOOK_RANGE
+			if root then
+				for _, r in ipairs(roots) do
+					local d = (r.Position - root.Position).Magnitude
+					if d < bestD then
+						best, bestD = r, d
+					end
+				end
+			end
+			lookTargets[model] = best
+		end
+		task.wait(0.3)
+	end
+end)
+
+-- first sight of a guard: its rig, sounds, wings, gear and effects
+local function setup(st)
+	local model = st.Model
+	st.Rig = K.measure(model)
+	st.Key = model:GetAttribute("Motion")
+	if not st.Rig then
+		return false
+	end
+	makeAudio(st)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("Motor6D") and (d.Name == "LeftWing" or d.Name == "RightWing") then
+			st.Wings = st.Wings or {}
+			st.Wings[d.Name] = d
+		end
+	end
+	local m = K.MOTION[st.Key]
+	local carry = m and m.Carry and model:FindFirstChild(m.Carry.Joint, true)
+	if carry and m.Carry.Draw then
+		st.Draw = K.drawSetup(model, st.Rig, m.Carry)
+		if K.SOUNDS.draw then
+			st.DrawVoice = makeVoice(K.SOUNDS.draw, model.PrimaryPart)
+		end
+	elseif carry and carry:GetAttribute("Grip") then
+		local arm = carry:GetAttribute("GripArm")
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("Motor6D") and d.Part1 and d.Part1.Name == arm and d.Part0 == carry.Part0 then
+				-- the grip was measured on the stored rig; the giant is scaled up (Scale), its offsets with it
+				local grip = carry:GetAttribute("Grip")
+				grip = (grip - grip.Position) + grip.Position * st.Rig.Scale
+				st.Carry = {Joint = carry, Grip = grip, Shoulder = d, Key = d.Name == "RightShoulder" and "RS" or "LS",
+					Def = m.Carry, W = m.Carry.Held == "idle" and 1 or 0}
+			end
+		end
+		if st.Carry and m.Carry.Held == "chase" and K.SOUNDS.draw then
+			st.DrawVoice = makeVoice(K.SOUNDS.draw, model.PrimaryPart)
+		end
+	end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("Motor6D") and d.Name == "Swish" then
+			st.Swish = st.Swish or {}
+			table.insert(st.Swish, d)
+		end
+	end
+	makeFx(st)
+	return true
+end
+
+-- one carried item between its slot (its joint at rest) and the hand: W = 0 in the slot, 1 in the hand
+local function updateCarry(st, model, tr, dt)
+	local c = st.Carry
+	local def = c.Def
+	local chasing = model:GetAttribute("Chasing") == true
+	local taunting = st.ActName == "taunt" and st.ActAge
+	local k = taunting and K.ease((st.ActAge - def.From) / (def.To - def.From)) or 1
+	local want
+	if def.Held == "chase" then
+		want = chasing and k or 0
+	else
+		want = chasing and 1 - k or 1
+	end
+	local before = c.W
+	-- during the taunt it follows the draw exactly; otherwise it eases (a chase ending puts it away smoothly)
+	c.W = taunting and want or c.W + (want - c.W) * (1 - exp(-dt * 6))
+	if st.DrawVoice and before < 0.5 and c.W >= 0.5 then
+		st.DrawVoice.Volume = K.SOUNDS.draw.Vol
+		st.DrawVoice.TimePosition = 0
+		st.DrawVoice:Play()
+	end
+	local sh, j = c.Shoulder, c.Joint
+	local armRel = sh.C0 * tr[c.Key] * sh.C1:Inverse()
+	local held = j.C0:Inverse() * armRel * c.Grip * j.C1
+	j.Transform = CFrame.identity:Lerp(held, c.W)
+end
+
+-- the katana (K.draw): drawn while chasing and through the grab and laugh, sheathed the same way afterwards
+local DRAW_TIME = 1
+local function updateDraw(st, model, tr, dt)
+	local d = st.Draw
+	local out = model:GetAttribute("Chasing") == true or ((st.ActName == "grab" or st.ActName == "laugh") and st.ActW > 0.05)
+	local before = d.P
+	d.P = clamp(d.P + (out and dt or -dt) / DRAW_TIME, 0, 1)
+	if st.DrawVoice and before < 0.5 and d.P >= 0.5 then
+		st.DrawVoice.Volume = K.SOUNDS.draw.Vol
+		st.DrawVoice.TimePosition = 0
+		st.DrawVoice:Play()
+	end
+	local rs, el, sword = K.draw(d, tr.RS, d.P)
+	st.Rig.J.RS.Transform = rs
+	d.Elbow.Transform = el
+	d.Joint.Transform = d.Joint.C0:Inverse() * sword * d.Joint.C1
+end
+
+------------------------------------------------------------------
+-- EVERY FRAME
+------------------------------------------------------------------
+local function step(dt)
+	local cam = workspace.CurrentCamera
+	local camPos = cam and cam.CFrame.Position or Vector3.zero
+	local now = workspace:GetServerTimeNow()
+	local t = os.clock()
+	for model, st in pairs(guards) do
+		local root = model.Parent and model.PrimaryPart
+		if not root then
+			continue
+		end
+		local dist = (root.Position - camPos).Magnitude
+		local active = model:GetAttribute("Chasing") or model:GetAttribute("Returning")
+		-- out of earshot: its hum stays silent while it keeps moving (footfalls are 3D and roll off by themselves)
+		if dist > NEAR then
+			silence(st)
+		end
+		if dist > (active and FAR_ANIM or NEAR) then
+			st.Far = true
+			silence(st)
+			for _, e in ipairs(st.Fx or {}) do
+				if e.Light then
+					e[1].Brightness = 0
+				else
+					e[1].Rate = 0
+				end
+			end
+			if st.Fin then
+				st.Fin.Part.Transparency = 1
+				st.Fin.Spray.Rate, st.Fin.Bubbles.Rate = 0, 0
+				if st.Fin.Foam then
+					st.Fin.Foam.Enabled = false
+				end
+			end
+			continue
+		end
+		if not st.Rig and not setup(st) then
+			continue
+		end
+		local rig = st.Rig
+		local m = K.MOTION[st.Key] or K.MOTION.brutus
+		local body = rig.Scale * 5.2 -- one body length in studs
+		if t >= nextGap and model:GetAttribute("Chasing") then
+			local me = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local gap = me and V(root.Position.X - me.Position.X, 0, root.Position.Z - me.Position.Z).Magnitude
+			if gap and gap <= GAP_RANGE then
+				nextGap = t + GAP_EVERY
+				gapRemote:FireServer(tonumber(model.Name:sub(1, 2)), gap)
+			end
+		end
+
+		-- how far they really moved since last frame (a teleport home or a stream-in doesn't count)
+		local pos = root.Position
+		local moved = st.Last and V(pos.X - st.Last.X, 0, pos.Z - st.Last.Z).Magnitude or 0
+		st.Last = pos
+		if st.Far or moved > 600 * dt + 20 then
+			moved = 0
+			st.Far = false
+		end
+		local speed = moved / max(dt, 1 / 240) / body
+		local before = st.Speed
+		st.Speed += (speed - st.Speed) * (1 - exp(-dt * 10))
+		if st.Moving and st.Speed < MOVE_OFF then
+			st.Moving = false
+		elseif not st.Moving and st.Speed > MOVE_ON then
+			st.Moving = true
+		end
+		-- a dive takes its time (the body tips over and goes in head first), everything else just starts moving
+		st.MoveW += ((st.Moving and 1 or 0) - st.MoveW) * (1 - exp(-dt * (m.DiveRate or (m.Dive and 3) or 7)))
+		-- fast movers (the quick walk home) take longer, bigger strides rather than spinning their legs faster
+		local runTarget = model:GetAttribute("Returning") and clamp(st.Speed / 6, 0.8, 1.2) or 1
+		st.Run += (runTarget - st.Run) * (1 - exp(-dt * 3))
+		local strideScale = clamp(st.Speed / 5, 1, 1.8)
+
+		-- stride phase from distance travelled; a footfall each time it passes the foot's landing point
+		local foot = m.Foot or pi / 2
+		local beforePhase = st.Phase
+		st.Phase += moved / (m.Stride * rig.Scale * strideScale) * 2 * pi
+		if st.Moving and floor((st.Phase - foot) / pi) ~= floor((beforePhase - foot) / pi) then
+			footfall(st, st.Run >= 0.8 and 1 or 0.7)
+			model:SetAttribute("StepTick", (model:GetAttribute("StepTick") or 0) + 1)
+		end
+
+		-- turning and speeding up lean the body (into the turn, forward when accelerating)
+		local look = root.CFrame.LookVector
+		local yaw = atan2(-look.X, -look.Z)
+		local yawRate = st.Yaw and ((yaw - st.Yaw + pi) % (2 * pi) - pi) / max(dt, 1 / 240) or 0
+		st.Yaw = yaw
+		st.Lean += (clamp(yawRate * st.Speed * 0.05, -0.2, 0.2) * st.MoveW - st.Lean) * (1 - exp(-dt * 6))
+		local accel = (st.Speed - before) / max(dt, 1 / 240)
+		st.Pitch += (clamp(-accel * 0.03, -0.12, 0.08) - st.Pitch) * (1 - exp(-dt * 5))
+
+		local s = {T = t + st.Seed, Run = st.Run}
+		local pose = K.newPose()
+		m.Idle(pose, t + st.Seed)
+		if st.MoveW > 0.01 then
+			local gp = K.newPose()
+			m.Gait(gp, st.Phase, s)
+			if m.Dive then
+				K.dive(pose, gp, st.MoveW, st.Moving)
+			else
+				K.blend(pose, gp, st.MoveW)
+			end
+		end
+		pose.Root += V(st.Pitch, 0, st.Lean)
+
+		-- the head turns toward the nearest player (while standing; a chasing guard faces its target anyway)
+		local target = lookTargets[model]
+		local want = V()
+		if target and target.Parent then
+			local d = root.CFrame:PointToObjectSpace(target.Position)
+			local flat = math.sqrt(d.X * d.X + d.Z * d.Z)
+			want = V(clamp(atan2(d.Y - body * 0.6, flat) * 0.6, -0.3, 0.25), clamp(atan2(-d.X, -d.Z), -0.9, 0.9), 0)
+		end
+		st.Look += (want - st.Look) * (1 - exp(-dt * 3))
+
+		-- one-off reactions take over the body, crossfading from one to the next
+		local act = model:GetAttribute("Act")
+		local at = model:GetAttribute("ActAt") or 0
+		local fresh = false
+		if ACT_LEN[act] and (act ~= st.ActName or at ~= st.ActAt) then
+			if st.ActName and st.ActW > 0.05 then
+				st.Prev, st.PrevAge, st.PrevT = st.ActName, st.ActAge, t
+			end
+			st.ActName, st.ActAt = act, at
+			fresh = true
+		end
+		local on = false
+		if st.ActName then
+			if act == st.ActName and at == st.ActAt then
+				st.ActAge = max(0, now - at)
+				on = st.ActAge < ACT_LEN[act]
+			end
+			st.ActW += ((on and 1 or 0) - st.ActW) * (1 - exp(-dt * (on and 16 or 5)))
+			if st.ActW > 0.005 then
+				local ap = K.newPose()
+				actPose(m, st.ActName, st.ActAge, ap)
+				if st.Prev and t - st.PrevT < CROSSFADE then
+					local pp = K.newPose()
+					actPose(m, st.Prev, st.PrevAge, pp)
+					K.blend(pp, ap, K.ease((t - st.PrevT) / CROSSFADE))
+					ap = pp
+				end
+				K.blend(pose, ap, st.ActW)
+			else
+				st.ActName = nil
+			end
+		end
+		pose.Neck += st.Look * (1 - st.MoveW) * (1 - st.ActW)
+
+		local tr = K.solve(rig, pose, st.Out)
+		for key, joint in pairs(rig.J) do
+			joint.Transform = tr[key]
+		end
+
+		-- wings: Fold sweeps them back along the body, Wing beats them (+ = up)
+		if st.Wings then
+			local fold, wing = pose.Fold * 1.15, pose.Wing
+			if st.Wings.LeftWing then
+				st.Wings.LeftWing.Transform = CFrame.Angles(0, fold, -wing)
+			end
+			if st.Wings.RightWing then
+				st.Wings.RightWing.Transform = CFrame.Angles(0, -fold, wing)
+			end
+		end
+
+		if st.Carry then
+			updateCarry(st, model, tr, dt)
+		end
+		if st.Draw then
+			updateDraw(st, model, tr, dt)
+		end
+
+		-- effects run with movement, and while airborne (a hover, an ascent)
+		local w = max(st.MoveW, clamp(pose.Off.Y / 1.5, 0, 1))
+		if st.Swish then
+			for _, j in ipairs(st.Swish) do
+				-- attribute Back: how far it streams out behind while moving (a coat)
+				local back = j:GetAttribute("Back")
+				j.Transform = back and CFrame.Angles(0.04 * sin(t * 1.3) - back * w - 0.06 * sin(t * 3) * w, 0, 0.03 * sin(t * 1.7))
+					or CFrame.Angles(0.1 * sin(t * 1.3) + 0.3 * sin(t * 4) * w, 0, 0)
+			end
+		end
+		local charging = model:GetAttribute("Charging") and 1 or 0
+		local takeoff = w > 0.15 and (st.LastW or 0) <= 0.15
+		st.LastW = w
+		for _, e in ipairs(st.Fx) do
+			if e.Light then
+				e[1].Brightness = e[2] * w
+			else
+				e[1].Rate = e[2] * (e.Charge and charging or w)
+				if takeoff and e.Burst then
+					e[1]:Emit(e.Burst)
+				end
+			end
+		end
+		if st.Wave then
+			st.Wave.CFrame = CFrame.new(pos.X, FLOOR_Y + 0.5, pos.Z)
+		end
+		local fin = st.Fin
+		if fin then
+			-- it comes up as far as the body has gone under
+			local under = clamp((pose.Sink or 0) / 6, 0, 1)
+			local h = fin.Part.Size.Y
+			if under > 0.3 then
+				local rise = (under - 0.3) / 0.7
+				fin.Part.Transparency = 0
+				if fin.Kind == "mound" then
+					-- the hump of earth over the mole, travelling exactly where he is and turned the way he is going
+					-- it heaves with each scoop of his claws, so it reads as something alive moving under there
+					local heave = 0.08 * h * sin(st.Phase * 2) * w
+					fin.Part.CFrame = CFrame.new(pos.X, FLOOR_Y - h / 2 + h * 0.85 * rise + heave, pos.Z) * CFrame.Angles(0, yaw + pi / 2, 0.04 * sin(st.Phase * 2) * w)
+					fin.Spray.Rate = 34 * w * rise
+					fin.Bubbles.Rate = 18 * w * rise
+					fin.Wake.CFrame = CFrame.new(pos.X, FLOOR_Y + 0.12, pos.Z) * CFrame.Angles(0, yaw, 0)
+					fin.Foam.Enabled = w > 0.2
+				else
+					-- the fin banks into a turn, like the body under it
+					fin.Part.CFrame = CFrame.new(pos.X, WATER_Y - h / 2 + h * 0.85 * rise, pos.Z) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(0, 0, st.Lean * 1.5)
+					fin.Spray.Rate = 22 * w * rise
+					fin.Bubbles.Rate = 10 * w * rise
+					if w > 0.3 and t >= fin.Next then
+						fin.Next = t + 0.2
+						ripple(pos - look * fin.Part.Size.Z * 0.3, rig.Scale * 1.0, 1.1)
+					end
+				end
+			else
+				fin.Part.Transparency = 1
+				fin.Spray.Rate, fin.Bubbles.Rate = 0, 0
+				if fin.Foam then
+					fin.Foam.Enabled = false
+				end
+			end
+			-- the mole going in, head first: earth thrown up as his nose hits the floor
+			if fin.Kind == "mound" and st.ActName == "taunt" and st.ActAge and st.ActAge > 0.36 and fin.DugAt ~= st.ActAt then
+				fin.DugAt = st.ActAt
+				fin.Spray:Emit(45)
+				fin.Bubbles:Emit(40)
+			end
+			-- breaking the surface: a burst of spray and a ring on the water for the shark, thrown earth for the mole
+			if fresh and act == "grab" then
+				fin.Spray:Emit(40)
+				fin.Bubbles:Emit(30)
+				if fin.Kind ~= "mound" then
+					ripple(pos, rig.Scale * 2.4, 1.2)
+					ripple(pos, rig.Scale * 1.3, 0.8)
+				end
+			end
+		end
+
+		-- a high-level guard's catch lands with its own effect, on the thief it caught
+		if fresh and act == "grab" and K.CATCH[st.Key] then
+			local me = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local at = pos + look * rig.Scale * 1.5
+			if me and V(me.Position.X - pos.X, 0, me.Position.Z - pos.Z).Magnitude < 90 then
+				at = me.Position
+			end
+			catchFx(K.CATCH[st.Key], at, rig.Scale)
+		end
+
+		-- the flying and floating ones hum while they move
+		local a = st.Audio
+		if a and a.Loop and dist <= NEAR then
+			local def, lp = K.SOUNDS[a.Prof.Loop[1]], a.Prof.Loop
+			local vol = def.Vol * lp[3] * w * (st.Run >= 0.8 and 1 or 0.7)
+			if vol > 0.01 then
+				a.Loop.Volume = vol
+				a.Loop.PlaybackSpeed = lp[2] * (0.9 + 0.2 * w)
+				if not a.Loop.IsPlaying then
+					a.Loop:Play()
+				end
+			elseif a.Loop.IsPlaying then
+				a.Loop:Stop()
+			end
+		end
+	end
+end
+
+task.spawn(function()
+	local map = workspace:WaitForChild("StealAGameMap", 60)
+	local folder = map and map:WaitForChild("Shopkeepers", 60)
+	if not folder then return end
+	for _, m in ipairs(folder:GetChildren()) do
+		track(m)
+	end
+	folder.ChildAdded:Connect(track)
+	folder.ChildRemoved:Connect(untrack)
+	RunService.PreSimulation:Connect(step)
+end)
