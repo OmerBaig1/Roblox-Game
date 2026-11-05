@@ -36,10 +36,11 @@ return function(t)
 		expect.equal(total, 151 + 120)
 	end)
 
-	t.test("original areas are 3.5 old sublevels long", function()
+	t.test("original areas are 3.5 old sublevels long, shortened to LEVEL_LEN_SCALE", function()
 		for zi = 1, 10 do
 			local z = C.ZONES[zi]
-			expect.equal(C.LEVELS[z.FirstLevel].Len + C.LEVELS[z.LastLevel].Len, 3.5 * C.OLD_SEG_LEN)
+			local len = C.LEVELS[z.FirstLevel].Len + C.LEVELS[z.LastLevel].Len
+			expect.truthy(math.abs(len - 3.5 * C.OLD_SEG_LEN * C.LEVEL_LEN_SCALE) <= 1)
 		end
 	end)
 

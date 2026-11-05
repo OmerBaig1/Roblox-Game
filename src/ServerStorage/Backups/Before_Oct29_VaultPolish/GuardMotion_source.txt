@@ -1,0 +1,328 @@
+--[[
+	GuardMotion: draws every shopkeeper on this screen and plays its running sounds. What each guard does is in
+	ReplicatedStorage.GuardKit (MOTION, AUDIO, and the solver that keeps feet on the floor); this script feeds it.
+
+	The server moves the giants and names what they're doing through attributes: Motion (the guard's key), Chasing,
+	Returning, Act + ActAt (a one-off reaction: "taunt", "grab", "laugh", "whiff"). Every frame, for each guard near the
+	camera:
+	  idle      always running underneath; the head turns toward the nearest player who comes close
+	  gait      blended in by real ground speed with hysteresis (on above MOVE_ON body lengths a second, off below
+	            MOVE_OFF), so a guard standing at its post never runs on the spot. The stride phase advances by the
+	            distance really covered, so feet never slide. Walking home is a calmer version of the chase (s.Run).
+	  lean      into turns and with changes of speed
+	  act       the grab, laugh, whiff or taunt takes over the whole body while it lasts (crossfading from one to the
+	            next) and hands back smoothly when it ends
+	Footfalls land where the stride says a foot comes down; each guard has its own sounds (GuardKit.AUDIO). Nothing
+	plays while a guard stands, laughs or grabs; the floating ones hum only while they move.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local K = require(ReplicatedStorage:WaitForChild("GuardKit"))
+
+local V = Vector3.new
+local sin, abs, pi, clamp, max, min, exp, atan2, floor = math.sin, math.abs, math.pi, math.clamp, math.max, math.min, math.exp, math.atan2, math.floor
+local NEAR = 260 -- studs from the camera within which guards are animated and heard
+local MOVE_ON, MOVE_OFF = 1.2, 0.5 -- body lengths a second
+local ACT_LEN = {grab = 0.6, laugh = 2.0, whiff = 0.55, taunt = 0.9}
+local CROSSFADE = 0.2
+local LOOK_RANGE = 16 -- body lengths: a guard turns its head toward a player this close
+
+local guards = {} -- model -> state
+
+local function actPose(m, name, age, p)
+	if name == "grab" then
+		m.Grab(p, age)
+	elseif name == "laugh" then
+		m.Laugh(p, age)
+	elseif name == "whiff" then
+		K.whiff(p, age)
+	elseif name == "taunt" then
+		K.taunt(p, age)
+	end
+end
+
+------------------------------------------------------------------
+-- SOUND
+------------------------------------------------------------------
+local cutToken = {} -- voice -> latest play, so an old cut never stops a newer footfall
+local function makeVoice(def, root)
+	local s = Instance.new("Sound")
+	s.SoundId = "rbxassetid://" .. def.Id
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 18
+	s.RollOffMaxDistance = NEAR
+	s.Volume = 0
+	s.Looped = def.Loop == true
+	s.Parent = root
+	return s
+end
+local function makeAudio(st)
+	local prof = K.AUDIO[st.Key]
+	local root = st.Model.PrimaryPart
+	if not prof or not root then return end
+	local a = {Prof = prof, Pool = {}, Count = 0}
+	local function voices(name)
+		if a.Pool[name] then return end
+		local def = K.SOUNDS[name]
+		a.Pool[name] = {Def = def, Voices = {makeVoice(def, root), makeVoice(def, root)}, I = 1}
+	end
+	if prof.Steps then
+		voices(prof.Steps[1])
+		voices(prof.Steps[2])
+	end
+	if prof.Layer then
+		voices(prof.Layer[1])
+	end
+	if prof.Loop then
+		a.Loop = makeVoice(K.SOUNDS[prof.Loop[1]], root)
+	end
+	st.Audio = a
+end
+local function cut(entry, pitch, volume)
+	local v = entry.Voices[entry.I]
+	entry.I = entry.I % #entry.Voices + 1
+	local def = entry.Def
+	v.PlaybackSpeed = pitch * (0.95 + math.random() * 0.1)
+	v.Volume = def.Vol * volume
+	v.TimePosition = def.Off or 0
+	v:Play()
+	local token = (cutToken[v] or 0) + 1
+	cutToken[v] = token
+	local len = (def.Len or 0.6) / v.PlaybackSpeed
+	task.delay(len, function()
+		if cutToken[v] == token then
+			v:Stop()
+		end
+	end)
+end
+local function footfall(st, loud)
+	local a = st.Audio
+	if not a or not a.Prof.Steps then return end
+	a.Count += 1
+	local prof = a.Prof
+	cut(a.Pool[prof.Steps[a.Count % 2 + 1]], prof.Pitch, prof.Vol * loud)
+	local layer = prof.Layer
+	if layer and a.Count % layer[4] == 0 then
+		cut(a.Pool[layer[1]], layer[2], layer[3] * loud)
+	end
+end
+local function silence(st)
+	local a = st.Audio
+	if a and a.Loop and a.Loop.IsPlaying then
+		a.Loop:Stop()
+	end
+end
+
+------------------------------------------------------------------
+-- TRACKING
+------------------------------------------------------------------
+local function track(model)
+	if guards[model] or not model:IsA("Model") then return end
+	guards[model] = {Model = model, Phase = 0, MoveW = 0, ActW = 0, Speed = 0, Moving = false, Seed = math.random() * 100,
+		Run = 1, Lean = 0, Pitch = 0, Look = V(), Out = {}}
+end
+local function untrack(model)
+	local st = guards[model]
+	if st and st.Rig then
+		for _, j in pairs(st.Rig.J) do
+			if j.Parent then
+				j.Transform = CFrame.identity
+			end
+		end
+	end
+	if st and st.Audio then
+		for _, e in pairs(st.Audio.Pool) do
+			for _, v in ipairs(e.Voices) do
+				v:Destroy()
+			end
+		end
+		if st.Audio.Loop then
+			st.Audio.Loop:Destroy()
+		end
+	end
+	guards[model] = nil
+end
+
+-- the nearest player's root for each guard, refreshed a few times a second (heads turn toward people nearby)
+local lookTargets = {}
+task.spawn(function()
+	while true do
+		local roots = {}
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local r = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+			if r then
+				table.insert(roots, r)
+			end
+		end
+		for model, st in pairs(guards) do
+			local root = model.PrimaryPart
+			local best, bestD = nil, (st.Rig and st.Rig.Scale or 4) * 5.2 * LOOK_RANGE
+			if root then
+				for _, r in ipairs(roots) do
+					local d = (r.Position - root.Position).Magnitude
+					if d < bestD then
+						best, bestD = r, d
+					end
+				end
+			end
+			lookTargets[model] = best
+		end
+		task.wait(0.3)
+	end
+end)
+
+------------------------------------------------------------------
+-- EVERY FRAME
+------------------------------------------------------------------
+local function step(dt)
+	local cam = workspace.CurrentCamera
+	local camPos = cam and cam.CFrame.Position or Vector3.zero
+	local now = workspace:GetServerTimeNow()
+	local t = os.clock()
+	for model, st in pairs(guards) do
+		local root = model.Parent and model.PrimaryPart
+		if not root then
+			continue
+		end
+		if (root.Position - camPos).Magnitude > NEAR then
+			st.Far = true
+			silence(st)
+			continue
+		end
+		if not st.Rig then
+			st.Rig = K.measure(model)
+			st.Key = model:GetAttribute("Motion")
+			if not st.Rig then
+				continue
+			end
+			makeAudio(st)
+		end
+		local rig = st.Rig
+		local m = K.MOTION[st.Key] or K.MOTION.brutus
+		local body = rig.Scale * 5.2 -- one body length in studs
+
+		-- how far they really moved since last frame (a teleport home or a stream-in doesn't count)
+		local pos = root.Position
+		local moved = st.Last and V(pos.X - st.Last.X, 0, pos.Z - st.Last.Z).Magnitude or 0
+		st.Last = pos
+		if st.Far or moved > 600 * dt + 20 then
+			moved = 0
+			st.Far = false
+		end
+		local speed = moved / max(dt, 1 / 240) / body
+		local before = st.Speed
+		st.Speed += (speed - st.Speed) * (1 - exp(-dt * 10))
+		if st.Moving and st.Speed < MOVE_OFF then
+			st.Moving = false
+		elseif not st.Moving and st.Speed > MOVE_ON then
+			st.Moving = true
+		end
+		st.MoveW += ((st.Moving and 1 or 0) - st.MoveW) * (1 - exp(-dt * 7))
+		st.Run += ((model:GetAttribute("Returning") and 0.6 or 1) - st.Run) * (1 - exp(-dt * 3))
+
+		-- stride phase from distance travelled; a footfall each time it passes the foot's landing point
+		local foot = m.Foot or pi / 2
+		local beforePhase = st.Phase
+		st.Phase += moved / (m.Stride * rig.Scale) * 2 * pi
+		if st.Moving and floor((st.Phase - foot) / pi) ~= floor((beforePhase - foot) / pi) then
+			footfall(st, st.Run >= 0.8 and 1 or 0.7)
+			model:SetAttribute("StepTick", (model:GetAttribute("StepTick") or 0) + 1)
+		end
+
+		-- turning and speeding up lean the body (into the turn, forward when accelerating)
+		local look = root.CFrame.LookVector
+		local yaw = atan2(-look.X, -look.Z)
+		local yawRate = st.Yaw and ((yaw - st.Yaw + pi) % (2 * pi) - pi) / max(dt, 1 / 240) or 0
+		st.Yaw = yaw
+		st.Lean += (clamp(yawRate * st.Speed * 0.05, -0.2, 0.2) * st.MoveW - st.Lean) * (1 - exp(-dt * 6))
+		local accel = (st.Speed - before) / max(dt, 1 / 240)
+		st.Pitch += (clamp(-accel * 0.03, -0.12, 0.08) - st.Pitch) * (1 - exp(-dt * 5))
+
+		local s = {T = t + st.Seed, Run = st.Run}
+		local pose = K.newPose()
+		m.Idle(pose, t + st.Seed)
+		if st.MoveW > 0.01 then
+			local gp = K.newPose()
+			m.Gait(gp, st.Phase, s)
+			K.blend(pose, gp, st.MoveW)
+		end
+		pose.Root += V(st.Pitch, 0, st.Lean)
+
+		-- the head turns toward the nearest player (while standing; a chasing guard faces its target anyway)
+		local target = lookTargets[model]
+		local want = V()
+		if target and target.Parent then
+			local d = root.CFrame:PointToObjectSpace(target.Position)
+			local flat = math.sqrt(d.X * d.X + d.Z * d.Z)
+			want = V(clamp(atan2(d.Y - body * 0.6, flat) * 0.6, -0.3, 0.25), clamp(atan2(-d.X, -d.Z), -0.9, 0.9), 0)
+		end
+		st.Look += (want - st.Look) * (1 - exp(-dt * 3))
+
+		-- one-off reactions take over the body, crossfading from one to the next
+		local act = model:GetAttribute("Act")
+		local at = model:GetAttribute("ActAt") or 0
+		if ACT_LEN[act] and (act ~= st.ActName or at ~= st.ActAt) then
+			if st.ActName and st.ActW > 0.05 then
+				st.Prev, st.PrevAge, st.PrevT = st.ActName, st.ActAge, t
+			end
+			st.ActName, st.ActAt = act, at
+		end
+		local on = false
+		if st.ActName then
+			if act == st.ActName and at == st.ActAt then
+				st.ActAge = max(0, now - at)
+				on = st.ActAge < ACT_LEN[act]
+			end
+			st.ActW += ((on and 1 or 0) - st.ActW) * (1 - exp(-dt * (on and 16 or 5)))
+			if st.ActW > 0.005 then
+				local ap = K.newPose()
+				actPose(m, st.ActName, st.ActAge, ap)
+				if st.Prev and t - st.PrevT < CROSSFADE then
+					local pp = K.newPose()
+					actPose(m, st.Prev, st.PrevAge, pp)
+					K.blend(pp, ap, K.ease((t - st.PrevT) / CROSSFADE))
+					ap = pp
+				end
+				K.blend(pose, ap, st.ActW)
+			else
+				st.ActName = nil
+			end
+		end
+		pose.Neck += st.Look * (1 - st.MoveW) * (1 - st.ActW)
+
+		local tr = K.solve(rig, pose, st.Out)
+		for key, joint in pairs(rig.J) do
+			joint.Transform = tr[key]
+		end
+
+		-- the floating ones hum while they move
+		local a = st.Audio
+		if a and a.Loop then
+			local def, lp = K.SOUNDS[a.Prof.Loop[1]], a.Prof.Loop
+			local vol = def.Vol * lp[3] * st.MoveW * (st.Run >= 0.8 and 1 or 0.7)
+			if vol > 0.01 then
+				a.Loop.Volume = vol
+				a.Loop.PlaybackSpeed = lp[2] * (0.9 + 0.2 * st.MoveW)
+				if not a.Loop.IsPlaying then
+					a.Loop:Play()
+				end
+			elseif a.Loop.IsPlaying then
+				a.Loop:Stop()
+			end
+		end
+	end
+end
+
+task.spawn(function()
+	local map = workspace:WaitForChild("StealAGameMap", 60)
+	local folder = map and map:WaitForChild("Shopkeepers", 60)
+	if not folder then return end
+	for _, m in ipairs(folder:GetChildren()) do
+		track(m)
+	end
+	folder.ChildAdded:Connect(track)
+	folder.ChildRemoved:Connect(untrack)
+	RunService.PreSimulation:Connect(step)
+end)

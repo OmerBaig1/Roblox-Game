@@ -77,4 +77,13 @@ return function(t)
 		local huge = {Position = V(0, 10, 0), Size = V(8, 10, 60)}
 		expect.equal(GC.reach(C, CFrame.new(0, 8, 0), huge), C.GUARD_REACH_MAX)
 	end)
+	t.test("the backstop: a runner the guard has reached or passed is in contact, one pulling clear is not", function()
+		local v = V(0, 0, -170)
+		expect.truthy(GC.contact(REACH, V(0, 10, -38), V(0, 3, 0), v)) -- run past, 38 studs ahead
+		expect.truthy(GC.contact(REACH, V(0, 10, 5), V(0, 3, 0), v)) -- right behind
+		expect.falsy(GC.contact(REACH, V(0, 10, 40), V(0, 3, 0), v)) -- still chasing, not there yet
+		expect.falsy(GC.contact(REACH, V(0, 10, -40), V(0, 3, 0), Z)) -- standing still, far away
+		expect.truthy(GC.escapeGap(C, REACH, v, 0) > 38) -- the lead a fast chase settles at doesn't count as an escape
+		expect.near(GC.escapeGap(C, REACH, Z, 0), REACH, 1e-6)
+	end)
 end

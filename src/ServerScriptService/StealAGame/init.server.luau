@@ -1179,7 +1179,67 @@ end)
 Pets.init({Kit = Kit, fmt = fmt, lobby = workspace:FindFirstChild("StealAGameMap") and workspace.StealAGameMap:FindFirstChild("Lobby"), cf = world.HatcheryCF})
 
 local function guardLabelText(g)
-	return string.format('<font color="#%s">%s</font> <font color="#ffffff">• %s</font>', C.LEVELS[g.Level].Accent:ToHex(), string.upper(g.Name), string.upper(g.Title))
+	return string.upper(g.Name)
+end
+
+-- The card over a guard's head: name (level colour), title, and the level's recommended speed, on a dark backing so
+-- it reads against any wall. Sized in studs from the guard's own scale, so a giant gets a sign a giant deserves and it
+-- shrinks with distance like the guard does (readable to ~200 studs).
+local function guardCard(g, adornee, offsetY)
+	local s = g.Scale
+	local accent = C.LEVELS[g.Level].Accent
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "GuardCard"
+	bb.Size = UDim2.fromScale(s * 6.2, s * 2.1)
+	bb.StudsOffset = Vector3.new(0, offsetY + s * 1.05, 0)
+	bb.LightInfluence = 0
+	bb.MaxDistance = 260
+	bb.Adornee = adornee
+	local back = Instance.new("Frame")
+	back.AnchorPoint = Vector2.new(0.5, 0)
+	back.Position = UDim2.fromScale(0.5, 0)
+	back.Size = UDim2.fromScale(1, 0.74)
+	back.BackgroundColor3 = Color3.fromRGB(16, 14, 24)
+	back.BackgroundTransparency = 0.25
+	back.Parent = bb
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.22, 0)
+	corner.Parent = back
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = accent
+	stroke.Thickness = 3
+	stroke.Parent = back
+	local function text(parent, pos, size, str, color)
+		local t = Instance.new("TextLabel")
+		t.AnchorPoint = Vector2.new(0.5, 0.5)
+		t.Position = pos
+		t.Size = size
+		t.BackgroundTransparency = 1
+		t.TextScaled = true
+		t.RichText = true
+		t.Font = Enum.Font.FredokaOne
+		t.TextColor3 = color
+		t.TextStrokeTransparency = 0.2
+		t.Text = str
+		t.Parent = parent
+		return t
+	end
+	local name = text(back, UDim2.fromScale(0.5, 0.36), UDim2.fromScale(0.92, 0.5), string.upper(g.Name), accent:Lerp(Color3.new(1, 1, 1), 0.35))
+	text(back, UDim2.fromScale(0.5, 0.78), UDim2.fromScale(0.86, 0.3), string.upper(g.Title), Color3.fromRGB(225, 225, 235))
+	-- the speed chip hangs under the card
+	local chip = Instance.new("Frame")
+	chip.AnchorPoint = Vector2.new(0.5, 0)
+	chip.Position = UDim2.fromScale(0.5, 0.78)
+	chip.Size = UDim2.fromScale(0.62, 0.22)
+	chip.BackgroundColor3 = Color3.fromRGB(16, 14, 24)
+	chip.BackgroundTransparency = 0.25
+	chip.Parent = bb
+	local cc = corner:Clone()
+	cc.CornerRadius = UDim.new(0.5, 0)
+	cc.Parent = chip
+	text(chip, UDim2.fromScale(0.5, 0.5), UDim2.fromScale(0.9, 0.8), 'RECOMMENDED SPEED  <font color="#78ff8c">\u{1F45F} ' .. Kit.fmt(g.MustBeat) .. "</font>", Color3.fromRGB(200, 200, 220))
+	bb.Parent = adornee
+	return name
 end
 
 for level = 1, C.NUM_LEVELS do
@@ -1198,8 +1258,13 @@ for level = 1, C.NUM_LEVELS do
 		g.RealSpeed = C.realSpeed(g.Points)
 		g.MustBeat = C.recommendedSpeed(level) -- speed points, the exact number on the level's sign
 		-- how far its hands reach (its body's front + a grab, capped) and how briskly it walks home
-		g.Reach = GuardCatch.reach(C, root.CFrame, model:FindFirstChild("Torso"))
+		local R = Guards.ROSTER[level]
+		g.Reach = GuardCatch.reach(C, root.CFrame, model:FindFirstChild("Torso"), scale)
 		g.Standoff = GuardCatch.standoff(GuardCatch.front(root.CFrame, model:FindFirstChild("Torso")))
+		if R.Front then
+			g.Reach = R.Reach
+			g.Standoff = GuardCatch.standoff(R.Front * scale)
+		end
 		g.ReturnSpeed = math.clamp(g.RealSpeed * C.GUARD_RETURN_FACTOR, C.GUARD_RETURN_MIN, C.GUARD_RETURN_MAX) * (Guards.ROSTER[level].Pace or 1)
 		g.IdleText = guardLabelText(g)
 		-- float the name above the tallest hat/helmet piece (a Toy Soldier's shako and plume covered it)
@@ -1213,8 +1278,10 @@ for level = 1, C.NUM_LEVELS do
 				end
 			end
 		end
-		g.Label = Kit.billboard(head or root, 420, 96, top + 2.2, g.IdleText, 160)
-		g.Label.TextWrapped = false -- one line at every distance (it used to drop the last word when you got close)
+		-- on the root, not the head: the card stays steady while the body dives, flies or bounces, sitting above the
+		-- highest the head ever gets (look.Air)
+		local headY = head and head.Position.Y - root.Position.Y or 0
+		g.Label = guardCard(g, root, headY + top + 1 + (look.Air or 0) * scale)
 		guards[level] = g
 	end)
 end
@@ -1230,15 +1297,13 @@ end
 
 local function setGuardTarget(g, player, now)
 	if g.Target == player then return end
+	g.ContactAt = nil
+	g.ChargePhase = nil
+	g.Model:SetAttribute("Charging", false)
 	if g.Target and g.Target.Parent then
 		chaseEvent:FireClient(g.Target, false)
 	end
 	g.Target = player
-	if g.Grab then
-		-- a lunge in progress ends with the chase
-		g.Grab = nil
-		g.Actions.Act("")
-	end
 	-- the players' games pick the chase gait or the walk home from these
 	g.Model:SetAttribute("Chasing", player ~= nil)
 	if player then
@@ -1268,8 +1333,16 @@ local function catchPlayer(g, player)
 		-- knocked away from the guard's hands, which are right on you: no teleport, the grab only lands in reach
 		knockEvent:FireClient(player, away.Unit * 50 + Vector3.new(0, 30, 0))
 	end
-	g.Actions.Laugh()
-	g.PauseUntil = os.clock() + C.GUARD_LAUGH_TIME
+	-- the catch has already counted; the grab plays now and the laugh follows it
+	g.Actions.Act("grab")
+	local token = {}
+	g.CatchToken = token
+	task.delay(C.GUARD_GRAB_TIME, function()
+		if g.CatchToken == token and not g.Target then
+			g.Actions.Laugh()
+		end
+	end)
+	g.PauseUntil = os.clock() + C.GUARD_GRAB_TIME + C.GUARD_LAUGH_TIME
 end
 
 -- Recovery only (see Config: stuck, out too long, or far away with nobody to see): back at the post in a puff
@@ -1329,18 +1402,12 @@ end
 local catchRay = RaycastParams.new()
 catchRay.FilterType = Enum.RaycastFilterType.Exclude
 catchRay.RespectCanCollide = true
-local function canCatch(g, player, tRoot, slack)
-	local root = g.Root
-	local gp, tp = root.Position, tRoot.Position
-	-- compare feet, since a giant's middle is far above yours
-	if math.abs((tp.Y - 3) - (gp.Y - g.StandY)) >= 6 then
-		return false
-	end
-	local ping = player:GetNetworkPing()
-	local shown = GuardCatch.shown(g.Hist, os.clock() - GuardCatch.delay(C, ping)) or gp
-	if not GuardCatch.inReach(C, g.Reach, gp, shown, tp, tRoot.AssemblyLinearVelocity, ping, slack) then
-		return false
-	end
+-- compare feet, since a giant's middle is far above yours: a jump over its head doesn't clear a body this tall
+local function feetLevel(g, tp)
+	return math.abs((tp.Y - 3) - (g.Root.Position.Y - g.StandY)) < g.Scale * 3
+end
+-- nothing solid between them: a wall or pier, not a low prop (a shelf or crate) a giant reaches straight over
+local function clearBetween(gp, tp)
 	local ignore = {world.GuardsFolder}
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p.Character then
@@ -1349,8 +1416,37 @@ local function canCatch(g, player, tRoot, slack)
 	end
 	catchRay.FilterDescendantsInstances = ignore
 	local from = Vector3.new(gp.X, tp.Y, gp.Z)
-	return workspace:Raycast(from, tp - from, catchRay) == nil
+	local hit = workspace:Raycast(from, tp - from, catchRay)
+	return hit == nil or hit.Instance.Size.Y < 12
 end
+local function canCatch(g, player, tRoot, slack)
+	local root = g.Root
+	local gp, tp = root.Position, tRoot.Position
+	if not feetLevel(g, tp) then
+		return false
+	end
+	local ping = player:GetNetworkPing()
+	local shown = GuardCatch.shown(g.Hist, os.clock() - GuardCatch.delay(C, ping)) or gp
+	if not GuardCatch.inReach(C, g.Reach, gp, shown, tp, tRoot.AssemblyLinearVelocity, ping, slack) then
+		return false
+	end
+	return clearBetween(gp, tp)
+end
+
+-- The player's own game says what its screen really shows: the guard chasing them is this close. The server only checks
+-- the claim is possible (lying can only get you caught sooner).
+Kit.event("GuardGap").OnServerEvent:Connect(function(player, level, gap)
+	if type(level) ~= "number" or type(gap) ~= "number" or gap ~= gap then return end
+	local g = guards[level]
+	local tRoot = getRoot(player)
+	if not g or not tRoot or g.Target ~= player or os.clock() < g.ChaseAt or gap > g.Reach then return end
+	local tp = tRoot.Position
+	local dist = Vector3.new(g.Root.Position.X - tp.X, 0, g.Root.Position.Z - tp.Z).Magnitude
+	local speed = tRoot.AssemblyLinearVelocity.Magnitude + g.Root.AssemblyLinearVelocity.Magnitude
+	if dist <= g.Reach + speed * (0.5 + math.clamp(player:GetNetworkPing(), 0, C.GUARD_LAG_MAX)) and feetLevel(g, tp) and clearBetween(g.Root.Position, tp) then
+		catchPlayer(g, player)
+	end
+end)
 
 local function updateGuard(g, now)
 	local root, hum = g.Root, g.Humanoid
@@ -1427,6 +1523,28 @@ local function updateGuard(g, now)
 			turnToward(g, tRoot.Position, 0.05)
 			return
 		end
+		-- A charger (the Minotaur) goes in bursts: wind-up standing still, a charge well above its normal speed, a recovery,
+		-- and again. Averaged over a cycle that is about its normal speed; the catch check below runs through all of it.
+		local chargeMul = 1
+		if Guards.ROSTER[g.Level].Charge then
+			local phase = g.ChargePhase
+			if not phase or now >= g.ChargeUntil then
+				if phase == "windup" then
+					phase, g.ChargeUntil = "charge", now + C.GUARD_CHARGE_TIME
+					g.Model:SetAttribute("Charging", true)
+					g.Actions.Act("")
+				elseif phase == "charge" then
+					phase, g.ChargeUntil = "recover", now + 0.6
+					g.Model:SetAttribute("Charging", false)
+					g.Actions.Act("recover")
+				else
+					phase, g.ChargeUntil = "windup", now + 0.9
+					g.Actions.Act("windup")
+				end
+				g.ChargePhase = phase
+			end
+			chargeMul = phase == "charge" and C.GUARD_CHARGE_BOOST or phase == "recover" and 0.45 or 0
+		end
 		-- slower than the level's recommended speed: the shopkeeper always out-runs you.
 		-- Judged on speed points, not WalkSpeed: WalkSpeed is a float32 (a player exactly at the
 		-- recommended speed read a hair under it) and is capped at MAX_REAL_SPEED.
@@ -1441,39 +1559,40 @@ local function updateGuard(g, now)
 		-- out of reach). The lunge adds a burst of speed while the hands go out
 		local tVel = tRoot.AssemblyLinearVelocity
 		local standoff = g.Standoff * math.clamp(1 - Vector3.new(tVel.X, 0, tVel.Z).Magnitude / 60, 0, 1)
-		if g.Grab then
-			speed *= C.GUARD_LUNGE_BOOST
-			standoff -= 1
-		end
 		-- momentum: from standing to full speed over GUARD_ACCEL_TIME
-		g.SpeedNow = approach(g.SpeedNow or 0, speed, speed * 0.05 / C.GUARD_ACCEL_TIME)
+		-- a charge launches off the mark instead of building up
+		g.SpeedNow = approach(g.SpeedNow or 0, speed * chargeMul, speed * math.max(chargeMul, 1) * 0.05 / (chargeMul > 1 and 0.15 or C.GUARD_ACCEL_TIME))
 		hum.WalkSpeed = g.SpeedNow
 		-- run at where you'll be by the time this movement reaches your screen, stopping just in front of you (the
 		-- giant's body never runs through you)
 		local aim = GuardCatch.aim(C, tRoot.Position, tRoot.AssemblyLinearVelocity, t:GetNetworkPing())
 		local to = Vector3.new(aim.X - root.Position.X, 0, aim.Z - root.Position.Z)
-		if to.Magnitude > standoff then
+		if chargeMul == 0 then
+			hum:MoveTo(root.Position)
+			turnToward(g, tRoot.Position, 0.08)
+		elseif to.Magnitude > standoff then
 			hum:MoveTo(insideHall(aim - to.Unit * standoff))
 		else
 			hum:MoveTo(root.Position)
 			turnToward(g, tRoot.Position, 0.05)
 		end
-		if g.Grab then
-			-- mid-lunge: the hands arrive GRAB_TIME after it began. Still in reach = caught; slipped away = a stumble
-			if now - g.Grab >= C.GUARD_GRAB_TIME then
-				g.Grab = nil
-				if canCatch(g, t, tRoot, C.GUARD_GRAB_SLACK) then
-					catchPlayer(g, t)
-				else
-					-- a stumble: it loses speed and can't grab again until it has recovered, but keeps coming
-					g.Actions.Act("whiff")
-					g.NoGrabUntil = now + C.GUARD_WHIFF_TIME
-					g.SpeedNow = speed * 0.4
-				end
+		-- in reach = caught, this tick (the grab pose plays afterwards, it never decides anything)
+		if canCatch(g, t, tRoot, 1) then
+			catchPlayer(g, t)
+		else
+			-- the backstop (GuardCatch): the guard has really reached or passed them, and they haven't truly got away
+			local ping = t:GetNetworkPing()
+			local gp, tp, tv = root.Position, tRoot.Position, tRoot.AssemblyLinearVelocity
+			local gap = Vector3.new(gp.X - tp.X, 0, gp.Z - tp.Z).Magnitude
+			local escape = GuardCatch.escapeGap(C, g.Reach, tv, ping)
+			if gap > escape then
+				g.ContactAt = nil
+			elseif GuardCatch.contact(g.Reach, gp, tp, tv) then
+				g.ContactAt = g.ContactAt or now
 			end
-		elseif now >= (g.NoGrabUntil or 0) and canCatch(g, t, tRoot, 1) then
-			g.Grab = now
-			g.Actions.Act("grab")
+			if g.ContactAt and now - g.ContactAt >= GuardCatch.contactTime(C, ping) and feetLevel(g, tp) and clearBetween(gp, tp) then
+				catchPlayer(g, t)
+			end
 		end
 	else
 		g.Label.Text = g.IdleText

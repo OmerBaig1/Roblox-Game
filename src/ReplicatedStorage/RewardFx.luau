@@ -38,11 +38,11 @@ local function tween(obj, t, props, style, dir)
 	return tw
 end
 
--- smaller screens get a smaller card (phones), big screens never blow it up
+-- the same share of the screen at any size (phones get a floor; it used to stop at 1, so it shrank on 1440p)
 local function screenScale()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-	return math.clamp(math.min(vp.X / 1100, vp.Y / 720), 0.62, 1)
+	return math.clamp(math.min(vp.X / 1100, vp.Y / 800), 0.62, 2)
 end
 
 local toastQueue, toasting = {}, false

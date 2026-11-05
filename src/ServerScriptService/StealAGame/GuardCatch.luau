@@ -14,8 +14,16 @@
 	          guard) and the server's (where they are now to where the guard really is). Lag never makes a reach
 	          longer - the server's gap is only allowed the distance the guard itself really covered in that moment.
 	  aim     the guard runs at where the player will be when its movement reaches their screen
-	  reach   the front of the guard's body plus an arm's grab, from its measured size, capped (a huge model never
-	          reaches further than C.GUARD_REACH_MAX)
+	  reach   the front of the guard's body plus an arm's grab, from its measured size, at least what its arms can
+	          reach for its scale, capped (a huge model never reaches further than C.GUARD_REACH_MAX)
+
+	What used to let a runner get away with the guard on top of them: all of the above is an ESTIMATE of the player's
+	screen, and its error grows with speed (0.05 s off at 200 studs/s is 10 studs). The guard, aiming at where the player
+	will be, overtook them and settled just outside that estimate for as long as they kept running. So now:
+	  the client reports the gap it really shows (GuardGap remote), which ends any argument about the screen
+	  contact    the server's own backstop, needing nothing from the client: once the guard has really reached or passed
+	             the player, the catch lands after contactTime (well after any honest report would have) unless they
+	             have genuinely pulled away (escapeGap) by then
 ]]
 
 local GC = {}
@@ -34,8 +42,25 @@ function GC.front(rootCF, torso)
 end
 
 -- the front of the body + a grab, capped
-function GC.reach(C, rootCF, torso)
-	return math.min(GC.front(rootCF, torso) + C.GUARD_GRAB_MARGIN, C.GUARD_REACH_MAX)
+function GC.reach(C, rootCF, torso, scale)
+	return math.min(math.max(GC.front(rootCF, torso) + C.GUARD_GRAB_MARGIN, (scale or 0) * C.GUARD_REACH_PER_SCALE), C.GUARD_REACH_MAX)
+end
+
+-- has the guard really reached the player, or run past them? (true positions, no estimates)
+function GC.contact(reach, gp, tp, tv)
+	local gap = flat(gp - tp)
+	return gap.Magnitude <= reach or (flat(tv).Magnitude > 1 and gap:Dot(flat(tv)) > 0)
+end
+
+-- how far ahead or behind a guard that made contact can be before the player has truly got away
+function GC.escapeGap(C, reach, tv, ping)
+	return reach + flat(tv).Magnitude * (GC.delay(C, ping) + C.PLAYER_INTERP_DELAY + math.clamp(ping or 0, 0, C.GUARD_LAG_MAX)) * 1.3
+end
+
+-- how long the backstop waits. Contact on the server reaches the screen only once the guard has closed the lag gap, which
+-- measured 1.2-1.5 s (L15 and L30); a working client has reported the catch by then, so this only ever meets a client that isn't reporting
+function GC.contactTime(C, ping)
+	return 2.5 + math.clamp(ping or 0, 0, C.GUARD_LAG_MAX)
 end
 
 -- where a guard closing in should stop: just in front of you (its centre never runs through you)

@@ -1,8 +1,8 @@
 {
   "properties": {
+    "Disabled": true,
     "SerializedOverrides": {
       "BinaryString": ""
-    },
-    "Disabled": true
+    }
   }
 }

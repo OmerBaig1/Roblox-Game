@@ -501,7 +501,7 @@ function K.stage(parent, W, H)
 		local cam = workspace.CurrentCamera
 		local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
 		local inset = GuiService:GetGuiInset().Y
-		s.Scale = math.min(vp.X / W, (vp.Y - inset) / H, 1.25)
+		s.Scale = math.min(vp.X / W, (vp.Y - inset) / H, 2)
 		fit.Position = UDim2.new(0.5, 0, 0.5, inset / 2)
 	end
 	refit()

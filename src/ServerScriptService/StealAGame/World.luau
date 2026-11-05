@@ -125,6 +125,10 @@ function World.build(C, Kit)
 	-- the client tutorial points players here
 	map:SetAttribute("VaultEntrance", ENTRANCE)
 	map:SetAttribute("HallWidth", C.ROOM_W)
+	-- where each level starts (and the hall's end), for the client's per-level atmosphere (VaultMood)
+	local startList = table.clone(starts)
+	table.insert(startList, hallEnd)
+	map:SetAttribute("LevelStarts", game:GetService("HttpService"):JSONEncode(startList))
 	map.Parent = workspace
 	W.Map = map
 	local function folder(name)
@@ -838,7 +842,9 @@ function World.build(C, Kit)
 		sg.Face = Enum.NormalId.Front
 		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 		sg.PixelsPerStud = ppsd
-		sg.LightInfluence = 0.2
+		-- wall art takes the level's light (VaultMood): a poster must not glow like a lamp in the midnight crypt.
+		-- Signs (level names, recommended speed) use their own full-bright guis and stay readable
+		sg.LightInfluence = 0.85
 		sg.MaxDistance = 260
 		sg.Parent = p
 		return sg
@@ -959,10 +965,54 @@ function World.build(C, Kit)
 		end
 	end
 
+	-- Gothic levels (the Haunted Crypt, the Vampire Vault): instead of pictures, the walls are lined with recessed stone
+	-- niches under pointed arches, each with a ledge, an urn and one candle burning in the level's light. They stand
+	-- where the posters and wall pieces would (0.13..0.87 of the length), between the pilasters.
+	local function buildNiches(parent, L, z0, half)
+		local T = L.Theme
+		local stone = T.Trim
+		local shadow = T.WallColor:Lerp(DARK, 0.6)
+		local flame = T.Accent:Lerp(Color3.new(1, 1, 1), 0.35)
+		for _, side in ipairs({-1, 1}) do
+			for k, f in ipairs({0.13, 0.26, 0.38, 0.5, 0.62, 0.74, 0.87}) do
+				local cf = wallCF(side, 24, z0 + L.Len * f, half)
+				local function at(x, y, z)
+					return cf * CFrame.new(x, y, z)
+				end
+				decoPart(parent, {Name = "NicheBack", Size = Vector3.new(10, 22, 0.3), CFrame = at(0, 0, -0.2), Color = shadow, Material = M.Slate})
+				for _, sx in ipairs({-1, 1}) do
+					decoPart(parent, {Name = "NicheColumn", Size = Vector3.new(1.4, 22, 1.4), CFrame = at(sx * 5.7, 0, -0.75), Color = stone, Material = M.Granite})
+					-- the two halves of the pointed arch meet over the middle
+					decoPart(parent, {Name = "NicheArch", Size = Vector3.new(1.4, 8.3, 1.4), CFrame = at(sx * 2.85, 14, -0.75) * CFrame.Angles(0, 0, sx * 0.76), Color = stone, Material = M.Granite})
+				end
+				decoPart(parent, {Name = "NicheKeystone", Size = Vector3.new(1.6, 1.8, 1.8), CFrame = at(0, 17.2, -0.8), Color = stone:Lerp(Color3.new(1, 1, 1), 0.15), Material = M.Granite})
+				decoPart(parent, {Name = "NicheLedge", Size = Vector3.new(8, 0.6, 1.8), CFrame = at(0, -6, -1), Color = stone, Material = M.Granite})
+				if k % 2 == 1 then
+					-- an urn on the ledge
+					decoPart(parent, {Name = "NicheUrn", Shape = Enum.PartType.Ball, Size = Vector3.new(2.2, 2.6, 2.2), CFrame = at(1.6, -4.4, -1.1), Color = shadow:Lerp(stone, 0.5), Material = M.Slate})
+					decoPart(parent, {Name = "NicheUrn", Size = Vector3.new(1.2, 0.5, 1.2), CFrame = at(1.6, -3, -1.1), Color = stone, Material = M.Granite})
+				end
+				-- one candle, and its light
+				decoPart(parent, {Name = "NicheCandle", Size = Vector3.new(0.5, 1.6, 0.5), CFrame = at(-1.6, -4.9, -1.2), Color = rgb(225, 215, 190), Material = M.SmoothPlastic})
+				local wick = decoPart(parent, {Name = "NicheFlame", Shape = Enum.PartType.Ball, Size = Vector3.new(0.35, 0.55, 0.35), CFrame = at(-1.6, -3.85, -1.2), Color = flame, Material = M.Neon})
+				local light = Instance.new("PointLight")
+				light.Color = flame
+				light.Range = 14
+				light.Brightness = 0.9
+				light.Shadows = false
+				light.Parent = wick
+			end
+		end
+	end
+
 	-- Posters of the level's games and themed pieces on both walls, and a frieze of the area's pictures up top
 	local function buildWallArt(parent, L, z0, half)
 		local zi = L.ZoneIndex
 		local T = L.Theme
+		if T.Gothic then
+			buildNiches(parent, L, z0, half)
+			return
+		end
 		local art = ZONE_ART[zi] or ZONE_ART[1]
 		local top, bottom = T.Accent:Lerp(Color3.new(1, 1, 1), 0.45), T.WallColor:Lerp(DARK, 0.35)
 		local frameColor = T.Trim
@@ -1205,6 +1255,11 @@ function World.build(C, Kit)
 			part(decor, {Name = "RunnerEdge", Size = Vector3.new(1, 0.14, len), CFrame = CFrame.new(sx * 13.5, 0.27, zMid), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
 			part(decor, {Name = "FloorBorder", Size = Vector3.new(6, 0.1, len), CFrame = CFrame.new(sx * (half - 3), 0.24, zMid), Color = T.FloorColor:Lerp(DARKEN, 0.25), Material = T.Floor, CanCollide = false})
 		end
+		-- a flooded deck (Black Flag Fortress): shallow sea water over the planks, wall to wall. The hammerhead swims
+		-- under it (GuardMotion draws its fin on this surface, WATER_Y = 0.42)
+		if T.Flooded then
+			part(decor, {Name = "FloodWater", Size = Vector3.new(half * 2, 0.1, len), CFrame = CFrame.new(0, 0.37, zMid), Color = rgb(38, 104, 122), Material = M.Glass, Transparency = 0.45, Reflectance = 0.12, CanCollide = false, CanQuery = false, CastShadow = false})
+		end
 		for bz = 12.5, len - 5, 25 do
 			part(decor, {Name = "Inlay", Size = Vector3.new(half * 2 - 12, 0.1, 1.2), CFrame = CFrame.new(0, 0.235, z0 + bz), Color = T.FloorColor:Lerp(T.Trim, 0.55), Material = M.SmoothPlastic, CanCollide = false})
 		end
@@ -1222,11 +1277,11 @@ function World.build(C, Kit)
 			part(decor, {Name = "AccentBand", Size = Vector3.new(0.5, 2, len), CFrame = CFrame.new(sx * (half - 0.15), 40, zMid), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
 			part(seg, {Name = "WallCap", Size = Vector3.new(6, 2.4, len), CFrame = CFrame.new(sx * (half + 1.5), C.WALL_H + 1.2, zMid), Color = T.Trim, Material = M.SmoothPlastic})
 			part(decor, {Name = "Cornice", Size = Vector3.new(1.6, 1.4, len), CFrame = CFrame.new(sx * (half - 0.6), C.WALL_H - 1.2, zMid), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
-			local pi = 0
-			for pz = 17.5, len - 10, 35 do
-				pi += 1
-				local pzw = z0 + pz
-				part(decor, {Name = "Pilaster", Size = Vector3.new(1.6, C.WALL_H - 14, 3.6), CFrame = CFrame.new(sx * (half - 0.6), 13 + (C.WALL_H - 14) / 2, pzw), Color = T.WallColor:Lerp(T.Trim, 0.5), Material = T.Wall, CanCollide = false})
+			-- pilasters stand in the gaps between the wall art (buildWallArt: posters and pieces at 0.13..0.87 of the
+			-- length), so a frame never runs into one whatever the level's length
+			for pi, f in ipairs({0.04, 0.195, 0.32, 0.44, 0.56, 0.68, 0.805, 0.96}) do
+				local pzw = z0 + len * f
+				part(decor, {Name = "Pilaster", Size = Vector3.new(1.6, C.WALL_H - 16, 3.6), CFrame = CFrame.new(sx * (half - 0.6), 15 + (C.WALL_H - 16) / 2, pzw), Color = T.WallColor:Lerp(T.Trim, 0.5), Material = T.Wall, CanCollide = false})
 				part(decor, {Name = "Capital", Size = Vector3.new(2.4, 1.6, 4.6), CFrame = CFrame.new(sx * (half - 1), C.WALL_H - 2.6, pzw), Color = T.Trim, Material = M.SmoothPlastic, CanCollide = false})
 				if pi % 3 == 2 then
 					-- a sconce in the level's light colour
@@ -1247,7 +1302,8 @@ function World.build(C, Kit)
 		local lineColor = zoneStart and T.Trim or accent
 		-- the beam sits just under the wall top so its sign is high and clear of the giants; the first level's gate
 		-- stands well inside the vault, so its sign doesn't hang in the entrance doorway
-		local archH = zoneStart and C.WALL_H - 3 or C.WALL_H - 7
+		-- as high as the walls allow: the tallest giants (34 studs) walk under the hanging speed sign
+		local archH = C.WALL_H - 1
 		local gz = z0 + (level == 1 and 30 or 0)
 		local outer = math.max(half, prevHalf)
 		for _, sx in ipairs({-1, 1}) do
@@ -1261,7 +1317,7 @@ function World.build(C, Kit)
 		local floorLabel = part(decor, {Name = "FloorLabel", Size = Vector3.new(9, 0.1, 60), CFrame = CFrame.new(0, 0.5, gz + (zoneStart and 17 or 13)) * CFrame.Angles(0, math.pi / 2, 0), Transparency = 1, CanCollide = false})
 		Kit.surfaceText(floorLabel, Enum.NormalId.Top, string.upper(level == 1 and zone.Name or L.Store), Color3.new(1, 1, 1), 20)
 		local signW = zoneStart and half * 2 - 24 or 64
-		local signH = zoneStart and 12 or 8
+		local signH = zoneStart and 10 or 8
 		local signY = archH - 4 - signH / 2 - 1
 		local sign = part(decor, {Name = "LevelSign", Size = Vector3.new(signW, signH, 0.8), CFrame = CFrame.new(0, signY, gz + 0.2), Color = Color3.new(1, 1, 1), CanCollide = false})
 		part(decor, {Name = "LevelSignFrame", Size = Vector3.new(signW + 1.6, signH + 1.6, 0.5), CFrame = CFrame.new(0, signY, gz + 0.6), Color = lineColor:Lerp(DARKEN, 0.15), Material = M.SmoothPlastic, CanCollide = false})
@@ -1271,7 +1327,7 @@ function World.build(C, Kit)
 		do
 			local hangW, hangH = zoneStart and 40 or 34, zoneStart and 9.5 or 8.5
 			local chainTop = signY - signH / 2 - 0.8
-			local chainLen = 2.4
+			local chainLen = 1.4
 			local hy = chainTop - chainLen - hangH / 2
 			for _, cx in ipairs({-hangW / 2 + 2.5, hangW / 2 - 2.5}) do
 				part(decor, {Name = "SpeedSignChain", Size = Vector3.new(0.3, chainLen + 0.4, 0.3), CFrame = CFrame.new(cx, chainTop - chainLen / 2, gz + 0.4), Color = rgb(70, 70, 80), Material = M.Metal, CanCollide = false})
@@ -1284,7 +1340,7 @@ function World.build(C, Kit)
 			sg.PixelsPerStud = 20
 			sg.LightInfluence = 0
 			sg.Parent = board
-			guiLabel(sg, UDim2.fromScale(0.5, 0.24), UDim2.fromScale(0.9, 0.3), zoneStart and "RECOMMENDED SPEED" or (string.upper(zone.Name) .. " \u{2022} PART 2"), rgb(200, 200, 220))
+			guiLabel(sg, UDim2.fromScale(0.5, 0.24), UDim2.fromScale(0.9, 0.3), "RECOMMENDED SPEED", rgb(200, 200, 220))
 			local num = guiLabel(sg, UDim2.fromScale(0.5, 0.66), UDim2.fromScale(0.9, 0.52), "\u{1F45F} " .. Kit.fmt(C.recommendedSpeed(level)), rgb(120, 255, 140))
 			num.TextStrokeTransparency = 0
 		end
@@ -1349,7 +1405,9 @@ function World.build(C, Kit)
 		end
 
 		-- Checkout counter by the shopkeeper's post (the guard stands at x = -(half - 18), 30% into the level)
-		local px, pz = -(half - 18), z0 + len * 0.3
+		-- 18 studs out: the giants' bodies reach up to ~17 studs in front of their post (Itza's legs and club used to
+		-- stand in the counter, so it looked like it was standing on it)
+		local px, pz = -(half - 18), z0 + len * 0.3 - 11
 		part(decor, {Name = "Counter", Size = Vector3.new(18, 3.6, 3), CFrame = CFrame.new(px, 1.8, pz - 7), Color = T.WallColor:Lerp(rgb(255, 255, 255), 0.2), Material = T.Wall})
 		part(decor, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = CFrame.new(px, 3.8, pz - 7), Color = accent, Material = M.SmoothPlastic})
 		part(decor, {Name = "Register", Size = Vector3.new(2, 1.4, 1.6), CFrame = CFrame.new(px - 5, 4.6, pz - 7), Color = rgb(40, 40, 45), Material = M.Metal})

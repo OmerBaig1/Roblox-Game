@@ -6,6 +6,7 @@
 ]]
 
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local UI = {}
 UI.FONT = Enum.Font.FredokaOne
@@ -378,10 +379,11 @@ function UI.panel(gui, opts)
 end
 
 ------------------------------------------------------------------
--- SCREEN SIZE. The HUD is drawn in pixels for a 2560x1440 screen. Rather than shrinking pieces one by one, each HUD
--- ScreenGui is laid out on a 1440p design canvas that is scaled to the real screen, so every size, gap, position and
--- animation keeps its proportions: about 0.75 at 1080p, 1 at 1440p. Small screens get a floor so text stays
--- readable (a lower one on touch screens, which have less room). Windows (MenuKit) fit themselves to the space left
+-- SCREEN SIZE. The HUD is drawn in pixels on a design canvas about 2000x1200, scaled to the real screen so every
+-- size, gap, position and animation keeps the same SHARE of the screen: 0.9 at 1080p, 1.2 at 1440p, 1.8 at 4K.
+-- (Until Oct 29 it was 1 at 1440p, which made the HUD look small on a real 1440p monitor: the layouts had only ever
+-- been judged in Studio's small viewport, where the floor below made them relatively bigger.) Small screens get a
+-- floor so text stays readable (a lower one on touch screens, which have less room). Windows (MenuKit) fit themselves to the space left
 -- and cap their size by the same scale, so they cover the same share of a 1080p screen as of a 1440p one.
 ------------------------------------------------------------------
 local UserInputService = game:GetService("UserInputService")
@@ -392,7 +394,7 @@ function UI.hudScale()
 		vp = Vector2.new(2560, 1440) -- a minimised window reports a 1x1 viewport
 	end
 	local touch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-	return math.clamp(math.min(vp.Y / 1440, vp.X / 2400), touch and 0.5 or 0.62, 1.15)
+	return math.clamp(math.min(vp.Y / 1200, vp.X / 2000), touch and 0.5 or 0.62, 1.8)
 end
 
 local canvases = {}
@@ -482,70 +484,349 @@ function UI.dot(parent, props)
 end
 
 ------------------------------------------------------------------
--- HUD TILE: the side buttons (Pets, Downloads, Installed). A square tile with real depth - a soft shadow, a darker
--- base the face sinks into when pressed, a face lit from above with a thin light rim, a soft disc behind the icon and
--- a crisp label - instead of a flat block with an outline. States: hover lifts it, press sinks it, active (its window
--- is open) lights the rim and a bar under the label, disabled greys it, and a red count badge sits inside its corner.
--- props: Name, Parent, Size (px), Position, AnchorPoint, LayoutOrder, Color, Text. Returns button, refs
--- {Icon = a square frame to draw the icon in, Text, Badge, BadgeText, setActive(on), setEnabled(on)}.
+-- TILE BUTTON: the big HUD tiles (PETS, DOWNLOADS, INSTALLED). Each is an emblem rather than a flat box: a faceted gem
+-- with a slow orbiting ring, a small turning 3D model standing out of it (a ViewportFrame, like the Play Time gift) and
+-- a ribbon carrying the label. Every tile has its own colours, model and click burst (TILE_STYLES); they share the build.
+-- States: hover lifts it, a click squashes and pops it and fires its burst, active (its window is open) lights a halo
+-- and turns the ribbon white, disabled greys it, and a red count badge sits on its corner.
+-- props: Name, Parent, Size (px), Position, AnchorPoint, LayoutOrder, Text, Style ("pets"/"downloads"/"installed").
+-- Returns button, refs {Text, Badge, BadgeText, Face, setActive(on), setEnabled(on)}.
 ------------------------------------------------------------------
+local function tilePart(model, class, props)
+	local p = Instance.new(class)
+	p.Anchored = true
+	p.CanCollide = false
+	p.TopSurface, p.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.SmoothPlastic
+	for k, v in pairs(props) do
+		p[k] = v
+	end
+	p.Parent = model
+	return p
+end
+-- SpecialMesh spheres don't draw in a ViewportFrame, so these are true Ball parts (always round: sized by the mean)
+local function tileBall(model, x, y, z, sx, sy, sz, color)
+	local d = (sx + sy + sz) / 3
+	return tilePart(model, "Part", {Shape = Enum.PartType.Ball, Size = Vector3.new(d, d, d), CFrame = CFrame.new(x, y, z), Color = color})
+end
+
+-- A burst bit: flies from the tile's centre by (dx, dy) px while spinning and fading, then is gone. All of them are plain
+-- non-Active frames, so they never catch a click, and they fly out to the sides and above: never over the label.
+local function burstBit(fx, size, color, dx, dy, spin, life, round)
+	local bit = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(size.X, size.Y), Rotation = math.random(0, 360),
+		BackgroundColor3 = color, BorderSizePixel = 0, ZIndex = 31, Parent = fx})
+	if round then
+		UI.corner(1, true).Parent = bit
+	end
+	local tw = TweenService:Create(bit, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Position = UDim2.new(0.5, dx, 0.42, dy), Rotation = bit.Rotation + spin, BackgroundTransparency = 1, Size = UDim2.fromOffset(size.X * 0.6, size.Y * 0.6)})
+	tw:Play()
+	tw.Completed:Once(function()
+		bit:Destroy()
+	end)
+	return bit
+end
+-- a shape made of several bars (a tick, a chevron, a paw) flying as one
+local function burstGlyph(fx, build, dx, dy, spin, life, startScale)
+	local g = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, ZIndex = 31, Parent = fx})
+	local s = new("UIScale", {Scale = startScale or 0.5, Parent = g})
+	build(g)
+	TweenService:Create(s, TweenInfo.new(life * 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+	local tw = TweenService:Create(g, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, dx, 0.42, dy), Rotation = spin})
+	tw:Play()
+	task.delay(life * 0.55, function()
+		for _, d in ipairs(g:GetChildren()) do
+			if d:IsA("Frame") then
+				TweenService:Create(d, TweenInfo.new(life * 0.45), {BackgroundTransparency = 1}):Play()
+			end
+		end
+	end)
+	tw.Completed:Once(function()
+		g:Destroy()
+	end)
+end
+local function glyphBar(g, x, y, w, h, rot, color, round)
+	local f = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, y), Size = UDim2.fromScale(w, h), Rotation = rot or 0, BackgroundColor3 = color, BorderSizePixel = 0, ZIndex = 32, Parent = g})
+	if round then
+		UI.corner(1, true).Parent = f
+	end
+end
+local function burstRing(fx, color, grow)
+	local ring = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1, ZIndex = 30, Parent = fx}, {UI.corner(1, true)})
+	local st = new("UIStroke", {Color = color, Thickness = 6, Parent = ring})
+	local info = TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(st, info, {Thickness = 1, Transparency = 1}):Play()
+	local tw = TweenService:Create(ring, info, {Size = UDim2.fromScale(grow, grow)})
+	tw:Play()
+	tw.Completed:Once(function()
+		ring:Destroy()
+	end)
+end
+
+local TILE_STYLES = {
+	-- a paw print that hops; the burst is paws and warm sparks floating up and away
+	pets = {
+		Top = Color3.fromRGB(255, 176, 70), Low = Color3.fromRGB(226, 66, 104), Glow = Color3.fromRGB(255, 214, 120), Chime = 1.25,
+		Build = function(model)
+			local cream, pink = Color3.fromRGB(255, 244, 226), Color3.fromRGB(255, 138, 150)
+			tileBall(model, 0, -0.38, 0, 1.5, 1.22, 0.7, cream)
+			tileBall(model, 0, -0.42, -0.26, 0.92, 0.72, 0.34, pink)
+			for _, t in ipairs({{-0.92, 0.3, 0.52, 0.72}, {-0.34, 0.76, 0.56, 0.78}, {0.34, 0.76, 0.56, 0.78}, {0.92, 0.3, 0.52, 0.72}}) do
+				tileBall(model, t[1], t[2], 0, t[3], t[4], 0.5, cream)
+				tileBall(model, t[1], t[2] + 0.02, -0.2, t[3] * 0.58, t[4] * 0.58, 0.22, pink)
+			end
+		end,
+		Animate = function(t, hot)
+			local hop = math.abs(math.sin(t * (hot and 5 or 2.4))) * (hot and 0.2 or 0.09)
+			return CFrame.new(0, hop, 0) * CFrame.Angles(0.12, math.sin(t * 1.1) * 0.5, math.sin(t * 2.4) * 0.07)
+		end,
+		Burst = function(fx)
+			burstRing(fx, Color3.fromRGB(255, 214, 120), 1.5)
+			local warm = {Color3.fromRGB(255, 196, 80), Color3.fromRGB(255, 120, 150), Color3.fromRGB(255, 244, 226)}
+			for k = 1, 4 do
+				local a = math.rad(-180 + 40 * k + math.random(-8, 8))
+				burstGlyph(fx, function(g)
+					local c = warm[k % 2 + 1]
+					glyphBar(g, 0.5, 0.66, 0.56, 0.5, 0, c, true)
+					glyphBar(g, 0.16, 0.42, 0.22, 0.3, -22, c, true)
+					glyphBar(g, 0.38, 0.2, 0.22, 0.3, -8, c, true)
+					glyphBar(g, 0.62, 0.2, 0.22, 0.3, 8, c, true)
+					glyphBar(g, 0.84, 0.42, 0.22, 0.3, 22, c, true)
+				end, math.cos(a) * math.random(58, 80), math.sin(a) * math.random(58, 80) - 14, math.random(-28, 28), 0.6)
+			end
+			for k = 1, 10 do
+				local a = math.rad(math.random(-205, 25))
+				burstBit(fx, Vector2.new(7, 7), warm[k % #warm + 1], math.cos(a) * math.random(40, 72), math.sin(a) * math.random(40, 72), 90, 0.5, true)
+			end
+		end,
+	},
+	-- an arrow that keeps dropping into its tray; the burst is chevrons and data bits raining down the sides
+	downloads = {
+		Top = Color3.fromRGB(70, 216, 255), Low = Color3.fromRGB(44, 86, 232), Glow = Color3.fromRGB(150, 236, 255), Chime = 1.05,
+		Build = function(model)
+			local white, tray, rim = Color3.fromRGB(245, 252, 255), Color3.fromRGB(28, 44, 120), Color3.fromRGB(120, 230, 255)
+			tilePart(model, "Part", {Size = Vector3.new(2.1, 0.3, 0.9), CFrame = CFrame.new(0, -1.05, 0), Color = tray})
+			tilePart(model, "Part", {Size = Vector3.new(0.3, 0.72, 0.9), CFrame = CFrame.new(-1.05, -0.84, 0), Color = rim})
+			tilePart(model, "Part", {Size = Vector3.new(0.3, 0.72, 0.9), CFrame = CFrame.new(1.05, -0.84, 0), Color = rim})
+			local arrow = Instance.new("Model")
+			arrow.Name = "Arrow"
+			local shaft = tilePart(arrow, "Part", {Name = "Shaft", Size = Vector3.new(0.62, 1.05, 0.5), CFrame = CFrame.new(0, 0.62, 0), Color = white})
+			-- the head: two wedges back to back, flat tops level with the bottom of the shaft
+			tilePart(arrow, "WedgePart", {Size = Vector3.new(0.5, 0.82, 0.72), CFrame = CFrame.new(-0.36, -0.28, 0) * CFrame.Angles(0, math.pi / 2, math.pi), Color = white})
+			tilePart(arrow, "WedgePart", {Size = Vector3.new(0.5, 0.82, 0.72), CFrame = CFrame.new(0.36, -0.28, 0) * CFrame.Angles(0, -math.pi / 2, math.pi), Color = white})
+			arrow.PrimaryPart = shaft
+			arrow.Parent = model
+		end,
+		Animate = function(t, hot, model)
+			local arrow = model:FindFirstChild("Arrow")
+			if arrow then
+				local k = (t * (hot and 1.5 or 0.8)) % 1
+				arrow:PivotTo(CFrame.new(0, 0.62 - 0.38 * math.sin(k * math.pi), 0))
+			end
+			return CFrame.Angles(0.14, math.sin(t * 0.9) * 0.42, 0)
+		end,
+		Burst = function(fx)
+			burstRing(fx, Color3.fromRGB(120, 230, 255), 1.45)
+			for k = 1, 6 do
+				local x = (k - 3.5) * 25
+				burstGlyph(fx, function(g)
+					local c = k % 2 == 0 and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(120, 230, 255)
+					glyphBar(g, 0.3, 0.42, 0.58, 0.2, 45, c, true)
+					glyphBar(g, 0.7, 0.42, 0.58, 0.2, -45, c, true)
+				end, x, math.random(-58, -32) - (3.5 - math.abs(k - 3.5)) * 14, 0, 0.5, 0.7)
+			end
+			for k = 1, 10 do
+				local side = k % 2 == 0 and 1 or -1
+				burstBit(fx, Vector2.new(6, 6), k % 3 == 0 and Color3.new(1, 1, 1) or Color3.fromRGB(90, 200, 255), side * math.random(50, 76), math.random(-46, 40), 0, 0.46)
+			end
+		end,
+	},
+	-- a game cartridge with a green tick; the burst is ticks, gold stars and green confetti
+	installed = {
+		Top = Color3.fromRGB(150, 236, 90), Low = Color3.fromRGB(16, 150, 96), Glow = Color3.fromRGB(190, 255, 150), Chime = 1.5,
+		Build = function(model)
+			local body, label, gold = Color3.fromRGB(232, 238, 246), Color3.fromRGB(30, 54, 92), Color3.fromRGB(255, 202, 72)
+			tilePart(model, "Part", {Size = Vector3.new(1.75, 2.1, 0.42), CFrame = CFrame.new(-0.14, 0.04, 0), Color = body})
+			tilePart(model, "Part", {Size = Vector3.new(1.32, 1.06, 0.06), CFrame = CFrame.new(-0.14, 0.32, -0.23), Color = label})
+			tilePart(model, "Part", {Size = Vector3.new(0.86, 0.1, 0.06), CFrame = CFrame.new(-0.14, 0.52, -0.27), Color = gold})
+			tilePart(model, "Part", {Size = Vector3.new(0.86, 0.1, 0.06), CFrame = CFrame.new(-0.14, 0.26, -0.27), Color = Color3.fromRGB(120, 230, 255)})
+			for k = 0, 4 do
+				tilePart(model, "Part", {Size = Vector3.new(0.17, 0.3, 0.05), CFrame = CFrame.new(-0.74 + k * 0.3, -0.84, -0.22), Color = gold})
+			end
+			tilePart(model, "Part", {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.26, 1.2, 1.2), CFrame = CFrame.new(0.72, -0.56, -0.42) * CFrame.Angles(0, math.pi / 2, 0), Color = Color3.fromRGB(46, 206, 104)})
+			tilePart(model, "Part", {Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 1.42, 1.42), CFrame = CFrame.new(0.72, -0.56, -0.36) * CFrame.Angles(0, math.pi / 2, 0), Color = Color3.new(1, 1, 1)})
+			tilePart(model, "Part", {Size = Vector3.new(0.36, 0.17, 0.08), CFrame = CFrame.new(0.56, -0.6, -0.58) * CFrame.Angles(0, 0, -0.8), Color = Color3.new(1, 1, 1)})
+			tilePart(model, "Part", {Size = Vector3.new(0.68, 0.17, 0.08), CFrame = CFrame.new(0.82, -0.52, -0.58) * CFrame.Angles(0, 0, 0.8), Color = Color3.new(1, 1, 1)})
+		end,
+		Animate = function(t, hot)
+			return CFrame.new(0, math.sin(t * 1.8) * 0.05, 0) * CFrame.Angles(0.1, math.sin(t * (hot and 2.4 or 1)) * 0.46, -0.08)
+		end,
+		Burst = function(fx)
+			burstRing(fx, Color3.fromRGB(190, 255, 150), 1.5)
+			for k = 1, 3 do
+				local a = math.rad(-150 + (k - 1) * 60)
+				burstGlyph(fx, function(g)
+					local c = Color3.fromRGB(120, 255, 130)
+					glyphBar(g, 0.3, 0.62, 0.42, 0.2, 45, c, true)
+					glyphBar(g, 0.62, 0.48, 0.76, 0.2, -50, c, true)
+				end, math.cos(a) * 76, math.sin(a) * 76, 0, 0.58)
+			end
+			for k = 1, 4 do
+				local a = math.rad(-195 + k * 42)
+				burstGlyph(fx, function(g)
+					local c = Color3.fromRGB(255, 214, 80)
+					glyphBar(g, 0.5, 0.5, 0.26, 0.9, 45, c)
+					glyphBar(g, 0.5, 0.5, 0.26, 0.9, -45, c)
+					glyphBar(g, 0.5, 0.5, 0.2, 0.9, 0, c)
+					glyphBar(g, 0.5, 0.5, 0.9, 0.2, 0, c)
+				end, math.cos(a) * math.random(46, 64), math.sin(a) * math.random(46, 64), 90, 0.48, 0.3)
+			end
+			local conf = {Color3.fromRGB(120, 255, 130), Color3.fromRGB(255, 214, 80), Color3.fromRGB(90, 220, 255), Color3.new(1, 1, 1)}
+			for k = 1, 12 do
+				local a = math.rad(math.random(-210, 30))
+				burstBit(fx, Vector2.new(9, 5), conf[k % #conf + 1], math.cos(a) * math.random(45, 78), math.sin(a) * math.random(45, 78) + 10, 300, 0.52)
+			end
+		end,
+	},
+}
+
 function UI.tileButton(props)
 	local size = props.Size or 112
-	local color = props.Color or UI.BLUE
-	local r = math.floor(size * 0.2)
+	local style = TILE_STYLES[props.Style]
 	local btn = new("TextButton", {Name = props.Name, Size = UDim2.fromOffset(size, size), Position = props.Position or UDim2.new(), AnchorPoint = props.AnchorPoint or Vector2.zero,
 		LayoutOrder = props.LayoutOrder or 0, BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = props.Parent})
 	local pop = new("UIScale", {Parent = btn})
-	new("Frame", {Name = "Shadow", Position = UDim2.fromOffset(0, 7), Size = UDim2.fromScale(1, 1), BackgroundColor3 = UI.BLACK, BackgroundTransparency = 0.72, ZIndex = 1, Parent = btn}, {UI.corner(r)})
-	local base = new("Frame", {Name = "Base", Position = UDim2.fromOffset(0, 5), Size = UDim2.fromScale(1, 1), BackgroundColor3 = color:Lerp(UI.BLACK, 0.55), ZIndex = 2, Parent = btn}, {UI.corner(r)})
-	local face = new("Frame", {Name = "Face", Size = UDim2.fromScale(1, 1), BackgroundColor3 = UI.WHITE, ZIndex = 3, Parent = btn}, {UI.corner(r)})
-	local grad = new("UIGradient", {Rotation = 90, Parent = face})
-	local rim = new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = face})
-	-- light across the top of the face
-	new("Frame", {Position = UDim2.fromOffset(5, 4), Size = UDim2.new(1, -10, 0.42, 0), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.82, ZIndex = 4, Parent = face},
-		{UI.corner(r - 4), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(0.1, 1)})})
-	-- a soft disc the icon sits on
-	new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.6, 0.6), BackgroundColor3 = color:Lerp(UI.BLACK, 0.45), BackgroundTransparency = 0.55, ZIndex = 4, Parent = face},
-		{UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 1, Transparency = 0.8})})
-	local icon = new("Frame", {Name = "Icon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.46, 0.46), BackgroundTransparency = 1, ZIndex = 5, Parent = face},
-		{new("UIAspectRatioConstraint", {AspectRatio = 1})})
-	local text = new("TextLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.83), Size = UDim2.new(1, -10, 0, math.floor(size * 0.16)), BackgroundTransparency = 1,
-		Text = props.Text or "", TextColor3 = UI.WHITE, TextScaled = true, FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 5, Parent = face},
-		{new("UIStroke", {Color = color:Lerp(UI.BLACK, 0.65), Thickness = 1.4, Transparency = 0.15})})
-	local bar = new("Frame", {AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -4), Size = UDim2.fromOffset(0, 4), BackgroundColor3 = UI.WHITE, ZIndex = 5, Parent = face}, {UI.corner(1, true)})
-	local badge = new("Frame", {Name = "Badge", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 6), Size = UDim2.fromOffset(26, 26), AutomaticSize = Enum.AutomaticSize.X,
-		BackgroundColor3 = Color3.fromRGB(255, 64, 82), Visible = false, ZIndex = 8, Parent = face},
+	local face = new("Frame", {Name = "Face", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 3, Parent = btn})
+	local function gem(name, scale, y, z)
+		return new("Frame", {Name = name, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.41, y), Size = UDim2.fromScale(scale, scale), Rotation = 45, ZIndex = z, Parent = face}, {UI.corner(math.floor(size * scale * 0.2))})
+	end
+	-- active: a halo round the gem
+	local halo = new("Frame", {Name = "Halo", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.98, 0.98), BackgroundTransparency = 1, ZIndex = 1, Parent = face}, {UI.corner(1, true)})
+	local haloStroke = new("UIStroke", {Color = style.Glow, Thickness = 5, Transparency = 1, Parent = halo})
+	local shadow = gem("Shadow", 0.72, 8, 2)
+	shadow.BackgroundColor3 = UI.BLACK
+	shadow.BackgroundTransparency = 0.68
+	local base = gem("Base", 0.72, 5, 3)
+	local outer = gem("Gem", 0.72, 0, 4)
+	outer.BackgroundColor3 = UI.WHITE
+	local outerGrad = new("UIGradient", {Rotation = 45, Parent = outer}) -- 45 + the gem's own 45 = top to bottom on screen
+	local rim = new("UIStroke", {Color = UI.WHITE, Thickness = 2, Transparency = 0.2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = outer})
+	-- a lighter facet across the upper half, and a dark sunken centre for the model to stand out of
+	local facet = gem("Facet", 0.6, -3, 5)
+	facet.BackgroundColor3 = UI.WHITE
+	facet.BackgroundTransparency = 0.72
+	new("UIGradient", {Rotation = 45, Transparency = NumberSequence.new(0, 1), Parent = facet})
+	local well = gem("Well", 0.47, 0, 6)
+	well.BackgroundColor3 = UI.WHITE
+	local wellGrad = new("UIGradient", {Rotation = 45, Parent = well})
+	-- the slow orbit: one bright arc going round the gem
+	local orbit = new("Frame", {Name = "Orbit", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.41), Size = UDim2.fromScale(0.62, 0.62), BackgroundTransparency = 1, ZIndex = 7, Parent = face}, {UI.corner(1, true)})
+	local orbitStroke = new("UIStroke", {Color = UI.WHITE, Thickness = 2, Parent = orbit})
+	new("UIGradient", {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.15), NumberSequenceKeypoint.new(1, 1)}), Parent = orbitStroke})
+	-- the 3D model
+	local view = new("ViewportFrame", {Name = "Icon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.39), Size = UDim2.fromScale(0.92, 0.92), BackgroundTransparency = 1,
+		Ambient = Color3.fromRGB(205, 205, 205), LightColor = UI.WHITE, LightDirection = Vector3.new(-0.5, -1, 0.7), ZIndex = 8, Parent = face})
+	local model = Instance.new("Model")
+	model.Parent = view
+	style.Build(model)
+	local cam = new("Camera", {FieldOfView = 28, Parent = view})
+	cam.CFrame = CFrame.lookAt(Vector3.new(0, 0.2, -7.4), Vector3.new(0, 0, 0))
+	view.CurrentCamera = cam
+	local parts = {}
+	for _, p in ipairs(model:GetChildren()) do
+		if p:IsA("BasePart") then
+			parts[p] = p.CFrame
+		end
+	end
+	-- the ribbon: tails folded behind, then the label bar over the bottom of the gem
+	for _, sx in ipairs({-1, 1}) do
+		new("Frame", {Name = "Tail", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, sx * size * 0.45, 0.875, 2), Size = UDim2.fromOffset(size * 0.14, size * 0.14), Rotation = 45,
+			BackgroundColor3 = style.Low:Lerp(UI.BLACK, 0.45), ZIndex = 9, Parent = face})
+	end
+	local ribbon = new("Frame", {Name = "Ribbon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.86), Size = UDim2.new(1, 0, 0.235, 0), BackgroundColor3 = UI.WHITE, ZIndex = 10, Parent = face}, {UI.corner(math.floor(size * 0.07))})
+	local ribbonGrad = new("UIGradient", {Rotation = 90, Parent = ribbon})
+	local ribbonRim = new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.25, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ribbon})
+	local text = new("TextLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, -12, 0.74, 0), BackgroundTransparency = 1,
+		Text = props.Text or "", TextColor3 = UI.WHITE, TextScaled = true, FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 11, Parent = ribbon})
+	local textStroke = new("UIStroke", {Color = style.Low:Lerp(UI.BLACK, 0.6), Thickness = 1.4, Transparency = 0.1, Parent = text})
+	local badge = new("Frame", {Name = "Badge", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -2, 0, -2), Size = UDim2.fromOffset(26, 26), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = Color3.fromRGB(255, 64, 82), Visible = false, ZIndex = 20, Parent = face},
 		{UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 2}), new("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}),
 		new("UIGradient", {Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 130, 140), Color3.fromRGB(225, 30, 55))})})
 	local badgeText = new("TextLabel", {Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, Text = "", TextColor3 = UI.WHITE, TextSize = 17,
-		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 9, Parent = badge})
-	local st = {Hover = false, Down = false, Active = false, Enabled = true}
+		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 21, Parent = badge})
+	local fx = new("Frame", {Name = "BurstFx", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 30, Parent = btn})
+
+	local st = {Hover = false, Down = false, Active = false, Enabled = true, Popping = false}
 	local function paint()
-		local c = st.Enabled and color or color:Lerp(Color3.fromRGB(120, 120, 130), 0.75)
-		if st.Hover and st.Enabled then
-			c = c:Lerp(UI.WHITE, 0.08)
+		local top, low = style.Top, style.Low
+		if not st.Enabled then
+			local grey = Color3.fromRGB(120, 120, 130)
+			top, low = top:Lerp(grey, 0.75), low:Lerp(grey, 0.75)
 		end
-		grad.Color = ColorSequence.new(c:Lerp(UI.WHITE, 0.2), c:Lerp(UI.BLACK, 0.12))
-		base.BackgroundColor3 = c:Lerp(UI.BLACK, 0.55)
-		rim.Transparency = st.Active and 0.05 or 0.6
-		rim.Thickness = st.Active and 2.5 or 1.5
+		if st.Hover and st.Enabled then
+			top, low = top:Lerp(UI.WHITE, 0.1), low:Lerp(UI.WHITE, 0.1)
+		end
+		outerGrad.Color = ColorSequence.new(top, low)
+		base.BackgroundColor3 = low:Lerp(UI.BLACK, 0.5)
+		wellGrad.Color = ColorSequence.new(low:Lerp(UI.BLACK, 0.5), low:Lerp(UI.BLACK, 0.2))
+		rim.Transparency = st.Active and 0 or 0.25
+		rim.Thickness = st.Active and 3 or 2
+		ribbonGrad.Color = st.Active and ColorSequence.new(UI.WHITE, style.Glow) or ColorSequence.new(top, low)
+		ribbonRim.Transparency = st.Active and 0 or 0.25
+		text.TextColor3 = st.Active and low:Lerp(UI.BLACK, 0.5) or UI.WHITE
+		textStroke.Transparency = st.Active and 1 or 0.1
 		text.TextTransparency = st.Enabled and 0 or 0.35
-		local lift = st.Down and 4 or (st.Hover and -2 or 0)
+		local lift = st.Down and 3 or (st.Hover and -3 or 0)
 		TweenService:Create(face, TweenInfo.new(st.Down and 0.06 or 0.16, Enum.EasingStyle.Quad), {Position = UDim2.fromOffset(0, lift)}):Play()
-		TweenService:Create(bar, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.fromOffset(st.Active and 26 or 0, 4)}):Play()
-		TweenService:Create(pop, TweenInfo.new(st.Down and 0.06 or 0.2, Enum.EasingStyle.Quad), {Scale = st.Down and 0.97 or 1}):Play()
+		if not st.Popping then
+			TweenService:Create(pop, TweenInfo.new(st.Down and 0.06 or 0.2, Enum.EasingStyle.Quad), {Scale = st.Down and 0.9 or 1}):Play()
+		end
 	end
 	paint()
 	btn.MouseEnter:Connect(function() st.Hover = true paint() end)
 	btn.MouseLeave:Connect(function() st.Hover = false st.Down = false paint() end)
 	btn.MouseButton1Down:Connect(function() if st.Enabled then st.Down = true paint() end end)
 	btn.MouseButton1Up:Connect(function() st.Down = false paint() end)
+	local lastBurst = 0
+	-- Activated covers mouse, touch and gamepad alike. Rapid clicks still open and close the window, but only one burst
+	-- runs at a time (they last about half a second), so they can never pile up.
 	btn.Activated:Connect(function()
 		st.Down = false
-		paint()
 		lastButtonSfx = os.clock() -- the window it opens plays the sound
+		local now = os.clock()
+		if st.Enabled and now - lastBurst > 0.45 then
+			lastBurst = now
+			style.Burst(fx)
+			UI.sfx("sparkle", style.Chime)
+		end
+		st.Popping = true
+		pop.Scale = 0.86
+		local tw = TweenService:Create(pop, TweenInfo.new(0.26, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
+		tw:Play()
+		tw.Completed:Once(function()
+			st.Popping = false
+		end)
+		paint()
 	end)
-	local refs = {Icon = icon, Text = text, Badge = badge, BadgeText = badgeText, Face = face}
+	RunService.RenderStepped:Connect(function()
+		if not UI.shown(btn) then return end
+		local t = os.clock()
+		local hot = st.Hover or st.Active
+		orbit.Rotation = (t * (hot and 110 or 45)) % 360
+		local spin = style.Animate(t, hot, model)
+		for p, cf in pairs(parts) do
+			p.CFrame = spin * cf
+		end
+		local arrow = model:FindFirstChild("Arrow")
+		if arrow then
+			arrow:PivotTo(spin * arrow:GetPivot())
+		end
+		-- the halo breathes while its window is open
+		haloStroke.Transparency = st.Active and 0.35 + 0.25 * math.sin(t * 4) or 1
+		orbitStroke.Thickness = st.Active and 3 or 2
+	end)
+	local refs = {Text = text, Badge = badge, BadgeText = badgeText, Face = face}
 	function refs.setActive(on)
 		st.Active = on
 		paint()

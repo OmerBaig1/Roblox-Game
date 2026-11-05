@@ -272,11 +272,11 @@ C.GUARD_ZONE_JUMP = 1.25        -- ...plus this much every 5 depth steps (depth 
 C.GUARD_IDLE_REAL_SPEED = 20
 -- Walking home after a chase: a deliberate pace from the guard's own speed (times its roster Pace: heavy ones lumber,
 -- nimble ones hurry), only quicker when it's far outside its own level, so it is never gone for long
-C.GUARD_RETURN_FACTOR = 0.45    -- return speed = chase speed x this, kept between MIN and MAX
-C.GUARD_RETURN_MIN = 22
-C.GUARD_RETURN_MAX = 70
-C.GUARD_FAR_DIST = 500          -- further than this from its post, it hurries: the rest of the way in about FAR_TIME s
-C.GUARD_FAR_TIME = 12
+C.GUARD_RETURN_FACTOR = 1.0     -- return speed = chase speed x this, kept between MIN and MAX
+C.GUARD_RETURN_MIN = 80
+C.GUARD_RETURN_MAX = 260
+C.GUARD_FAR_DIST = 120          -- further than this from its post, it hurries: the rest of the way in about FAR_TIME s
+C.GUARD_FAR_TIME = 2.5
 -- Recovery for a guard that can't get home (the only time one ever teleports): stuck in place for STUCK_TIME
 -- (after one jump to get free), out for longer than RETURN_TIMEOUT, or far from home with no player within
 -- UNSEEN_DIST to see it. It vanishes in a puff of smoke and reappears at its post.
@@ -285,15 +285,18 @@ C.GUARD_RETURN_TIMEOUT = 40
 C.GUARD_UNSEEN_DIST = 200
 -- Catching (GuardCatch): a guard must physically reach you. Its reach is the front of its body plus an arm's grab
 -- (never more than REACH_MAX), measured where you are now AND where your own screen shows you both (your ping plus
--- the time the guard's movement takes to reach your screen). Then a GRAB_TIME lunge: if you're still in reach
--- (x GRAB_SLACK) you're caught, otherwise the guard stumbles (slows, and can't grab again for WHIFF_TIME) and keeps coming.
+-- the time the guard's movement takes to reach your screen). In reach = caught on that server tick; the grab and
+-- laugh are only played afterwards (GRAB_TIME is just the length of the grab pose, it never delays the catch).
 C.GUARD_GRAB_MARGIN = 2.5
-C.GUARD_REACH_MAX = 11
+C.GUARD_CHARGE_TIME = 2.6       -- the Minotaur: how long one charge lasts
+C.GUARD_CHARGE_BOOST = 1.6      -- and how much faster than its normal speed
+C.GUARD_REACH_MAX = 13
+C.GUARD_REACH_PER_SCALE = 1.9   -- a giant's hands reach about this many times its scale (an arm is about 2.2)
 C.GUARD_GRAB_TIME = 0.3
 C.GUARD_GRAB_SLACK = 1.15
 C.GUARD_LUNGE_BOOST = 1.15     -- the lunge: a burst of speed while the hands go out
 C.GUARD_WHIFF_TIME = 0.5
-C.GUARD_LAUGH_TIME = 1.9        -- stands laughing this long after a catch, then walks home
+C.GUARD_LAUGH_TIME = 1.2        -- stands laughing this long after a catch, then walks home
 C.GUARD_INTERP_DELAY = 0.18     -- how long behind the server a guard appears on a player's screen, on top of ping (measured)
 C.PLAYER_INTERP_DELAY = 0.16    -- how long behind the player's own screen the server sees them, on top of ping (measured)
 C.GUARD_LAG_MAX = 0.3           -- pings above this count as this (a huge ping never stretches a reach)
@@ -438,6 +441,7 @@ end
 -- WORLD LAYOUT
 ------------------------------------------------------------------
 C.ROOM_W = 120                  -- widest the vault hallway gets (each level sets its own Width, never more)
+C.LEVEL_LEN_SCALE = 0.7         -- every level's playable length is its design Len x this (Oct 29: 30% less running)
 C.OLD_SEG_LEN = 200             -- length of one level in the old 50-level vault (the new lengths are measured against it)
 C.WALL_H = 63                   -- 70% of the old 90, so the sky shows from everywhere inside
 C.ENTRANCE_W = 80
@@ -561,7 +565,7 @@ C.ZONES = {
 		},
 		Levels = {
 			{Name = "Treasure Beach", Len = 350, Width = 120, Theme = {Floor = M.Sand, FloorColor = rgb(240, 214, 150), Wall = M.WoodPlanks, WallColor = rgb(122, 82, 50), Trim = rgb(255, 205, 60), Accent = rgb(60, 170, 220), Light = rgb(255, 240, 200), Props = {"palm", "barrel", "chest"}, Panel = M.Wood}},
-			{Name = "Black Flag Fortress", Len = 350, Width = 112, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(108, 74, 46), Wall = M.Cobblestone, WallColor = rgb(124, 118, 108), Trim = rgb(40, 36, 34), Accent = rgb(200, 40, 40), Light = rgb(255, 190, 120), Props = {"anchor", "barrel", "cannon"}, Panel = M.Slate}},
+			{Name = "Black Flag Fortress", Len = 350, Width = 112, Theme = {Floor = M.WoodPlanks, FloorColor = rgb(108, 74, 46), Wall = M.Cobblestone, WallColor = rgb(124, 118, 108), Trim = rgb(40, 36, 34), Accent = rgb(200, 40, 40), Light = rgb(255, 190, 120), Props = {"anchor", "barrel", "cannon"}, Panel = M.Slate, Flooded = true}},
 		},
 	},
 	{
@@ -574,8 +578,8 @@ C.ZONES = {
 			{"Vampire Vault", {"Vampire Thrivers", "Floodborne", "Vampurr"}},
 		},
 		Levels = {
-			{Name = "Haunted Game Crypt", Len = 350, Width = 116, Theme = {Floor = M.Slate, FloorColor = rgb(92, 88, 112), Wall = M.Granite, WallColor = rgb(118, 108, 140), Trim = rgb(70, 64, 84), Accent = rgb(120, 255, 120), Light = rgb(160, 255, 170), Props = {"tombstone", "pumpkin", "ghost"}, Panel = M.Cobblestone}},
-			{Name = "Vampire Vault", Len = 350, Width = 120, Theme = {Floor = M.Marble, FloorColor = rgb(70, 24, 34), Wall = M.Fabric, WallColor = rgb(118, 22, 42), Trim = rgb(220, 180, 80), Accent = rgb(230, 40, 70), Light = rgb(255, 120, 120), Props = {"candelabra", "ghost", "tombstone"}, Panel = M.Wood}},
+			{Name = "Haunted Game Crypt", Len = 350, Width = 116, Theme = {Floor = M.Slate, FloorColor = rgb(58, 56, 66), Wall = M.Granite, WallColor = rgb(66, 62, 74), Trim = rgb(92, 88, 96), Accent = rgb(120, 255, 150), Light = rgb(150, 230, 170), Props = {"tombstone", "candelabra", "urn"}, Panel = M.Cobblestone, Gothic = true}},
+			{Name = "Vampire Vault", Len = 350, Width = 120, Theme = {Floor = M.Marble, FloorColor = rgb(70, 24, 34), Wall = M.Fabric, WallColor = rgb(118, 22, 42), Trim = rgb(220, 180, 80), Accent = rgb(230, 40, 70), Light = rgb(255, 120, 120), Props = {"candelabra", "column", "urn"}, Panel = M.Wood, Gothic = true}},
 		},
 	},
 	{
@@ -782,7 +786,7 @@ for zi, zone in ipairs(C.ZONES) do
 		end
 		table.insert(C.LEVELS, {
 			Index = i, Zone = zone, ZoneIndex = zi, Sub = si, Store = lv.Name, Games = games, Depth = depth,
-			Len = lv.Len, Width = math.min(lv.Width, C.ROOM_W), Theme = lv.Theme,
+			Len = math.floor(lv.Len * C.LEVEL_LEN_SCALE + 0.5), Width = math.min(lv.Width, C.ROOM_W), Theme = lv.Theme,
 			IncomeBase = C.INCOME_BASE * C.AREA_STEP ^ (zi - 1) * C.SUB_STEP ^ (si - 1),
 			InstallBase = C.INSTALL_BASE * C.INSTALL_GROWTH ^ (depth - 1),
 			Accent = lv.Theme.Accent,

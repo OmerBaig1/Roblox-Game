@@ -24,14 +24,15 @@ return function(t)
 		end
 	end)
 
-	-- runs a pose and checks the result: finite, and the lowest point exactly on the floor plus the pose's own air
+	-- runs a pose and checks the result: finite, and the lowest point exactly on the floor plus the pose's own air,
+	-- minus its Sink (the only deliberate way under the floor: the shark and the mole, burrowing)
 	local function check(r, label, fn)
 		local p = K.newPose()
 		fn(p)
 		local tr, lift = K.solve(r.Rig, p)
 		local R = tr.Root - tr.Root.Position
-		local low = K.lowest(r.Rig, R, {LH = tr.LH, RH = tr.RH}) + tr.Root.Position.Y
-		local air = math.max(p.Off.Y, 0) * r.Rig.Scale
+		local low = K.lowest(r.Rig, R, {LH = tr.LH, RH = tr.RH}, {LS = tr.LS, RS = tr.RS}, {LK = tr.LK, RK = tr.RK}) + tr.Root.Position.Y
+		local air = (math.max(p.Off.Y, 0) - (p.Sink or 0)) * r.Rig.Scale
 		if low ~= low or math.abs(low - (r.Rig.Rest + air)) > 1e-3 then
 			error(string.format("%s %s: lowest point %.3f, floor %.3f", r.Key, label, low, r.Rig.Rest + air))
 		end
@@ -87,5 +88,52 @@ return function(t)
 				end
 			end
 		end
+	end)
+	t.test("Kage's katana: palm on the handle from the grip on, blade never in his torso or head", function()
+		local model = game:GetService("ServerStorage").GuardModels.L13:Clone()
+		local rig = K.measure(model)
+		local M = K.MOTION.kage
+		local d = K.drawSetup(model, rig, M.Carry)
+		local blade, torso, head = model.Gear_Katana, model.Torso, model.Head
+		local function inside(sword, cf, part)
+			for i = -6, 6 do
+				local pt = cf:PointToObjectSpace(sword * Vector3.new(0, i / 6 * blade.Size.Y / 2, 0))
+				local h = part.Size * 0.4
+				if math.abs(pt.X) < h.X and math.abs(pt.Y) < h.Y and math.abs(pt.Z) < h.Z then
+					return true
+				end
+			end
+			return false
+		end
+		local function check(pose)
+			local tr = K.solve(rig, pose)
+			local neck = rig.C0.Neck * tr.Neck * rig.C1i.Neck
+			for p = 0, 1, 0.02 do
+				local rs, el, sword = K.draw(d, tr.RS, p)
+				expect.falsy(inside(sword, CFrame.identity, torso) or inside(sword, neck, head))
+				if p >= 0.3 then
+					local palm = (d.C0 * rs * d.C1i * d.EC0 * el * d.EC1i) * d.Hand
+					expect.truthy((palm - sword * d.HandleOff).Magnitude < 0.02)
+				end
+			end
+		end
+		for x = 0, 6, 0.4 do
+			local g, i = K.newPose(), K.newPose()
+			M.Gait(g, x, {T = 0, Run = 1})
+			M.Idle(i, x)
+			check(g)
+			check(i)
+		end
+		for a = 0, 0.6, 0.06 do
+			local g = K.newPose()
+			M.Grab(g, a)
+			check(g)
+		end
+		for a = 0, 2, 0.2 do
+			local l = K.newPose()
+			M.Laugh(l, a)
+			check(l)
+		end
+		model:Destroy()
 	end)
 end

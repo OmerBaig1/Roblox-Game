@@ -1,0 +1,144 @@
+--[[
+	VaultMood: each vault level's own light. The vault is open to the sky, so on its own every level shared the same
+	sunny early afternoon (a Haunted Crypt in bright daylight). As you walk from level to level this eases the time of
+	day, the ambient light, the haze and a colour grade to that level's mood, and back to the lobby's look when you
+	leave the vault. Only this screen's Lighting changes; the server's settings (World) are the lobby look and are
+	read once at the start, so nothing is lost.
+
+	MOOD[level] (levels without one keep the lobby look):
+	  Clock    time of day (0 = midnight: the night sky and stars)    Bright   sun brightness
+	  Amb/Out  Ambient / OutdoorAmbient                               Tint, Sat, Con, Exp   colour grade (Exp: a small brightness lift so night levels stay readable)
+	  Haze     Atmosphere density (0 = clear, ~0.5 = thick fog) in AtmoColor
+]]
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+
+local MOOD = {
+	-- 4 Pirate Cove / Black Flag Fortress: a storm rolling in at dusk over the flooded deck
+	[8] = {Clock = 17.2, Bright = 2.4, Amb = rgb(130, 140, 155), Out = rgb(150, 160, 180), Tint = rgb(236, 240, 250), Sat = -0.08, Con = 0.06, Haze = 0.18, AtmoColor = rgb(120, 140, 160)}, -- late-afternoon storm light: moody but readable (it was too dark)
+	-- 5 Haunted Crypt: midnight, a cold green fog, colour drained out
+	[9] = {Clock = 0, Bright = 1.5, Amb = rgb(135, 160, 150), Out = rgb(150, 180, 168), Tint = rgb(190, 240, 210), Sat = -0.35, Con = 0.18, Exp = 0.06, Haze = 0.3, AtmoColor = rgb(60, 95, 80)},
+	-- Vampire Vault: a crimson night
+	[10] = {Clock = 0.5, Bright = 1.5, Exp = 0.05, Amb = rgb(130, 85, 115), Out = rgb(150, 100, 135), Tint = rgb(245, 212, 228), Sat = -0.12, Con = 0.22, Haze = 0.25, AtmoColor = rgb(70, 15, 40)},
+	-- 6 Cyber City: neon night
+	[11] = {Clock = 22, Bright = 1.5, Exp = 0.05, Amb = rgb(100, 95, 150), Out = rgb(120, 110, 180), Tint = rgb(220, 215, 255), Sat = 0.25, Con = 0.15, Haze = 0.15, AtmoColor = rgb(70, 50, 120)},
+	[12] = {Clock = 21, Bright = 1.5, Exp = 0.05, Amb = rgb(130, 90, 140), Out = rgb(160, 110, 170), Tint = rgb(255, 215, 240), Sat = 0.3, Con = 0.15, Haze = 0.15, AtmoColor = rgb(120, 50, 110)},
+	-- 7 Ninja Dojo at dusk; the Cherry Blossom Garden on a soft pink morning
+	[13] = {Clock = 17.7, Bright = 2.0, Amb = rgb(110, 85, 70), Out = rgb(150, 115, 95), Tint = rgb(255, 228, 205), Sat = 0, Con = 0.1, Haze = 0.15, AtmoColor = rgb(170, 110, 80)},
+	[14] = {Clock = 8, Bright = 2.6, Amb = rgb(150, 130, 140), Out = rgb(200, 175, 190), Tint = rgb(255, 232, 242), Sat = 0.1, Con = 0, Haze = 0.25, AtmoColor = rgb(255, 205, 225)},
+	-- 8 Robot Factory: hard industrial light
+	[15] = {Clock = 13, Bright = 2.4, Amb = rgb(120, 118, 110), Out = rgb(150, 148, 140), Tint = rgb(245, 242, 230), Sat = -0.15, Con = 0.12, Haze = 0.12, AtmoColor = rgb(140, 130, 110)},
+	-- 9 Dragon's Lair: an ember-lit evening, smoke in the air
+	[17] = {Clock = 17.6, Bright = 2.2, Amb = rgb(125, 105, 95), Out = rgb(150, 125, 110), Tint = rgb(255, 240, 228), Sat = 0, Con = 0.1, Haze = 0.18, AtmoColor = rgb(120, 70, 45)}, -- a warm evening, not a red wash: the walls are already crimson
+	[18] = {Clock = 18.6, Bright = 1.9, Amb = rgb(130, 95, 80), Out = rgb(155, 115, 95), Tint = rgb(255, 236, 222), Sat = 0.05, Con = 0.14, Haze = 0.22, AtmoColor = rgb(140, 65, 30)},
+	-- 10 Outer Space: night and stars
+	[19] = {Clock = 0, Bright = 1.5, Exp = 0.05, Amb = rgb(150, 160, 195), Out = rgb(170, 180, 220), Tint = rgb(225, 232, 255), Sat = 0, Con = 0.1, Haze = 0, AtmoColor = rgb(60, 70, 110)},
+	[20] = {Clock = 23, Bright = 1.5, Exp = 0.05, Amb = rgb(120, 100, 160), Out = rgb(140, 120, 190), Tint = rgb(235, 220, 255), Sat = 0.1, Con = 0.12, Haze = 0.1, AtmoColor = rgb(80, 50, 120)},
+	-- 11 Sunken Atlantis: light filtering down through water
+	[21] = {Clock = 12, Bright = 1.8, Amb = rgb(70, 130, 150), Out = rgb(90, 160, 180), Tint = rgb(195, 235, 255), Sat = -0.05, Con = 0.05, Haze = 0.5, AtmoColor = rgb(40, 120, 150)},
+	[22] = {Clock = 12, Bright = 2.0, Amb = rgb(80, 145, 165), Out = rgb(110, 175, 195), Tint = rgb(205, 240, 255), Sat = 0.05, Con = 0.05, Haze = 0.45, AtmoColor = rgb(50, 140, 165)},
+	-- 12 Desert: a hot haze; the Tomb of Ra in torchlit dusk
+	[23] = {Clock = 15.5, Bright = 3, Amb = rgb(160, 135, 100), Out = rgb(200, 170, 130), Tint = rgb(255, 238, 205), Sat = 0.05, Con = 0.05, Haze = 0.25, AtmoColor = rgb(220, 180, 120)},
+	[24] = {Clock = 19, Bright = 1.4, Amb = rgb(115, 80, 50), Out = rgb(145, 100, 65), Tint = rgb(255, 220, 180), Sat = 0.05, Con = 0.18, Haze = 0.2, AtmoColor = rgb(150, 100, 60)},
+	-- 14 Frozen Tundra: cold and misty
+	[27] = {Clock = 10, Bright = 2.4, Amb = rgb(150, 170, 195), Out = rgb(185, 205, 230), Tint = rgb(225, 238, 255), Sat = -0.1, Con = 0.05, Haze = 0.35, AtmoColor = rgb(215, 232, 255)},
+	[28] = {Clock = 16.8, Bright = 2.0, Amb = rgb(140, 145, 170), Out = rgb(180, 180, 205), Tint = rgb(235, 238, 255), Sat = -0.05, Con = 0.08, Haze = 0.4, AtmoColor = rgb(210, 220, 245)},
+	-- 15 Wild West: golden hour
+	[29] = {Clock = 17.3, Bright = 2.4, Amb = rgb(140, 105, 75), Out = rgb(180, 140, 100), Tint = rgb(255, 228, 192), Sat = 0.05, Con = 0.1, Haze = 0.2, AtmoColor = rgb(210, 160, 100)},
+	[30] = {Clock = 17.8, Bright = 2.0, Amb = rgb(130, 95, 65), Out = rgb(170, 125, 85), Tint = rgb(255, 222, 185), Sat = 0.05, Con = 0.12, Haze = 0.25, AtmoColor = rgb(200, 140, 90)},
+	-- 16 Jungle Temple: humid green haze
+	[31] = {Clock = 14, Bright = 2.2, Amb = rgb(100, 130, 90), Out = rgb(130, 165, 115), Tint = rgb(228, 255, 218), Sat = 0.1, Con = 0.05, Haze = 0.35, AtmoColor = rgb(120, 160, 100)},
+	[32] = {Clock = 16.5, Bright = 1.8, Amb = rgb(95, 115, 80), Out = rgb(125, 150, 105), Tint = rgb(235, 250, 215), Sat = 0.1, Con = 0.1, Haze = 0.35, AtmoColor = rgb(110, 140, 85)},
+	-- 17 Midnight Carnival: lit up at night
+	[33] = {Clock = 21, Bright = 1.5, Exp = 0.05, Amb = rgb(135, 105, 155), Out = rgb(160, 125, 180), Tint = rgb(255, 222, 252), Sat = 0.15, Con = 0.18, Haze = 0.15, AtmoColor = rgb(90, 50, 110)},
+	[34] = {Clock = 21.5, Bright = 1.5, Exp = 0.05, Amb = rgb(140, 100, 140), Out = rgb(165, 120, 165), Tint = rgb(255, 215, 235), Sat = 0.15, Con = 0.18, Haze = 0.15, AtmoColor = rgb(100, 45, 90)},
+	-- 18 Steampunk Skyway: sepia afternoon in the clouds
+	[35] = {Clock = 16.8, Bright = 2.4, Amb = rgb(145, 120, 95), Out = rgb(185, 155, 125), Tint = rgb(255, 232, 198), Sat = -0.2, Con = 0.1, Haze = 0.25, AtmoColor = rgb(200, 170, 130)},
+	[36] = {Clock = 17.5, Bright = 2.0, Amb = rgb(140, 105, 80), Out = rgb(175, 135, 105), Tint = rgb(255, 225, 190), Sat = -0.2, Con = 0.15, Haze = 0.3, AtmoColor = rgb(170, 130, 95)},
+	-- 19 Crystal Caverns: cave dark with violet glow
+	[37] = {Clock = 22, Bright = 1.5, Exp = 0.05, Amb = rgb(160, 145, 190), Out = rgb(180, 160, 210), Tint = rgb(232, 218, 255), Sat = 0.1, Con = 0.15, Haze = 0.25, AtmoColor = rgb(80, 60, 120)},
+	[38] = {Clock = 21, Bright = 1.5, Exp = 0.05, Amb = rgb(160, 135, 190), Out = rgb(190, 160, 220), Tint = rgb(240, 225, 255), Sat = 0.15, Con = 0.12, Haze = 0.2, AtmoColor = rgb(130, 90, 170)},
+	-- 20 Cosmic Nexus: beyond time, under the stars
+	[39] = {Clock = 0, Bright = 1.5, Exp = 0.05, Amb = rgb(145, 170, 180), Out = rgb(160, 195, 200), Tint = rgb(215, 250, 240), Sat = 0, Con = 0.15, Haze = 0.15, AtmoColor = rgb(40, 90, 90)},
+	[40] = {Clock = 23.5, Bright = 1.5, Exp = 0.05, Amb = rgb(135, 125, 110), Out = rgb(165, 150, 130), Tint = rgb(255, 240, 210), Sat = 0.05, Con = 0.2, Haze = 0.1, AtmoColor = rgb(90, 70, 40)},
+}
+
+local map = workspace:WaitForChild("StealAGameMap")
+local starts
+while not starts do
+	local raw = map:GetAttribute("LevelStarts")
+	if raw then
+		starts = HttpService:JSONDecode(raw)
+	else
+		map:GetAttributeChangedSignal("LevelStarts"):Wait()
+	end
+end
+local halfW = (map:GetAttribute("HallWidth") or 120) / 2 + 10
+
+local grade = Instance.new("ColorCorrectionEffect")
+grade.Name = "VaultMood"
+grade.Parent = Lighting
+local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+
+-- the lobby look, as the server set it
+local LOBBY = {Clock = Lighting.ClockTime, Bright = Lighting.Brightness, Amb = Lighting.Ambient, Out = Lighting.OutdoorAmbient,
+	Tint = Color3.new(1, 1, 1), Sat = 0, Con = 0, Exp = 0,
+	Haze = atmosphere and atmosphere.Density or 0, AtmoColor = atmosphere and atmosphere.Color or Color3.new(1, 1, 1)}
+
+local function levelAt(pos)
+	if math.abs(pos.X) > halfW or pos.Z < starts[1] or pos.Z >= starts[#starts] then
+		return nil
+	end
+	for i = 1, #starts - 1 do
+		if pos.Z < starts[i + 1] then
+			return i
+		end
+	end
+end
+
+local current, tweens = false, {}
+local function apply(mood)
+	for _, tw in ipairs(tweens) do
+		tw:Cancel()
+	end
+	local info = TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	-- ClockTime wraps at 24: go the short way round (21 -> 0 runs forward through midnight)
+	local clock = mood.Clock
+	local now = Lighting.ClockTime
+	if clock - now > 12 then
+		clock -= 24
+	elseif now - clock > 12 then
+		clock += 24
+	end
+	tweens = {
+		TweenService:Create(Lighting, info, {ClockTime = clock, Brightness = mood.Bright, Ambient = mood.Amb, OutdoorAmbient = mood.Out}),
+		TweenService:Create(grade, info, {TintColor = mood.Tint, Saturation = mood.Sat, Contrast = mood.Con, Brightness = mood.Exp or 0}),
+	}
+	if atmosphere then
+		table.insert(tweens, TweenService:Create(atmosphere, info, {Density = mood.Haze, Color = mood.AtmoColor}))
+	end
+	for _, tw in ipairs(tweens) do
+		tw:Play()
+	end
+end
+
+while true do
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if root then
+		local level = levelAt(root.Position)
+		local mood = level and MOOD[level] or LOBBY
+		if mood ~= current then
+			current = mood
+			apply(mood)
+		end
+	end
+	task.wait(0.25)
+end
