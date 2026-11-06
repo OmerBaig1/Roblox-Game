@@ -310,6 +310,7 @@ end
 
 -- for the case packaging (CasePackaging draws its back-cover screenshots with the same kit)
 GamePoster.makeKit = makeKit
+GamePoster.tier = rarityTier
 function GamePoster.family(name)
 	return FAMILY[name]
 end

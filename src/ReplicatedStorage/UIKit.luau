@@ -346,6 +346,65 @@ function UI.fancyButton(props)
 	return b, {Icon = icon, Text = text, Badge = badge, BadgeText = badgeText}
 end
 
+-- The main menu's big buttons (SHOP, INDEX): a raised plate on a dark base, a drawn picture breaking out of its top left
+-- corner, and real travel: it lifts on hover, sinks on press, and stays pressed in and rimmed while its window is open.
+-- props: Name, Parent, LayoutOrder, Size, Image, Text, Top, Low (the plate's colours), Ink (its outline)
+function UI.heroButton(props)
+	local H = props.Size.Y.Offset
+	local b = new("TextButton", {Name = props.Name, Size = props.Size, LayoutOrder = props.LayoutOrder or 0, BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = props.Parent})
+	local ink = props.Ink
+	new("Frame", {Name = "Base", Position = UDim2.fromOffset(0, 7), Size = UDim2.fromScale(1, 1), BackgroundColor3 = ink, Parent = b}, {UI.corner(22), new("UIStroke", {Color = ink:Lerp(UI.BLACK, 0.4), Thickness = 3})})
+	local glow = new("Frame", {Name = "ActiveRim", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 3), Size = UDim2.new(1, 12, 1, 18), BackgroundTransparency = 1, Parent = b}, {UI.corner(28)})
+	local glowEdge = new("UIStroke", {Color = Color3.fromRGB(255, 245, 170), Thickness = 4, Transparency = 1, Parent = glow})
+	local face = new("Frame", {Name = "Face", Size = UDim2.fromScale(1, 1), BackgroundColor3 = UI.WHITE, ZIndex = 2, Parent = b}, {UI.corner(22), new("UIStroke", {Color = ink:Lerp(UI.BLACK, 0.25), Thickness = 3.5})})
+	UI.gradient(face, props.Top, props.Low, 100)
+	-- depth: a lit band over the top, a shade along the bottom, a thin bright rim just inside the edge
+	new("Frame", {Position = UDim2.fromOffset(6, 5), Size = UDim2.new(1, -12, 0.42, 0), BackgroundColor3 = UI.WHITE, BackgroundTransparency = 0.68, ZIndex = 3, Parent = face}, {UI.corner(16), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(0.1, 1)})})
+	new("Frame", {AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0.4, 0), BackgroundColor3 = props.Low:Lerp(UI.BLACK, 0.5), ZIndex = 3, Parent = face}, {UI.corner(22), new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new(1, 0.4)})})
+	new("Frame", {Position = UDim2.fromOffset(2, 2), Size = UDim2.new(1, -4, 1, -4), BackgroundTransparency = 1, ZIndex = 3, Parent = face}, {UI.corner(20), new("UIStroke", {Color = UI.WHITE, Thickness = 1.5, Transparency = 0.5})})
+	local icon = new("ImageLabel", {Name = "Picture", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(H * 0.52, H * 0.44), Size = UDim2.fromOffset(H * 1.16, H * 1.16), BackgroundTransparency = 1, Image = props.Image, ScaleType = Enum.ScaleType.Fit, ZIndex = 5, Parent = face})
+	local text = UI.label({Position = UDim2.new(0, H + 8, 0.17, 0), Size = UDim2.new(1, -(H + 18), 0.66, 0), TextXAlignment = Enum.TextXAlignment.Left, Text = props.Text or "", ZIndex = 5, Parent = face})
+	UI.gradient(text, Color3.fromRGB(255, 255, 240), props.TextLow or Color3.fromRGB(255, 225, 130), 90)
+	UI.bounce(b)
+	-- the plate's travel
+	local hovering, pressed, active = false, false, false
+	local function place(t)
+		local y = pressed and 6 or (active and 3 or (hovering and -3 or 0))
+		TweenService:Create(face, TweenInfo.new(t or 0.14, pressed and Enum.EasingStyle.Quad or Enum.EasingStyle.Back), {Position = UDim2.fromOffset(0, y)}):Play()
+	end
+	b.MouseEnter:Connect(function()
+		hovering = true
+		place()
+		-- the picture gives a little shake
+		icon.Rotation = -7
+		TweenService:Create(icon, TweenInfo.new(0.5, Enum.EasingStyle.Elastic), {Rotation = 0}):Play()
+	end)
+	b.MouseLeave:Connect(function()
+		hovering, pressed = false, false
+		place()
+	end)
+	b.MouseButton1Down:Connect(function()
+		pressed = true
+		place(0.05)
+	end)
+	b.MouseButton1Up:Connect(function()
+		pressed = false
+		place()
+	end)
+	b.Activated:Connect(function()
+		icon.Size = UDim2.fromOffset(H * 1.34, H * 1.34)
+		TweenService:Create(icon, TweenInfo.new(0.32, Enum.EasingStyle.Back), {Size = UDim2.fromOffset(H * 1.16, H * 1.16)}):Play()
+	end)
+	local badge = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -6, 0, 6), Size = UDim2.fromOffset(28, 28), BackgroundColor3 = UI.RED, Visible = false, ZIndex = 10, Parent = face}, {UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 2})})
+	local badgeText = UI.label({Size = UDim2.fromScale(1, 1), Text = "!", ZIndex = 11, Parent = badge})
+	local function setActive(on)
+		active = on
+		place()
+		TweenService:Create(glowEdge, TweenInfo.new(0.18), {Transparency = on and 0.05 or 1}):Play()
+	end
+	return b, {Icon = icon, Text = text, Badge = badge, BadgeText = badgeText, SetActive = setActive, Face = face}
+end
+
 -- Coloured panel with a header bar (title + icon + close button)
 function UI.panel(gui, opts)
 	local color = opts.Color or UI.GOLD

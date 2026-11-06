@@ -300,7 +300,11 @@ function K.window(gui, opts)
 		-- a soft light across the top half
 		new("Frame", {Position = UDim2.fromOffset(6, 4), Size = UDim2.new(1, -12, 0.42, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 0.86, BorderSizePixel = 0, ZIndex = 2, Parent = band}, {K.corner(20)})
 		local badge = new("Frame", {Position = UDim2.fromOffset(16, 10), Size = UDim2.fromOffset(48, 48), BackgroundColor3 = WHITE, ZIndex = 3, Parent = band}, {K.corner(), K.stroke(accent:Lerp(BLACK, 0.35), 2.5, 0)})
-		new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = opts.Icon or "", TextScaled = true, ZIndex = 4, Parent = badge}, {new("UIPadding", {PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7), PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7)})})
+		if opts.IconImage then
+			new("ImageLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.92, 0.92), BackgroundTransparency = 1, Image = opts.IconImage, ScaleType = Enum.ScaleType.Fit, ZIndex = 4, Parent = badge})
+		else
+			new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = opts.Icon or "", TextScaled = true, ZIndex = 4, Parent = badge}, {new("UIPadding", {PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7), PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7)})})
+		end
 		local title = K.text({Text = opts.Title, FontFace = K.TITLE, TextSize = 32, Position = UDim2.fromOffset(76, 0), Size = UDim2.new(0, 300, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 3, Parent = band})
 		new("UIStroke", {Color = accent:Lerp(BLACK, 0.6), Thickness = 2, Transparency = 0.25, Parent = title})
 		tools = new("Frame", {Name = "Tools", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -78, 0.5, 0), Size = UDim2.new(1, -460, 0, 40), BackgroundTransparency = 1, ZIndex = 3, Parent = band},
@@ -451,7 +455,11 @@ function K.sideTabs(props)
 		local st = K.stroke(WHITE, 1.5, 0.9)
 		st.Parent = b
 		local bar = new("Frame", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.new(0, 5, 0, 0), BackgroundColor3 = (it.Color or accent):Lerp(WHITE, 0.3), BorderSizePixel = 0, ZIndex = z + 1, Parent = b}, {K.corner()})
-		new("TextLabel", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 12, 0.5, 0), Size = UDim2.fromOffset(30, 30), BackgroundTransparency = 1, Text = it.Icon or "", TextScaled = true, ZIndex = z + 1, Parent = b})
+		if it.Image then
+			new("ImageLabel", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(36, 36), BackgroundTransparency = 1, Image = it.Image, ScaleType = Enum.ScaleType.Fit, ZIndex = z + 1, Parent = b})
+		else
+			new("TextLabel", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 12, 0.5, 0), Size = UDim2.fromOffset(30, 30), BackgroundTransparency = 1, Text = it.Icon or "", TextScaled = true, ZIndex = z + 1, Parent = b})
+		end
 		local lbl = K.text({Text = it.Text, TextSize = props.TextSize or 17, TextColor3 = K.C.Text2, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(50, 0), Size = UDim2.new(1, -112, 1, 0), ZIndex = z + 1, Parent = b})
 		local note = K.text({Text = "", TextSize = 14, TextColor3 = K.C.Muted, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0), Size = UDim2.new(0, 60, 1, 0), ZIndex = z + 1, Parent = b})
 		-- on the icon's corner, like an app badge: clear of the name and the progress note

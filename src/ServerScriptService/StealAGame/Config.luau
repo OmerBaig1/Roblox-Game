@@ -67,6 +67,17 @@ end
 function C.rarityAllowed(level, r)
 	return C.LEVELS[level].ZoneIndex >= (C.RARITIES[r].MinArea or 1)
 end
+-- THE FUSING MACHINE: C.FUSE_COPIES of the same game at the same rarity make one at the next rarity, as far as that
+-- game's own area allows (the same limit the Vault drops by). Returns the next rarity, or nil at the top.
+C.FUSE_COPIES = 3
+C.FUSE_REACH = 60 -- how close to the machine you must stand, in studs (the server checks)
+function C.fuseNext(level, r)
+	local nextR = r + 1
+	if C.RARITIES[nextR] and C.rarityAllowed(level, nextR) then
+		return nextR
+	end
+	return nil
+end
 -- How likely each step up in rarity is, from level 1 (tiny) to level 50 (much better)
 C.RARITY_RATIO_LOW = 0.12
 C.RARITY_RATIO_HIGH = 0.6

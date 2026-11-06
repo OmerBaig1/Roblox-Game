@@ -2042,6 +2042,11 @@ function World.build(C, Kit)
 		local pos = ENTRANCE + Vector3.new(128, 0, -20)
 		W.HatcheryCF = CFrame.lookAt(pos, pos + Vector3.new(1, 0, -1))
 	end
+	-- The Fusing Machine mirrors it, just outside the right console tower, also facing out toward the bases
+	do
+		local pos = ENTRANCE + Vector3.new(-128, 0, -20)
+		W.FuseCF = CFrame.lookAt(pos, pos + Vector3.new(-1, 0, -1))
+	end
 
 	------------------------------------------------------------------
 	-- WHERE THE BASES GO

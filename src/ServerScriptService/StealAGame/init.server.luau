@@ -152,6 +152,14 @@ local held = {}         -- player -> list of {Item, Data, Kind = "own"/"vault"/"
 local guards = {}       -- level -> shopkeeper
 local nextRotation = os.clock() + C.ROTATE_TIME -- when every level gets new games
 local playerData = {}   -- player -> {Upgrades, Trails, TrailEquipped}
+
+-- the player's music volume (0-1), kept in their save
+Kit.event("SetMusicVolume").OnServerEvent:Connect(function(player, volume)
+	local data = playerData[player]
+	if data and type(volume) == "number" and volume == volume then
+		data.MusicVolume = math.clamp(volume, 0, 1)
+	end
+end)
 local friendCache = {}  -- "id1-id2" -> are they friends
 local loadedData = {}   -- player -> true when their save loaded OK
 local fullWarned = {}   -- player -> last "base full" warning time
@@ -391,7 +399,7 @@ end
 
 -- Every game is a boxed release for one of six made-up consoles: CasePackaging builds the whole case (its plastic,
 -- the front cover, its own back cover and the spines) and decides its size
-local CasePackaging = require(script.CasePackaging)
+local CasePackaging = require(ReplicatedStorage:WaitForChild("CasePackaging"))
 local function addPosters(item, rec, hidden)
 	CasePackaging.dress(item, rec, hidden)
 end
@@ -1685,6 +1693,11 @@ local function applyTrail(player)
 	root:SetAttribute("TrailRainbow", nil)
 	root:SetAttribute("TrailBubbles", nil)
 	local idx = player:GetAttribute("TrailEquipped") or 0
+	do -- for the HUD's trail bonus
+		local t = C.TRAILS[idx]
+		player:SetAttribute("TrailName", t and t.Name or nil)
+		player:SetAttribute("TrailHex", t and t.Colors and (t.Colors[2] or t.Colors[1]):ToHex() or nil)
+	end
 	local t = C.TRAILS[idx]
 	if not t then return end
 	local rgb = Kit.rgb
@@ -2677,6 +2690,129 @@ skipFunction.OnServerInvoke = function(player, id)
 end
 
 ------------------------------------------------------------------
+-- THE FUSING MACHINE: three copies of a game at one rarity become one at the next. Copies come only from the player's
+-- own cases and hands, and only the three they picked. Everything from the checks to the new game happens in one go with
+-- no yield, so a disconnect or a second request can't leave anything half done: the animation is only for show.
+------------------------------------------------------------------
+local FuseMachine = require(script.FuseMachine)
+local fuseModel, fusePrompt = FuseMachine.build(Kit, workspace.StealAGameMap:FindFirstChild("Lobby") or workspace.StealAGameMap, world.FuseCF)
+local fuseFunction = Kit.func("FuseGames")
+local openFuseEvent = Kit.event("OpenFuse")
+local fuseCooldown = {}
+fusePrompt.Triggered:Connect(function(player)
+	openFuseEvent:FireClient(player)
+end)
+Players.PlayerRemoving:Connect(function(player)
+	fuseCooldown[player] = nil
+end)
+
+local function findCopy(player, id)
+	local plot = playerPlots[player]
+	if plot then
+		for i = 1, plot.Cases do
+			local slot = plot.Slots[i]
+			if slot and slot.Data and slot.Data.Id == id then
+				return slot.Data, slot, nil
+			end
+		end
+	end
+	for _, e in ipairs(heldList(player)) do
+		-- "own" only: a game stolen and not yet home isn't yours to fuse
+		if e.Kind == "own" and e.Data.Id == id then
+			return e.Data, nil, e
+		end
+	end
+	return nil
+end
+
+fuseFunction.OnServerInvoke = function(player, ids)
+	local data = playerData[player]
+	local plot = playerPlots[player]
+	if not data or not data.Loaded or not plot then
+		return false, "Try again in a moment"
+	end
+	if os.clock() < (fuseCooldown[player] or 0) then
+		return false, "The machine is still charging"
+	end
+	if type(ids) ~= "table" or #ids ~= C.FUSE_COPIES then
+		return false, "Pick " .. C.FUSE_COPIES .. " copies first"
+	end
+	local root = getRoot(player)
+	if not root or (root.Position - world.FuseCF.Position).Magnitude > C.FUSE_REACH then
+		return false, "Go back to the Fusing Machine"
+	end
+	local copies, seen = {}, {}
+	for i = 1, C.FUSE_COPIES do
+		local id = ids[i]
+		if type(id) ~= "string" or seen[id] then
+			return false, "Pick " .. C.FUSE_COPIES .. " different copies"
+		end
+		seen[id] = true
+		local rec, slot, entry = findCopy(player, id)
+		if not rec then
+			return false, "One of those copies isn't yours any more"
+		end
+		copies[i] = {Rec = rec, Slot = slot, Entry = entry}
+	end
+	local first = copies[1].Rec
+	for _, c in ipairs(copies) do
+		if c.Rec.L ~= first.L or c.Rec.G ~= first.G or c.Rec.R ~= first.R then
+			return false, "All three must be the same game at the same rarity"
+		end
+	end
+	local nextR = C.fuseNext(first.L, first.R)
+	if not nextR then
+		return false, first.Name .. " is at its top rarity"
+	end
+
+	-- the new copy first: if building it ever failed, nothing has been taken yet
+	local rec = newGame(first.L, first.G, nextR)
+	-- install progress carries over: three finished copies make a finished game
+	local share = 0
+	for _, c in ipairs(copies) do
+		share += math.clamp(c.Rec.Progress / math.max(c.Rec.InstallTime, 1), 0, 1) / C.FUSE_COPIES
+	end
+	rec.Progress = rec.InstallTime * share
+	rec.Installed = rec.Progress >= rec.InstallTime
+	local item = createItem(rec)
+
+	local target -- the case it goes back in: the first one that gave up a copy
+	local list = heldList(player)
+	local heldChanged = false
+	for _, c in ipairs(copies) do
+		local gone
+		if c.Slot then
+			target = target or c.Slot
+			gone = takeFromSlot(plot, c.Slot)
+		else
+			local at = table.find(list, c.Entry)
+			gone = table.remove(list, at).Item
+			heldChanged = true
+		end
+		if gone then
+			gone:Destroy()
+		end
+	end
+	target = target or freeSlot(plot)
+	if target then
+		placeInSlot(plot, target, item, rec)
+	else
+		table.insert(list, {Item = item, Data = rec, Kind = "own"})
+		markFound(player, rec)
+		heldChanged = true
+	end
+	if heldChanged then
+		syncHeld(player)
+	end
+	fuseCooldown[player] = os.clock() + 1
+	-- every client nearby plays the fusion on the machine
+	fuseModel:SetAttribute("FuseColor", rec.Color:ToHex())
+	fuseModel:SetAttribute("FusedAt", workspace:GetServerTimeNow())
+	return true, {Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color:ToHex(), R = rec.R, Where = target and ("Case " .. target.Index) or "In your hands",
+		Income = math.floor(rec.Income * levelFactor(player, rec))}
+end
+
+------------------------------------------------------------------
 -- AREA COMPLETION REWARDS
 ------------------------------------------------------------------
 local function pushAreas(player)
@@ -2790,6 +2926,7 @@ local function collectSave(player)
 		DailyStreak = data.DailyStreak,
 		StarterBought = data.StarterBought,
 		SeenIntro = data.SeenIntro,
+		MusicVolume = data.MusicVolume,
 		TrailIntroDone = data.TrailIntroDone,
 		Receipts = data.Receipts,
 		LastSpin = data.LastSpin,
@@ -2846,6 +2983,46 @@ if RunService:IsStudio() then
 		return player and grantLockReset(player, info)
 	end
 	devLock.Parent = ServerStorage
+	-- and real copies of a game in empty cases, for the fusing tests; "remove" takes back exactly the copies listed
+	local devCopies = ServerStorage:FindFirstChild("DevFuseCopies") or Instance.new("BindableFunction")
+	devCopies.Name = "DevFuseCopies"
+	devCopies.OnInvoke = function(player, action, name, r, count, installed)
+		local plot = playerPlots[player]
+		if action == "remove" then
+			local n = 0
+			for i = 1, plot.Cases do
+				local slot = plot.Slots[i]
+				if slot and slot.Data and table.find(name, slot.Data.Id) then
+					takeFromSlot(plot, slot):Destroy()
+					n += 1
+				end
+			end
+			return n
+		end
+		local level = C.GAME_LEVEL[name]
+		local gi
+		for i, def in ipairs(C.LEVELS[level].Games) do
+			if def.Name == name then
+				gi = i
+			end
+		end
+		local ids = {}
+		for _ = 1, count do
+			local slot = freeSlot(plot)
+			if not slot then
+				break
+			end
+			local rec = newGame(level, gi, r)
+			if installed then
+				rec.Progress = rec.InstallTime
+				rec.Installed = true
+			end
+			placeInSlot(plot, slot, createItem(rec), rec)
+			table.insert(ids, rec.Id)
+		end
+		return ids, plot.Cases
+	end
+	devCopies.Parent = ServerStorage
 	-- and the real theft / lock steps, for the lock timer tests
 	local devLockTest = ServerStorage:FindFirstChild("DevLockTest") or Instance.new("BindableFunction")
 	devLockTest.Name = "DevLockTest"
@@ -3195,6 +3372,7 @@ local function onPlayerAdded(player)
 			data.DailyStreak = tonumber(saved.DailyStreak)
 			data.StarterBought = saved.StarterBought == true
 			data.SeenIntro = saved.SeenIntro == true
+			data.MusicVolume = tonumber(saved.MusicVolume)
 			-- its own flag: SeenIntro was set the moment the old chat started, so it never meant "finished"
 			data.TrailIntroDone = saved.TrailIntroDone == true
 			data.Receipts = type(saved.Receipts) == "table" and saved.Receipts or {}
@@ -3282,6 +3460,7 @@ local function onPlayerAdded(player)
 	pushAreas(player)
 	Pets.load(player, loadedOK and type(saved) == "table" and saved.Pets or nil)
 	player:SetAttribute("TutorialDone", playerData[player].TutorialDone == true)
+	player:SetAttribute("MusicVolume", playerData[player].MusicVolume or -1) -- -1: never set, use the default
 	task.spawn(checkPasses, player)
 	if not plot then
 		task.delay(3, notify, player, "No free base on this server, sorry!", RED)
@@ -3494,11 +3673,22 @@ task.spawn(function()
 	end
 end)
 
+-- what fusing this copy would make, for the machine's screen (nil at the game's top rarity)
+local function fuseInfo(rec)
+	local nextR = C.fuseNext(rec.L, rec.R)
+	local info = nextR and C.RARITIES[nextR]
+	if not info then
+		return nil
+	end
+	return {Rarity = info.Name, Color = info.Color:ToHex(), Earn = math.floor(C.gameIncome(rec.L, nextR) * (rec.Factor or 1)), Now = math.floor(rec.Income * (rec.Factor or 1))}
+end
+
 local function libraryEntry(rec, where)
 	local tier = not rec.Installed and skipTier(rec)
 	return {
 		Id = rec.Id, SkipRobux = tier and tier.Steps * C.SKIP_ROBUX_PER_STEP or nil,
 		Name = rec.Name, Rarity = rec.Rarity, Color = rec.Color:ToHex(), Level = rec.L, Where = where,
+		R = rec.R, Fuse = fuseInfo(rec),
 		Income = rec.Installed and math.floor(rec.Income * (rec.Factor or 1)) or nil,
 		Progress = math.floor(rec.Progress), InstallTime = rec.InstallTime,
 		-- in your hands: not installing (that only happens in a case), just waiting for one

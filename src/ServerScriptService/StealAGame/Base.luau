@@ -8,7 +8,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local GamePoster = require(ReplicatedStorage:WaitForChild("GamePoster"))
+local CasePackaging = require(ReplicatedStorage:WaitForChild("CasePackaging"))
 local TreadModels = require(script.Parent.TreadModels)
 
 local Base = {}
@@ -708,7 +708,7 @@ function Base.updatePodium(plot, top)
 			spot.Key = key
 			spot.Gui:ClearAllChildren()
 			if g then
-				GamePoster.Create({Name = g.Name, Rarity = g.Rarity, Color = g.Color}).Parent = spot.Gui
+				CasePackaging.Cover({Name = g.Name, Rarity = g.Rarity, Color = g.Color}).Parent = spot.Gui
 				spot.Text.Text = string.format('#%d\n<font color="#5aff78">%s</font>', rank, g.IncomeText)
 			else
 				local t = Instance.new("TextLabel")

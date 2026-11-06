@@ -18,6 +18,7 @@ local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UI = require(ReplicatedStorage:WaitForChild("UIKit"))
 local K = require(ReplicatedStorage:WaitForChild("MenuKit"))
+local GameArt = require(ReplicatedStorage:WaitForChild("GameArt"))
 local new = UI.new
 local WHITE = Color3.new(1, 1, 1)
 
@@ -370,8 +371,10 @@ local function showReward()
 		end
 	end)
 
-	-- the picture: the reward's emoji
-	local icon = UI.label({AnchorPoint = Vector2.new(0.5, 0.5), Position = MID, Size = UDim2.fromOffset(150, 150), Text = o.Icon or "\u{1F381}", Outline = false, ZIndex = 52, Parent = holder})
+	-- the picture: the reward's own drawing (an emoji only for something that has none)
+	local art = GameArt.forReward(o)
+	local icon = art and new("ImageLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = MID, Size = UDim2.fromOffset(190, 190), BackgroundTransparency = 1, Image = art, ScaleType = Enum.ScaleType.Fit, ZIndex = 52, Parent = holder})
+		or UI.label({AnchorPoint = Vector2.new(0.5, 0.5), Position = MID, Size = UDim2.fromOffset(150, 150), Text = o.Icon or "\u{1F381}", Outline = false, ZIndex = 52, Parent = holder})
 	local iconScale = new("UIScale", {Parent = icon})
 	local ph, phScale
 	if o.Poster then
@@ -446,6 +449,12 @@ local function showReward()
 			-- a game you can see straight away: it pops in
 			phScale.Scale = 0.4
 			tween(phScale, 0.5, {Scale = 1.05}, Enum.EasingStyle.Back)
+			-- it lands with a thump: a ring of its colour along the floor of the reveal
+			local thump = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = MID, Size = UDim2.fromOffset(120, 120), BackgroundTransparency = 1, ZIndex = 51, Parent = holder},
+				{UI.corner(1, true), new("UIStroke", {Color = color:Lerp(WHITE, 0.3), Thickness = 9})})
+			tween(thump, 0.55, {Size = UDim2.fromOffset(460, 460)}, Enum.EasingStyle.Quad)
+			tween(thump:FindFirstChildOfClass("UIStroke"), 0.55, {Transparency = 1, Thickness = 1}, Enum.EasingStyle.Quad)
+			task.delay(0.6, thump.Destroy, thump)
 		end
 		if kind == "boost" then
 			-- two rings pulse out like a power-up switching on
@@ -458,7 +467,31 @@ local function showReward()
 					task.delay(0.65, ring.Destroy, ring)
 				end)
 			end
+			-- and its energy crackles outward
+			for k = 1, 6 do
+				local a = k / 6 * math.pi * 2
+				local zap = new("ImageLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = MID, Size = UDim2.fromOffset(46, 46), BackgroundTransparency = 1, Image = art, Rotation = k * 60, ZIndex = 51, Parent = holder})
+				tween(zap, 0.7, {Position = MID + UDim2.fromOffset(math.cos(a) * 250, math.sin(a) * 170), Size = UDim2.fromOffset(14, 14), ImageTransparency = 1}, Enum.EasingStyle.Quint)
+				task.delay(0.75, zap.Destroy, zap)
+			end
 			UI.sfx("unlock")
+		elseif kind == "trail" then
+			-- a new trail: its colour streaks across behind the picture
+			for k = -1, 1 do
+				local streak = new("ImageLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = MID + UDim2.fromOffset(-520, k * 56), Size = UDim2.fromOffset(620, 130), BackgroundTransparency = 1, Image = GameArt.HudTrail, ImageColor3 = color, ZIndex = 51, Parent = holder})
+				task.delay(0.08 + (k + 1) * 0.1, function()
+					tween(streak, 0.75, {Position = MID + UDim2.fromOffset(520, k * 56), ImageTransparency = 1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				end)
+				task.delay(1.1, streak.Destroy, streak)
+			end
+			UI.sfx("unlock")
+		elseif kind == "pack" then
+			-- the box bursts open: everything flies out of it
+			icon.Rotation = -8
+			tween(icon, 0.5, {Rotation = 0}, Enum.EasingStyle.Elastic)
+			task.delay(0.12, function()
+				Fx.confetti(icon.AbsolutePosition + icon.AbsoluteSize / 2 + GuiService:GetGuiInset(), {Count = 40})
+			end)
 		elseif kind == "spin" then
 			-- flung off the wheel: the prize spins in, and the wheel's colours burst out around it
 			icon.Rotation = -360
@@ -483,15 +516,95 @@ local function showReward()
 		end
 	end
 
-	-- out: shrink away, then the next one
+	-- out: it heads for where it belongs (a game to your Downloads, a boost to your stats), then the next one
 	task.delay(hold + extra, function()
-		tween(scale, 0.3, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-		task.wait(0.32)
+		local dest = (o.Poster and UDim2.fromScale(0.94, 0.56)) or ((kind == "boost" or kind == "trail") and UDim2.fromScale(0.1, 0.16)) or UDim2.fromScale(0.5, 0.3)
+		tween(holder, 0.38, {Position = dest}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(scale, 0.38, {Scale = 0}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		task.wait(0.4)
 		turnConn:Disconnect()
 		holder:Destroy()
 		revealing = false
 		showReward()
 	end)
+end
+
+-- A BURST OF CONFETTI out of a point on the screen (screen pixels). Paper, dots, streamers and stars, near ones big and
+-- fast, far ones small and slow; they fly out, drift and flutter down under gravity. At most about 60 pieces at a time on
+-- screen, all stepped by one loop that stops when they land. opts: Count, Colors, Reach (studs of pixels at 1440p)
+local DEFAULT_CONFETTI = {Color3.fromRGB(255, 80, 120), Color3.fromRGB(255, 210, 60), Color3.fromRGB(90, 220, 255), Color3.fromRGB(120, 255, 140), Color3.fromRGB(200, 120, 255), Color3.fromRGB(255, 140, 60)}
+local bits, bitConn = {}, nil
+local function stepBits(dt)
+	local now = os.clock()
+	for i = #bits, 1, -1 do
+		local b = bits[i]
+		local age = now - b.Born
+		if age >= b.Life then
+			b.Frame:Destroy()
+			table.remove(bits, i)
+		else
+			b.V = b.V * math.exp(-dt * b.Drag) + Vector2.new(0, b.G * dt)
+			b.P += b.V * dt
+			b.Frame.Position = UDim2.fromOffset(b.P.X + math.sin(age * b.Sway) * b.SwayAmp, b.P.Y)
+			b.Frame.Rotation += b.Spin * dt
+			local fade = math.clamp((b.Life - age) / 0.35, 0, 1)
+			b.Frame.BackgroundTransparency = b.Text and 1 or 1 - fade
+			if b.Text then
+				b.Frame.TextTransparency = 1 - fade
+			end
+			if b.Flip then
+				-- paper turning over in the air
+				b.Frame.Size = UDim2.fromOffset(b.W, math.max(1, b.H * math.abs(math.cos(age * b.Flip))))
+			end
+		end
+	end
+	if #bits == 0 and bitConn then
+		bitConn:Disconnect()
+		bitConn = nil
+	end
+end
+function Fx.confetti(at, opts)
+	opts = opts or {}
+	local root = rewardLayer()
+	local ss = screenScale()
+	local colors = opts.Colors or DEFAULT_CONFETTI
+	local reach = (opts.Reach or 340) * ss
+	local count = math.min(opts.Count or 42, math.max(0, 60 - #bits))
+	for i = 1, count do
+		local depth = math.random() -- 0 far, 1 near: near pieces are bigger and faster
+		local a = -math.pi / 2 + (math.random() - 0.5) * math.pi * 1.55
+		if i % 4 == 0 then
+			a = math.random() * math.pi * 2 -- some go every way
+		end
+		local speed = reach * (1.2 + depth * 2.4) * (0.55 + math.random() * 0.45)
+		local w, h = (7 + depth * 9) * ss, (5 + depth * 7) * ss
+		local kind = i % 6
+		local color = colors[i % #colors + 1]
+		local frame
+		local bit = {Born = os.clock(), Life = 0.9 + math.random() * 0.7, P = at, V = Vector2.new(math.cos(a), math.sin(a)) * speed, G = reach * 3.4, Drag = 2.5 + (1 - depth) * 1.4,
+			Spin = math.random(-600, 600), Sway = 5 + math.random() * 5, SwayAmp = (2 + depth * 8) * ss, W = w, H = h}
+		if kind == 0 then
+			frame = new("Frame", {Size = UDim2.fromOffset(h, h), BackgroundColor3 = color, BorderSizePixel = 0}, {new("UICorner", {CornerRadius = UDim.new(1, 0)})}) -- dots
+		elseif kind == 1 then
+			w, h = (3 + depth * 3) * ss, (16 + depth * 14) * ss -- streamers
+			frame = new("Frame", {Size = UDim2.fromOffset(w, h), BackgroundColor3 = color, BorderSizePixel = 0}, {new("UICorner", {CornerRadius = UDim.new(1, 0)})})
+			bit.W, bit.H = w, h
+		elseif kind == 2 then
+			frame = new("TextLabel", {Size = UDim2.fromOffset(w * 1.9, w * 1.9), BackgroundTransparency = 1, Text = "\u{2605}", TextScaled = true, Font = Enum.Font.GothamBlack, TextColor3 = color}) -- stars
+			bit.Text = true
+		else
+			frame = new("Frame", {Size = UDim2.fromOffset(w, h), BackgroundColor3 = color, BorderSizePixel = 0}) -- paper
+			bit.Flip = 7 + math.random() * 8
+		end
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromOffset(at.X, at.Y)
+		frame.Rotation = math.random(0, 360)
+		frame.ZIndex = 70
+		frame.Parent = root
+		bit.Frame = frame
+		table.insert(bits, bit)
+	end
+	bitConn = bitConn or RunService.RenderStepped:Connect(stepBits)
 end
 
 function Fx.reward(opts)
