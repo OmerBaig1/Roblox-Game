@@ -101,6 +101,14 @@ return function(t)
 		expect.truthy(legendaryBeats > 0)
 	end)
 
+	t.test("a case can only be stolen from up close and on its own floor", function()
+		expect.truthy(C.inStealReach(Vector3.new(6, 2, 4), 0))
+		expect.truthy(C.inStealReach(Vector3.new(60, 0, 0), 232)) -- a fast runner the server sees late
+		expect.falsy(C.inStealReach(Vector3.new(60, 0, 0), 0))
+		expect.falsy(C.inStealReach(Vector3.new(0, 20, 0), 0)) -- through the floor
+		expect.falsy(C.inStealReach(Vector3.new(0, -20, 0), 450))
+	end)
+
 	t.test("old saves map to the same game", function()
 		expect.equal(C.LEGACY[1][1], "Pang")
 		expect.equal(C.LEGACY[50][4], "Devil May Nubs V")

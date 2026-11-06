@@ -19,6 +19,13 @@ C.SELL_MULTIPLIER = 30          -- an installed game sells for (income per secon
 C.UNINSTALLED_SELL = 10         -- a game that isn't installed yet sells for (its level's base income x this)
 C.MAX_HELD = 1                  -- games a player can hold at once
 C.MAX_HELD_PASS = 2             -- ...with the 2x Steal game pass
+-- Can a thief at this offset from a case really reach it? The prompt's own limit runs on their screen, which an exploit can
+-- skip, so the server checks too. Generous sideways (the server sees a fast runner late), strict on height: the next floor up
+-- or down is out of reach.
+function C.inStealReach(offset, speed)
+	local flat = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	return math.abs(offset.Y) <= 14 and flat <= 24 + speed * 0.3
+end
 C.SAVE_STORE = "StealAGameSave_v3" -- v3: full reset Oct 28 (v2 still holds everyone's old saves)
 C.AUTOSAVE_TIME = 60
 
@@ -35,8 +42,10 @@ C.SUB_STEP = 1.2
 C.RARITY_MULT = {1, 1.15, 1.35, 1.6, 1.925, 2.0, 2.1, 2.2, 2.3, 2.4}
 C.PEDESTALS = 6                 -- game slots in every vault level (the level's other games rotate through them)
 -- where they stand: {x as a fraction of the half-width, z as a fraction of the level's length}. Two outer columns and
--- an inner pair, all clear of the runner down the middle (the main running lane) and of the shopkeeper's counter
-C.PEDESTAL_LAYOUT = {{-0.62, 0.5}, {0.62, 0.5}, {-0.36, 0.62}, {0.36, 0.62}, {-0.62, 0.74}, {0.62, 0.74}}
+-- an inner pair, clear of the runner down the middle (the main running lane). All in the entrance half of the level, with the
+-- guard and its counter behind them (GUARD_POST_Z): the way out is never past the guard, so no game is unfairer than another.
+C.PEDESTAL_LAYOUT = {{-0.62, 0.14}, {0.62, 0.14}, {-0.36, 0.26}, {0.36, 0.26}, {-0.62, 0.38}, {0.62, 0.38}}
+C.GUARD_POST_Z = 0.74
 
 ------------------------------------------------------------------
 -- RARITY (rolled for every copy of a game)
@@ -127,6 +136,7 @@ C.DAILY = {
 -- each ID below. Items with Id = 0 show in the shop as "Coming soon".
 ------------------------------------------------------------------
 C.GAMEPASSES = {
+	{Key = "VIP", Id = 0, Name = "VIP", Desc = "+15% money, +15% speed, a VIP title, a crown and a golden base", Price = 499, Featured = true},
 	{Key = "DoubleMoney", Id = 0, Name = "2x Money", Desc = "Every game in your base earns double!", Price = 199},
 	{Key = "DoubleSpeed", Id = 0, Name = "2x Speed", Desc = "Run twice as fast as everyone else!", Price = 149},
 	{Key = "DoubleSteal", Id = 0, Name = "2x Steal", Desc = "Carry 2 games at once, forever!", Price = 250},
@@ -320,6 +330,12 @@ C.GUARD_ACCEL_TIME = 0.35       -- from standing to full chase speed
 C.GUARD_TURN_RATE = 6           -- radians a second when turning on the spot (no snapping round)
 C.GUARD_REACTION = 0.6
 C.GUARD_GIVE_UP = 120
+-- THE RULE: at or above a level's recommended speed you can always get away. Against such a runner a guard never moves faster
+-- than this share of their real speed, whatever its own speed or ability says. (The speed curve is so flat that the recommended
+-- speed alone is only 2% faster than the guard, which lag can use up.) Below it, guards still out-run you.
+C.GUARD_BEATEN_SHARE = 0.93
+C.GUARD_CATCHUP = 30 -- below the recommended speed: this much on top, so the games being near the door doesn't make slow runners safe
+C.GUARD_BEATEN_HOLD = 0.3 -- ...and it must stay in reach this long (seconds) to catch them
 C.GUARD_LATE_LEVEL = 25         -- past this level shopkeepers get an extra speed-up
 C.GUARD_LATE_GROWTH = 1.02
 -- Shopkeepers are giants: this many times a player's size (level 1 up to level 50). Max fits under the level signs.
@@ -350,6 +366,7 @@ C.ESCAPE_CONFIRM_TIME = 0.3     -- seconds you must stay out of the vault before
 C.FALL_RETURN_Y = -40           -- falling below this height returns any stolen games
 -- Friends in the same server boost your cash: the first friend +10%, every friend after that +2.5% more.
 -- It follows who is here right now, so a friend leaving and rejoining can never stack it twice.
+C.VIP_BONUS = 1.15 -- the VIP game pass: this much more money and speed
 C.FRIEND_FIRST_BOOST = 0.1
 C.FRIEND_EXTRA_BOOST = 0.025
 function C.friendBoost(n)
@@ -467,7 +484,7 @@ C.BASE_RING_RADIUS = 250        -- distance from the entrance to the bases (was 
 C.BASE_YARD = 26                -- open front yard between the walkway loop and each base (the treadmill stands here)
 C.LOOP_R = C.BASE_RING_RADIUS - C.PLOT_D / 2 - 7 - C.BASE_YARD -- radius of the walkway loop
 C.TREAD_OFFSET_X = 20           -- treadmill sits in the front yard, this far to the right of the base's centre
-C.TREAD_OFFSET_Z = 12           -- and this far out from the base's open front, leaving room to walk by
+C.TREAD_OFFSET_Z = 4           -- and this far out from the base's open front, leaving room to walk by
 C.BASE_ARC = 170
 C.FENCE_R = 420                 -- leaves room for the biggest bases (196 deep)
 C.ISLAND_R = 600

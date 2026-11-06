@@ -808,8 +808,11 @@ function UI.tileButton(props)
 	local badge = new("Frame", {Name = "Badge", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -2, 0, -2), Size = UDim2.fromOffset(26, 26), AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundColor3 = Color3.fromRGB(255, 64, 82), Visible = false, ZIndex = 20, Parent = face},
 		{UI.corner(1, true), new("UIStroke", {Color = UI.WHITE, Thickness = 2}), new("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}),
+		-- the number's box is only as wide as its text, so this is what puts a narrow digit in the middle of the circle
+		new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center}),
 		new("UIGradient", {Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 130, 140), Color3.fromRGB(225, 30, 55))})})
 	local badgeText = new("TextLabel", {Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, Text = "", TextColor3 = UI.WHITE, TextSize = 17,
+		TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
 		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Heavy), ZIndex = 21, Parent = badge})
 	local fx = new("Frame", {Name = "BurstFx", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 30, Parent = btn})
 

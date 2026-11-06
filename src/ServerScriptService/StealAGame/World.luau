@@ -75,6 +75,7 @@ local function animateNpc(model, waveEvery)
 	end
 end
 
+local Environment = require(script.Parent.Environment)
 local World = {}
 
 function World.build(C, Kit)
@@ -207,19 +208,9 @@ function World.build(C, Kit)
 	------------------------------------------------------------------
 	-- THE ISLAND
 	------------------------------------------------------------------
-	-- a soft, warm meadow green (not a flat neon one), with large, faint patches of lighter and darker grass so the
-	-- lawn reads as one natural surface rather than a single colour
+	-- the lawn itself is terrain, laid on top of this once everything else stands (Environment.ground)
 	local GRASS = rgb(104, 182, 78)
-	cyl(lobby, 12, C.ISLAND_R * 2, CFrame.new(ENTRANCE + Vector3.new(0, -6, 0)), {Name = "Island", Color = GRASS, Material = M.Grass})
-	do
-		local tones = {GRASS:Lerp(rgb(150, 196, 96), 0.35), GRASS:Lerp(rgb(70, 140, 60), 0.3), GRASS:Lerp(rgb(170, 190, 100), 0.25)}
-		for k = 1, 26 do
-			local a = rng:NextNumber(0, math.pi * 2)
-			local r = rng:NextNumber(90, C.ISLAND_R - 70)
-			local size = rng:NextNumber(40, 90)
-			cyl(lobby, 0.04, size, CFrame.new(ENTRANCE + Vector3.new(math.cos(a) * r, 0.02, math.sin(a) * r)), {Name = "Meadow", Color = tones[k % #tones + 1], Material = M.Grass, CanCollide = false, CanQuery = false, CastShadow = false})
-		end
-	end
+	cyl(lobby, 12, C.ISLAND_R * 2, CFrame.new(ENTRANCE + Vector3.new(0, -8, 0)), {Name = "Island", Color = GRASS, Material = M.Grass})
 	cyl(lobby, 10, C.ISLAND_R * 2 + 8, CFrame.new(ENTRANCE + Vector3.new(0, -11, 0)), {Name = "IslandRim", Color = rgb(120, 85, 55), Material = M.Ground})
 	for i = 1, 7 do
 		local r = C.ISLAND_R * (1 - i * 0.125)
@@ -239,7 +230,7 @@ function World.build(C, Kit)
 
 	-- Stone walkways: a loop in front of the bases, a main path to the vault, a short path to each base
 	-- (each base sits back from the loop behind a front yard, where its treadmill stands)
-	local PATH = rgb(200, 192, 176)
+	local PATH = rgb(84, 78, 74) -- the solid walking surface: it shows as the grout between the paving blocks laid on it
 	local EDGE = rgb(146, 136, 120) -- the kerb along every walkway
 	local LOOP_R = C.LOOP_R
 	local function inHall(pos, pad)
@@ -270,7 +261,7 @@ function World.build(C, Kit)
 				local a0 = math.pi / 2 + (i + 0.5) / 18 * math.pi
 				local mid = ENTRANCE + Vector3.new(math.sin(a0) * PLAZA_R / 2, 0, -math.abs(math.cos(a0)) * PLAZA_R / 2 - 10)
 				-- smooth plastic: neighbouring slices overlap a little near the middle, and an untextured surface hides that
-				part(lobby, {Name = "Plaza", Size = Vector3.new(2 * PLAZA_R * math.sin(math.pi / 36) + 2, 0.3, PLAZA_R), CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.15, 0), ENTRANCE + Vector3.new(0, 0.15, -10)), Color = rgb(226, 218, 200), Material = M.SmoothPlastic})
+				part(lobby, {Name = "Plaza", Size = Vector3.new(2 * PLAZA_R * math.sin(math.pi / 36) + 2, 0.3, PLAZA_R), CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.15, 0), ENTRANCE + Vector3.new(0, 0.15, -10)), Color = rgb(96, 88, 80), Material = M.SmoothPlastic})
 			end
 			for i = 0, 35 do
 				local a = math.pi / 2 + (i + 0.5) / 36 * math.pi
@@ -281,6 +272,7 @@ function World.build(C, Kit)
 		for i = 1, C.NUM_PLOTS do
 			path(LOOP_R + 7, C.BASE_RING_RADIUS - C.PLOT_D / 2, math.rad(-C.BASE_ARC / 2 + (i - 1) * C.BASE_ARC / (C.NUM_PLOTS - 1)), 12)
 		end
+		Environment.paving(lobby, C, ENTRANCE, inHall, rng)
 		-- Lamp posts along the loop
 		for i = 0, 19 do
 			local a = (i + 0.5) / 20 * math.pi * 2
@@ -341,20 +333,15 @@ function World.build(C, Kit)
 		fencePiece(CFrame.new(x, 0, ENTRANCE.Z + math.sqrt(C.FENCE_R ^ 2 - x ^ 2)), 14)
 	end
 
-	local function giantTree(pos, s)
-		cyl(scenery, 10 * s, 1.7 * s, CFrame.new(pos + Vector3.new(0, 5 * s, 0)), {Name = "Trunk", Color = rgb(105, 72, 45), Material = M.Wood})
-		local leaf = rgb(45, rng:NextInteger(120, 165), 55)
-		part(scenery, {Name = "Leaves", Shape = Enum.PartType.Ball, Size = Vector3.one * 10 * s, CFrame = CFrame.new(pos + Vector3.new(0, 11 * s, 0)), Color = leaf, Material = M.Grass, CastShadow = false})
-		part(scenery, {Name = "Leaves", Shape = Enum.PartType.Ball, Size = Vector3.one * 7 * s, CFrame = CFrame.new(pos + Vector3.new(2.5 * s, 15 * s, 1 * s)), Color = leaf:Lerp(rgb(120, 200, 90), 0.25), Material = M.Grass, CastShadow = false})
-	end
 	for row = 0, 2 do
 		local r = C.FENCE_R + 35 + row * 50
 		local count = math.floor(2 * math.pi * r / 48)
 		for i = 0, count - 1 do
 			local a = (i + (row % 2) * 0.5 + rng:NextNumber(-0.2, 0.2)) / count * math.pi * 2
 			local pos = ENTRANCE + Vector3.new(math.sin(a), 0, -math.cos(a)) * (r + rng:NextNumber(-8, 8))
-			if not inHall(pos, 55) then
-				giantTree(pos, rng:NextNumber(7, 11))
+			-- the canopies reach up to 80 studs from the trunk: keep them off the vault's walls
+			if not inHall(pos, 85) then
+				Environment.tree(scenery, pos, rng, row == 0)
 			end
 		end
 	end
@@ -1260,6 +1247,7 @@ function World.build(C, Kit)
 		if T.Flooded then
 			part(decor, {Name = "FloodWater", Size = Vector3.new(half * 2, 0.1, len), CFrame = CFrame.new(0, 0.37, zMid), Color = rgb(38, 104, 122), Material = M.Glass, Transparency = 0.45, Reflectance = 0.12, CanCollide = false, CanQuery = false, CastShadow = false})
 		end
+		Environment.vaultFloor(decor, z0, len, half, T, L.ZoneIndex)
 		for bz = 12.5, len - 5, 25 do
 			part(decor, {Name = "Inlay", Size = Vector3.new(half * 2 - 12, 0.1, 1.2), CFrame = CFrame.new(0, 0.235, z0 + bz), Color = T.FloorColor:Lerp(T.Trim, 0.55), Material = M.SmoothPlastic, CanCollide = false})
 		end
@@ -1363,7 +1351,7 @@ function World.build(C, Kit)
 				buildShelf(decor, side, z0 + len * f, boxColors, half, wood)
 			end
 		end
-		local spots = {{1, 0.24}, {-1, 0.44}, {1, 0.52}, {-1, 0.66}, {1, 0.8}, {-1, 0.95}, {1, 0.96}}
+		local spots = {{1, 0.46}, {-1, 0.5}, {1, 0.56}, {-1, 0.6}, {1, 0.8}, {-1, 0.95}, {1, 0.96}} -- clear of the games and the counter
 		for i, spot in ipairs(spots) do
 			-- the guard's side keeps clear in front of the counter
 			local kind = T.Props[(i + level) % #T.Props + 1]
@@ -1404,15 +1392,15 @@ function World.build(C, Kit)
 			end
 		end
 
-		-- Checkout counter by the shopkeeper's post (the guard stands at x = -(half - 18), 30% into the level)
+		-- Checkout counter by the shopkeeper's post (the guard stands at x = -(half - 18), C.GUARD_POST_Z into the level, behind the games)
 		-- 18 studs out: the giants' bodies reach up to ~17 studs in front of their post (Itza's legs and club used to
 		-- stand in the counter, so it looked like it was standing on it)
-		local px, pz = -(half - 18), z0 + len * 0.3 - 11
+		local px, pz = -(half - 18), z0 + len * C.GUARD_POST_Z - 11
 		part(decor, {Name = "Counter", Size = Vector3.new(18, 3.6, 3), CFrame = CFrame.new(px, 1.8, pz - 7), Color = T.WallColor:Lerp(rgb(255, 255, 255), 0.2), Material = T.Wall})
 		part(decor, {Name = "CounterTop", Size = Vector3.new(18.6, 0.4, 3.6), CFrame = CFrame.new(px, 3.8, pz - 7), Color = accent, Material = M.SmoothPlastic})
 		part(decor, {Name = "Register", Size = Vector3.new(2, 1.4, 1.6), CFrame = CFrame.new(px - 5, 4.6, pz - 7), Color = rgb(40, 40, 45), Material = M.Metal})
 
-		-- DISPLAY: C.PEDESTALS games past the shopkeeper, each on a glowing ring (C.PEDESTAL_LAYOUT: two outer
+		-- DISPLAY: C.PEDESTALS games in front of the shopkeeper, each on a glowing ring (C.PEDESTAL_LAYOUT: two outer
 		-- columns and an inner pair, leaving the runner down the middle clear)
 		for i = 1, C.PEDESTALS do
 			local p = C.PEDESTAL_LAYOUT[i]
@@ -1422,7 +1410,7 @@ function World.build(C, Kit)
 			part(decor, {Name = "PedestalTrim", Size = Vector3.new(6.6, 0.4, 6.6), CFrame = CFrame.new(pos + Vector3.new(0, 2.5, 0)), Color = T.Trim, Material = M.Metal, CanCollide = false})
 			table.insert(W.Spots, {Pedestal = ped, Level = level, Item = nil, Data = nil, Carried = false})
 		end
-		local timerPart = part(decor, {Name = "RestockTimer", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(0, 20, z0 + len * 0.64), Transparency = 1, CanCollide = false})
+		local timerPart = part(decor, {Name = "RestockTimer", Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(0, 20, z0 + len * 0.26), Transparency = 1, CanCollide = false})
 		W.RestockLabels[level] = Kit.billboard(timerPart, 300, 56, 0, "IN STOCK", 140)
 
 		Kit.setGroup(decor, "Decor")

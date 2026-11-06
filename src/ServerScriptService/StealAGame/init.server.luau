@@ -842,7 +842,7 @@ end
 local theftCount = 0 -- each theft's id, so the owner's alarm can tell which one ended
 local function onCase(player, plot, slot)
 	if plot.Slots[slot.Index] ~= slot then return end
-	if plot.Owner == player then
+	if plot.Owner == player and plot.DevStranger ~= player then
 		local list = heldList(player)
 		if plot.Runner == player then
 			notify(player, "Get off the treadmill first!", RED)
@@ -894,6 +894,8 @@ local function onCase(player, plot, slot)
 		return
 	end
 	if not canTake(player) or not getRoot(player) then return end
+	local thief = getRoot(player)
+	if not C.inStealReach(thief.Position - slot.ItemCF.Position, thief.AssemblyLinearVelocity.Magnitude) then return end
 	local item, rec = takeFromSlot(plot, slot)
 	slot.Reserved = true
 	refreshSlotPrompts(plot, slot)
@@ -1258,7 +1260,7 @@ end
 for level = 1, C.NUM_LEVELS do
 	task.spawn(function()
 		local L = C.LEVELS[level]
-		local post = Vector3.new(-(L.Width / 2 - 18), 0, world.segStart(level) + L.Len * 0.3)
+		local post = Vector3.new(-(L.Width / 2 - 18), 0, world.segStart(level) + L.Len * C.GUARD_POST_Z)
 		local model, hum, root, head, look, actions = Guards.create(C, Kit, level, world.GuardsFolder, post)
 		local scale = model:GetAttribute("Scale") or 1
 		post = Vector3.new(post.X, model:GetAttribute("StandY") or 4, post.Z)
@@ -1452,7 +1454,7 @@ Kit.event("GuardGap").OnServerEvent:Connect(function(player, level, gap)
 	if type(level) ~= "number" or type(gap) ~= "number" or gap ~= gap then return end
 	local g = guards[level]
 	local tRoot = getRoot(player)
-	if not g or not tRoot or g.Target ~= player or os.clock() < g.ChaseAt or gap > g.Reach then return end
+	if not g or not tRoot or g.Target ~= player or g.Beaten or os.clock() < g.ChaseAt or gap > g.Reach then return end -- out-running it: the server's check decides
 	local tp = tRoot.Position
 	local dist = Vector3.new(g.Root.Position.X - tp.X, 0, g.Root.Position.Z - tp.Z).Magnitude
 	local speed = tRoot.AssemblyLinearVelocity.Magnitude + g.Root.AssemblyLinearVelocity.Magnitude
@@ -1564,8 +1566,16 @@ local function updateGuard(g, now)
 		local tHum = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
 		local speed = g.RealSpeed
 		local points = (t:GetAttribute("SpeedPoints") or C.START_SPEED) * (t:GetAttribute("SpeedMultiplier") or 1)
-		if tHum and points < g.MustBeat then
-			speed = math.max(speed, tHum.WalkSpeed * 1.25)
+		-- the Slow Down switch really does make you slow, whatever your number says
+		local fastEnough = points * 1.000001 >= g.MustBeat -- multiplying can land a hair under the exact number
+		local beaten = tHum and fastEnough and not t:GetAttribute("SlowDown")
+		g.Beaten = beaten
+		if tHum and not fastEnough then
+			speed = math.max(speed, tHum.WalkSpeed * 1.25 + C.GUARD_CATCHUP)
+		end
+		local top = speed * chargeMul
+		if beaten then
+			top = math.min(top, tHum.WalkSpeed * C.GUARD_BEATEN_SHARE) -- no ability gets round this, a charge included
 		end
 		-- it stops just in front of someone standing still; someone fleeing pulls away from any point it aims short of,
 		-- so the faster they run the more it aims right at them (measured: at 80 studs/s any standoff left it trailing
@@ -1574,7 +1584,7 @@ local function updateGuard(g, now)
 		local standoff = g.Standoff * math.clamp(1 - Vector3.new(tVel.X, 0, tVel.Z).Magnitude / 60, 0, 1)
 		-- momentum: from standing to full speed over GUARD_ACCEL_TIME
 		-- a charge launches off the mark instead of building up
-		g.SpeedNow = approach(g.SpeedNow or 0, speed * chargeMul, speed * math.max(chargeMul, 1) * 0.05 / (chargeMul > 1 and 0.15 or C.GUARD_ACCEL_TIME))
+		g.SpeedNow = approach(g.SpeedNow or 0, top, speed * math.max(chargeMul, 1) * 0.05 / (chargeMul > 1 and 0.15 or C.GUARD_ACCEL_TIME))
 		hum.WalkSpeed = g.SpeedNow
 		-- run at where you'll be by the time this movement reaches your screen, stopping just in front of you (the
 		-- giant's body never runs through you)
@@ -1590,7 +1600,17 @@ local function updateGuard(g, now)
 			turnToward(g, tRoot.Position, 0.05)
 		end
 		-- in reach = caught, this tick (the grab pose plays afterwards, it never decides anything)
-		if canCatch(g, t, tRoot, 1) then
+		local inReach = canCatch(g, t, tRoot, 1)
+		-- someone out-running it can only be caught if it really stays on them: the server's idea of where a fast runner is can
+		-- fall far behind for a moment, and that mustn't count as the guard having reached them
+		if inReach and beaten then
+			g.NearSince = g.NearSince or now
+			inReach = now - g.NearSince >= C.GUARD_BEATEN_HOLD
+		elseif not inReach then
+			g.NearSince = nil
+		end
+		if inReach then
+			g.NearSince = nil
 			catchPlayer(g, t)
 		else
 			-- the backstop (GuardCatch): the guard has really reached or passed them, and they haven't truly got away
@@ -1603,7 +1623,7 @@ local function updateGuard(g, now)
 			elseif GuardCatch.contact(g.Reach, gp, tp, tv) then
 				g.ContactAt = g.ContactAt or now
 			end
-			if g.ContactAt and now - g.ContactAt >= GuardCatch.contactTime(C, ping) and feetLevel(g, tp) and clearBetween(gp, tp) then
+			if not beaten and g.ContactAt and now - g.ContactAt >= GuardCatch.contactTime(C, ping) and feetLevel(g, tp) and clearBetween(gp, tp) then
 				catchPlayer(g, t)
 			end
 		end
@@ -2129,13 +2149,13 @@ end
 
 local function moneyMult(player)
 	local friends = 1 + C.friendBoost(player:GetAttribute("FriendsHere") or 0)
-	return (hasPass(player, "DoubleMoney") and 2 or 1) * boostMult(player, "Money") * friends
+	return (hasPass(player, "DoubleMoney") and 2 or 1) * (hasPass(player, "VIP") and C.VIP_BONUS or 1) * boostMult(player, "Money") * friends
 end
 
 local function refreshMultipliers(player)
 	local trail = C.TRAILS[player:GetAttribute("TrailEquipped") or 0]
 	local trailSpeed = trail and trail.Speed or 1
-	local mult = (hasPass(player, "DoubleSpeed") and 2 or 1) * boostMult(player, "Speed") * trailSpeed
+	local mult = (hasPass(player, "DoubleSpeed") and 2 or 1) * (hasPass(player, "VIP") and C.VIP_BONUS or 1) * boostMult(player, "Speed") * trailSpeed
 	if player:GetAttribute("SpeedMultiplier") ~= mult then
 		player:SetAttribute("SpeedMultiplier", mult)
 	end
@@ -2156,8 +2176,37 @@ for _, p in ipairs(Players:GetPlayers()) do
 	watchTrail(p)
 end
 
+-- VIP: the look follows the pass, whenever it arrives (on joining, or right after buying it) and on every respawn
+local Vip = require(script.Vip)
+local function applyVipLook(player)
+	local on = hasPass(player, "VIP")
+	Vip.character(player, on)
+	local plot = playerPlots[player]
+	if plot then
+		Vip.base(plot, C, Kit, player, on)
+	end
+end
+
 local function applyPasses(player)
 	refreshMultipliers(player)
+	applyVipLook(player)
+end
+local function watchVip(player)
+	player:GetAttributeChangedSignal("Pass_VIP"):Connect(function()
+		applyPasses(player)
+	end)
+	player.CharacterAdded:Connect(function(char)
+		char:WaitForChild("Head", 5)
+		char:WaitForChild("HumanoidRootPart", 5)
+		char:WaitForChild("Humanoid", 5)
+		if player.Parent then
+			applyVipLook(player)
+		end
+	end)
+end
+Players.PlayerAdded:Connect(watchVip)
+for _, p in ipairs(Players:GetPlayers()) do
+	watchVip(p)
 end
 
 local function checkPasses(player)
@@ -2706,6 +2755,11 @@ end
 ------------------------------------------------------------------
 local FuseMachine = require(script.FuseMachine)
 local fuseModel, fusePrompt = FuseMachine.build(Kit, workspace.StealAGameMap:FindFirstChild("Lobby") or workspace.StealAGameMap, world.FuseCF)
+-- everything on the ground now stands, so the lawn and flowers can be fitted round it
+do
+	local map = workspace.StealAGameMap
+	require(script.Environment).ground(C, Vector3.new(0, 0, C.HALL_START_Z), {map.Lobby, world.BasesFolder}, Random.new(4242), plots)
+end
 local fuseFunction = Kit.func("FuseGames")
 local openFuseEvent = Kit.event("OpenFuse")
 local fuseCooldown = {}
@@ -3039,11 +3093,15 @@ if RunService:IsStudio() then
 	-- and the real theft / lock steps, for the lock timer tests
 	local devLockTest = ServerStorage:FindFirstChild("DevLockTest") or Instance.new("BindableFunction")
 	devLockTest.Name = "DevLockTest"
-	devLockTest.OnInvoke = function(player, action)
+	devLockTest.OnInvoke = function(player, action, level, index)
 		local plot = playerPlots[player]
 		if action == "grab" then
+			local seen = 0
 			for _, spot in ipairs(spots) do
-				if spot.Item then
+				if not level or spot.Level == level then
+					seen += 1
+				end
+				if spot.Item and (not level or spot.Level == level) and (not index or seen == index) then
 					grabFromVault(player, spot)
 					break
 				end
@@ -3055,6 +3113,9 @@ if RunService:IsStudio() then
 		elseif action == "unlock" then
 			plot.LockLeft = 0
 			refreshLock(plot)
+		elseif action == "stranger" or action == "owner" then
+			-- so one tester can be treated as a thief at their own base (lock rules can't be tested alone otherwise)
+			plot.DevStranger = action == "stranger" and player or nil
 		elseif action == "tick" then
 			refreshLock(plot)
 		elseif action == "slots" then
@@ -3104,6 +3165,15 @@ end
 ------------------------------------------------------------------
 -- CLAIMING / RELEASING A BASE
 ------------------------------------------------------------------
+-- Where this player's own base is, for their HUD's distance counter. Same values never re-send, so it's safe to call often.
+local function publishBase(player, plot)
+	local halfW, front, back = Base.bounds(plot)
+	player:SetAttribute("BaseCF", plot.CF)
+	player:SetAttribute("BaseHalfW", halfW)
+	player:SetAttribute("BaseFront", front)
+	player:SetAttribute("BaseBack", back)
+end
+
 local function claimPlot(player)
 	for _, plot in ipairs(plots) do
 		if not plot.Owner then
@@ -3116,6 +3186,8 @@ local function claimPlot(player)
 			local floors, cases, tier = C.baseLayout(playerData[player].Upgrades)
 			Base.setTier(plot, tier)
 			Base.setLayout(plot, floors, cases, caseCallbacks)
+			publishBase(player, plot)
+			applyVipLook(player)
 			setPlotOwnerPrompts(plot)
 			rebuildTreadmill(plot)
 			updateUpgradeLabel(plot)
@@ -3143,6 +3215,7 @@ local function releasePlot(player)
 	Base.setLayout(plot, 1, C.START_CASES, caseCallbacks)
 	setPlotOwnerPrompts(plot)
 	plot.SignLabel.Text = "Empty Base"
+	Vip.base(plot, C, Kit, nil, false)
 	plot.PadLabel.Text = "$0"
 	rebuildTreadmill(plot)
 	updateUpgradeLabel(plot)
@@ -3812,6 +3885,9 @@ task.spawn(function()
 				end
 			end
 
+			if owner then
+				publishBase(owner, plot) -- buying a bigger base moves its back wall
+			end
 			-- the belt's speed, for the clients that animate it: faster every treadmill level (6 to 16 studs/s), kept under the
 			-- speed where the slats seem to strobe. Here, so a machine rebuilt by an upgrade picks it up.
 			if plot.TreadModel then
@@ -3870,6 +3946,16 @@ RunService.Heartbeat:Connect(function(dt)
 	if checkTimer < 0.1 then return end
 	local step = checkTimer
 	checkTimer = 0
+
+	-- which Vault level each player is in, and its recommended speed: the same number the guard judges them by, for the HUD's notice
+	for _, p in ipairs(Players:GetPlayers()) do
+		local r = getRoot(p)
+		local level = r and world.roomAt(r.Position) or 0
+		if p:GetAttribute("VaultLevel") ~= level then
+			p:SetAttribute("VaultRecommended", level > 0 and C.recommendedSpeed(level) or nil)
+			p:SetAttribute("VaultLevel", level)
+		end
+	end
 
 	for _, plot in ipairs(plots) do
 		local runner = plot.Runner
@@ -3948,9 +4034,9 @@ RunService.Heartbeat:Connect(function(dt)
 	for _, plot in ipairs(plots) do
 		if plot.Owner and plot.LockLeft > 0 then
 			for _, player in ipairs(Players:GetPlayers()) do
-				if player ~= plot.Owner then
+				if player ~= plot.Owner or plot.DevStranger == player then
 					local root = getRoot(player)
-					-- Only for someone already deep inside when the lock went on (the walls stop everyone else)
+					-- For someone already inside when the lock went on, or who got past the walls any other way
 					if root and Base.insideCore(plot, root.Position) then
 						-- anything they took from this base goes back to its case first: it's carried on their body, so the
 						-- teleport below would otherwise take it out through the lock walls with them
@@ -3968,6 +4054,7 @@ RunService.Heartbeat:Connect(function(dt)
 							syncHeld(player)
 						end
 						player.Character:PivotTo(plot.CF * CFrame.new(0, 4, -C.PLOT_D / 2 - 10))
+						root.AssemblyLinearVelocity = Vector3.zero
 						notify(player, "That base is locked!", RED)
 					end
 				end

@@ -17,10 +17,10 @@ return function(t)
 			local pts = {}
 			for i, p in ipairs(C.PEDESTAL_LAYOUT) do
 				local x, z = p[1] * half, p[2] * L.Len
-				-- inside the walls, clear of the 26-stud runner, past the counter (30% in)
+				-- inside the walls, clear of the 26-stud runner, well in front of the guard and its counter
 				expect.truthy(math.abs(x) + RING < half - 2)
 				expect.truthy(math.abs(x) - RING >= 13)
-				expect.truthy(z > L.Len * 0.3 + 20)
+				expect.truthy(z < L.Len * C.GUARD_POST_Z - 20)
 				pts[i] = Vector3.new(x, 0, z)
 			end
 			for i = 1, #pts do

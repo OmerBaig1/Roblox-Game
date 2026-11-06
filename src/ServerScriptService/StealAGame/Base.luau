@@ -12,6 +12,7 @@ local CasePackaging = require(ReplicatedStorage:WaitForChild("CasePackaging"))
 local TreadModels = require(script.Parent.TreadModels)
 
 local Base = {}
+local Environment = require(script.Parent.Environment)
 local C, Kit
 local FRONT -- local Z of the open front of every base
 
@@ -63,6 +64,11 @@ end
 function Base.insidePlot(plot, position)
 	local lp = plot.CF:PointToObjectSpace(position)
 	return math.abs(lp.X) <= C.PLOT_W / 2 + 10 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < (plot.Look and plot.Look.Floors or 2) * C.FLOOR_H + 10
+end
+
+-- The area insidePlot counts as the base, sideways and front to back: the HUD measures how far away it is
+function Base.bounds(plot)
+	return C.PLOT_W / 2 + 10, FRONT, backZ(plot)
 end
 
 -- Strictly inside the walls (not on the stairs or the treadmill outside)
@@ -302,6 +308,11 @@ function Base.setTier(plot, t)
 	plot.Rows = tier.Rows
 	plot.PerFloor = tier.Rows * 2
 	plot.D = C.PLOT_D + (tier.Rows - 4) * ROW_GAP
+	local mostRows = 0
+	for _, each in ipairs(C.BASE_TIERS) do
+		mostRows = math.max(mostRows, each.Rows)
+	end
+	Environment.baseFootprint(plot.CF, C.PLOT_W, FRONT, FRONT + plot.D, FRONT + C.PLOT_D + (mostRows - 4) * ROW_GAP)
 	for f = #plot.FloorModels, 2, -1 do
 		plot.FloorModels[f]:Destroy()
 		plot.FloorModels[f] = nil
@@ -460,6 +471,8 @@ local function buildFloor(plot, f)
 	do
 		local s = stairSide(f)
 		part(model, {Name = "DoorBarrier", Size = Vector3.new(0.6, 14, GAP_Z2 - GAP_Z1), CFrame = at(s * (W / 2 - 0.5), y0 + 8, (GAP_Z1 + GAP_Z2) / 2), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
+		-- ...and across this floor's open front, floor to ceiling: only a low railing stands there otherwise
+		part(model, {Name = "DoorBarrier", Size = Vector3.new(W, C.FLOOR_H - 1, 0.6), CFrame = at(0, y0 + C.FLOOR_H / 2, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
 	end
 	local floorSign = part(model, {Name = "FloorSign", Size = Vector3.new(12, 2.4, 0.3), CFrame = at(0, y0 + 18.2, BACK - 1.2), Color = rgb(25, 25, 32)})
 	Kit.surfaceText(floorSign, Enum.NormalId.Front, "FLOOR " .. f, accent, 30)
