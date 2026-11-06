@@ -60,9 +60,14 @@ C.RARITY_INSTALL_MULT = 1.25    -- each rarity step takes this much longer to in
 function C.rarityMult(r)
 	return C.RARITY_MULT[r] or 1
 end
--- What a fresh copy of rarity r from this level earns per second (the one place income is decided)
+-- What a copy of rarity r from this level earns per second: the ONE place income is decided (saves don't store it).
+-- Each rarity earns at least $1 more than the one below: rounding alone would tie the cheapest games ($3.00 and $3.45).
 function C.gameIncome(level, r)
-	return math.max(1, math.floor(C.LEVELS[level].IncomeBase * C.rarityMult(r) + 0.5))
+	local base, income = C.LEVELS[level].IncomeBase, 0
+	for step = 1, r do
+		income = math.max(income + 1, math.floor(base * C.rarityMult(step) + 0.5))
+	end
+	return income
 end
 function C.rarityAllowed(level, r)
 	return C.LEVELS[level].ZoneIndex >= (C.RARITIES[r].MinArea or 1)

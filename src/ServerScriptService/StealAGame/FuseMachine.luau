@@ -5,6 +5,10 @@
 ]]
 local FuseMachine = {}
 
+-- Every measurement below is multiplied by this: at 0.6 the machine is about as wide as the Trail Shop (25 studs against 24).
+-- FuseUI reads it from the model's Scale attribute, so the animation shrinks with it.
+local S = 0.6
+
 function FuseMachine.build(Kit, parent, cf)
 	local rgb = Color3.fromRGB
 	local M = {Metal = Enum.Material.Metal, Neon = Enum.Material.Neon, Glass = Enum.Material.Glass, Smooth = Enum.Material.SmoothPlastic}
@@ -14,15 +18,16 @@ function FuseMachine.build(Kit, parent, cf)
 	model.Name = "FusingMachine"
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	local function at(x, y, z)
-		return cf * CFrame.new(x, y, z)
+		return cf * CFrame.new(x * S, y * S, z * S)
 	end
 	local function part(props)
 		props.Material = props.Material or M.Smooth
+		props.Size = props.Size * S
 		return Kit.part(model, props)
 	end
 	local function cyl(h, d, x, y, z, props)
 		props.Material = props.Material or M.Smooth
-		return Kit.cylinder(model, h, d, at(x, y, z), props)
+		return Kit.cylinder(model, h * S, d * S, at(x, y, z), props)
 	end
 	local function deco(p)
 		p.CanCollide, p.CanQuery, p.CanTouch, p.CastShadow = false, false, false, false
@@ -57,16 +62,16 @@ function FuseMachine.build(Kit, parent, cf)
 	local core = deco(part({Name = "FuseCore", Shape = Enum.PartType.Ball, Size = Vector3.new(4.4, 4.4, 4.4), CFrame = at(0, CY, 0), Color = rgb(40, 170, 230), Material = M.Neon}))
 	local light = Instance.new("PointLight")
 	light.Name = "CoreLight"
-	light.Color, light.Range, light.Brightness, light.Shadows = CYAN, 20, 0.8, false
+	light.Color, light.Range, light.Brightness, light.Shadows = CYAN, 20 * S, 0.8, false
 	light.Parent = core
 	local sparks = Instance.new("ParticleEmitter")
 	sparks.Name = "CoreSparks"
 	sparks.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 	sparks.Color = ColorSequence.new(CYAN, PINK)
 	sparks.LightEmission = 1
-	sparks.Size = NumberSequence.new(0.5, 0)
+	sparks.Size = NumberSequence.new(0.5 * S, 0)
 	sparks.Lifetime = NumberRange.new(0.6, 1.1)
-	sparks.Speed = NumberRange.new(1.5, 3)
+	sparks.Speed = NumberRange.new(1.5 * S, 3 * S)
 	sparks.SpreadAngle = Vector2.new(180, 180)
 	sparks.Rate = 10
 	sparks.Parent = core
@@ -74,13 +79,13 @@ function FuseMachine.build(Kit, parent, cf)
 	local function ring(name, y, radius, color, n)
 		local folder = Instance.new("Folder")
 		folder.Name = name
-		folder:SetAttribute("Y", y)
+		folder:SetAttribute("Y", y * S)
 		folder.Parent = model
 		for i = 1, n do
 			local a = (i - 0.5) / n * 2 * math.pi
 			local seg = deco(part({Name = "Seg", Size = Vector3.new(0.55, 0.55, 2 * math.pi * radius / n * 0.68), CFrame = at(math.cos(a) * radius, y, math.sin(a) * radius), Color = color, Material = M.Neon}))
 			seg:SetAttribute("Angle", a)
-			seg:SetAttribute("Radius", radius)
+			seg:SetAttribute("Radius", radius * S)
 			seg.Parent = folder
 		end
 	end
@@ -98,32 +103,33 @@ function FuseMachine.build(Kit, parent, cf)
 		deco(cyl(0.45, 6, x, FLOOR + 5, z, {Name = "PodLight", Color = i == 2 and PINK or CYAN, Material = M.Neon}))
 		-- the tube from the pod's shoulder to the chamber, one straight, slightly raised run
 		local from, to = at(x, FLOOR + 4.2, z).Position, at(dx * 6.4, FLOOR + 6.2, dz * 6.4).Position
-		deco(part({Name = "Tube", Size = Vector3.new(1.5, 1.5, (to - from).Magnitude + 1), CFrame = CFrame.lookAt((from + to) / 2, to), Color = rgb(150, 230, 255), Material = M.Glass, Transparency = 0.35}))
+		deco(part({Name = "Tube", Size = Vector3.new(1.5, 1.5, (to - from).Magnitude / S + 1), CFrame = CFrame.lookAt((from + to) / 2, to), Color = rgb(150, 230, 255), Material = M.Glass, Transparency = 0.35}))
 		-- the case
 		local home = at(x, FLOOR + 8.6, z)
 		local case = deco(part({Name = "FuseCase" .. i, Size = Vector3.new(3.5, 4.5, 0.65), CFrame = home * CFrame.Angles(0, math.rad(deg + 180), 0), Color = ({rgb(255, 90, 120), rgb(90, 170, 255), rgb(120, 225, 110)})[i], Material = M.Smooth}))
-		deco(part({Name = "CaseArt" .. i, Size = Vector3.new(2.9, 3.6, 0.72), CFrame = case.CFrame * CFrame.new(0, -0.25, 0), Color = rgb(255, 230, 150), Material = M.Smooth})).Parent = case
-		case:SetAttribute("HomeX", x)
-		case:SetAttribute("HomeY", FLOOR + 8.6)
-		case:SetAttribute("HomeZ", z)
+		deco(part({Name = "CaseArt" .. i, Size = Vector3.new(2.9, 3.6, 0.72), CFrame = case.CFrame * CFrame.new(0, -0.25 * S, 0), Color = rgb(255, 230, 150), Material = M.Smooth})).Parent = case
+		case:SetAttribute("HomeX", x * S)
+		case:SetAttribute("HomeY", (FLOOR + 8.6) * S)
+		case:SetAttribute("HomeZ", z * S)
 		case:SetAttribute("Deg", deg)
 	end
 
 	-- the fused game rises here (hidden until a fusion)
 	local result = deco(part({Name = "FuseResult", Size = Vector3.new(4.2, 5.4, 0.8), CFrame = at(0, -30, 0), Color = GOLD, Material = M.Neon, Transparency = 1}))
-	result:SetAttribute("Y", CY)
+	result:SetAttribute("Y", CY * S)
 	-- the flash (hidden until a fusion)
 	deco(part({Name = "FuseFlash", Shape = Enum.PartType.Ball, Size = Vector3.new(1, 1, 1), CFrame = at(0, -30, 0), Color = rgb(255, 255, 255), Material = M.Neon, Transparency = 1}))
 
-	-- THE SIGN: its name, and what it does in pictures
-	local poleL, poleR = -15.5, 15.5
-	for _, x in ipairs({poleL, poleR}) do
-		part({Name = "SignPole", Size = Vector3.new(1.3, 30, 1.3), CFrame = at(x, FLOOR + 15, 8), Color = DARK, Material = M.Metal})
-		deco(part({Name = "PoleLight", Size = Vector3.new(0.4, 28, 0.4), CFrame = at(x, FLOOR + 15, 7.25), Color = CYAN, Material = M.Neon}))
+	-- THE SIGN: a small board on two short legs, standing on the ground just in front of the platform. These are real studs
+	-- (not scaled). Nothing on it collides, so it can't block anyone walking up to the machine.
+	local signAt = cf * CFrame.new(0, 2.3, -15.2) * CFrame.Angles(math.rad(-12), 0, 0)
+	for _, x in ipairs({-3.2, 3.2}) do
+		deco(Kit.part(model, {Name = "SignLeg", Size = Vector3.new(0.45, 2.6, 0.45), CFrame = cf * CFrame.new(x, 1.3, -15), Color = DARK, Material = M.Metal}))
 	end
-	local board = part({Name = "FuseSign", Size = Vector3.new(33, 6, 1), CFrame = at(0, FLOOR + 30, 8), Color = DARK})
-	deco(part({Name = "SignEdge", Size = Vector3.new(33.8, 6.8, 0.8), CFrame = at(0, FLOOR + 30, 8.2), Color = PINK, Material = M.Neon}))
-	local title = Kit.surfaceText(board, Enum.NormalId.Front, "FUSING MACHINE", GOLD, 40)
+	deco(Kit.part(model, {Name = "SignEdge", Size = Vector3.new(8.7, 2.7, 0.2), CFrame = signAt * CFrame.new(0, 0, 0.14), Color = PINK, Material = M.Neon}))
+	deco(Kit.part(model, {Name = "SignBack", Size = Vector3.new(8.3, 2.3, 0.1), CFrame = signAt * CFrame.new(0, 0, 0.26), Color = DARK, Material = M.Smooth})) -- the edge stays a thin rim from behind too
+	local board = deco(Kit.part(model, {Name = "FuseSign", Size = Vector3.new(8.3, 2.3, 0.3), CFrame = signAt, Color = DARK, Material = M.Smooth}))
+	local title = Kit.surfaceText(board, Enum.NormalId.Front, "FUSING MACHINE", GOLD, 60)
 	title.Font = Enum.Font.LuckiestGuy
 	-- 3 cases + an arrow + one glowing case, on a panel in front of the chamber
 	local panel = part({Name = "FusePanel", Size = Vector3.new(13, 5.4, 0.8), CFrame = at(0, FLOOR + 2.9, -9.6) * CFrame.Angles(math.rad(-16), 0, 0), Color = DARK, Material = M.Metal})
@@ -131,7 +137,7 @@ function FuseMachine.build(Kit, parent, cf)
 	sg.Name = "Equation"
 	sg.Face = Enum.NormalId.Front
 	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	sg.PixelsPerStud = 40
+	sg.PixelsPerStud = 40 * S
 	sg.LightInfluence = 0
 	sg.Parent = panel
 	local function box(x, w, h, color, parentGui)
@@ -179,9 +185,10 @@ function FuseMachine.build(Kit, parent, cf)
 	local anchor = deco(part({Name = "FuseAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, FLOOR + 4, -11), Transparency = 1}))
 	local prompt = Kit.prompt(anchor, "Fuse Games", "Fusing Machine", 0, 20)
 
+	model:SetAttribute("Scale", S)
 	model:SetAttribute("CX", cf.X)
 	model:SetAttribute("CZ", cf.Z)
-	model:SetAttribute("CenterY", CY)
+	model:SetAttribute("CenterY", CY * S)
 	model:SetAttribute("Frame", cf)
 	model.Parent = parent
 	return model, prompt

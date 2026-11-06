@@ -186,16 +186,6 @@ function UI.fmt(n)
 	return (v >= 100 and string.format("%d", math.floor(v)) or string.format("%.1f", math.floor(v * 10) / 10)) .. SUFFIXES[i]
 end
 
-function UI.commas(n)
-	local s = tostring(math.floor(n))
-	while true do
-		local k
-		s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
-		if k == 0 then break end
-	end
-	return s
-end
-
 function UI.fmtTime(seconds)
 	seconds = math.max(0, math.ceil(seconds))
 	local h = math.floor(seconds / 3600)
@@ -502,6 +492,19 @@ function UI.canvasScale(obj)
 	local root = obj and obj:FindFirstAncestor("Canvas")
 	local sc = root and root:FindFirstChildOfClass("UIScale")
 	return sc and sc.Scale or 1
+end
+-- Where the Cash box starts on the canvas. Roblox's top bar keeps its pixel height while the canvas scales, so this has to
+-- be worked out from the bar: a fixed canvas offset slides under it as the screen gets smaller.
+function UI.hudTop()
+	local gs = game:GetService("GuiService")
+	local bar = math.max(gs.TopbarInset.Max.Y, (gs:GetGuiInset()).Y)
+	return math.max(78, math.ceil((bar + 10) / UI.hudScale()))
+end
+-- runs fn now and whenever the canvas or the top bar changes size
+function UI.watchHud(gui, fn)
+	UI.canvas(gui):GetPropertyChangedSignal("AbsoluteSize"):Connect(fn)
+	game:GetService("GuiService"):GetPropertyChangedSignal("TopbarInset"):Connect(fn)
+	fn()
 end
 -- FindFirstChild anywhere below, waiting up to timeout seconds (things may move into a canvas)
 function UI.findDeep(parent, name, timeout)

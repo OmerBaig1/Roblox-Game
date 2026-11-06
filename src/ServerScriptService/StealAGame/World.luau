@@ -2042,10 +2042,10 @@ function World.build(C, Kit)
 		local pos = ENTRANCE + Vector3.new(128, 0, -20)
 		W.HatcheryCF = CFrame.lookAt(pos, pos + Vector3.new(1, 0, -1))
 	end
-	-- The Fusing Machine mirrors it, just outside the right console tower, also facing out toward the bases
+	-- The Fusing Machine stands beside the Trail Shop, in front of the right console tower, facing the same way as the shop
 	do
-		local pos = ENTRANCE + Vector3.new(-128, 0, -20)
-		W.FuseCF = CFrame.lookAt(pos, pos + Vector3.new(-1, 0, -1))
+		local pos = ENTRANCE + Vector3.new(-88, 0, -29)
+		W.FuseCF = CFrame.lookAt(pos, pos + Vector3.new(0, 0, -1))
 	end
 
 	------------------------------------------------------------------

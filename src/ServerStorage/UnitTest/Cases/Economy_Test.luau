@@ -2,6 +2,7 @@
 -- The rule: a game from a deeper area earns more than any game from a shallower one, except
 --   * a Legendary may earn up to 10% more than a Common from the very next area
 --   * a premium rarity (Mythic and up) may beat the next area's Common and Uncommon, nothing better
+--   * in the first area, whole-dollar income may reach $1 past a next-area game (each rarity must earn at least $1 more)
 return function(t)
 	local C = require(game:GetService("ServerScriptService").StealAGame.Config)
 	local expect = t.expect
@@ -58,7 +59,7 @@ return function(t)
 		for level = 1, C.NUM_LEVELS do
 			for r = 2, #C.RARITIES do
 				if C.rarityAllowed(level, r) then
-					expect.truthy(C.gameIncome(level, r) >= C.gameIncome(level, r - 1))
+					expect.truthy(C.gameIncome(level, r) > C.gameIncome(level, r - 1))
 				end
 			end
 		end
@@ -79,6 +80,7 @@ return function(t)
 									local nextArea = zb == za + 1
 									local ok = nextArea and r1 == LEGENDARY and r2 == 1 and low <= high * 1.1
 										or nextArea and r1 > LEGENDARY and r2 <= 2
+											or za == 1 and nextArea and low <= high + 1
 									if ok and r1 == LEGENDARY then
 										legendaryBeats += 1
 									end

@@ -260,13 +260,13 @@ local function pickGame(level)
 	return #list
 end
 
-local function makeRecord(level, gi, income, installTime, progress, r)
+local function makeRecord(level, gi, installTime, progress, r)
 	local L = C.LEVELS[level]
 	local g = L and L.Games[gi]
 	if not g then return nil end
 	r = math.clamp(math.floor(tonumber(r) or 1), 1, #C.RARITIES)
 	local info = C.RARITIES[r]
-	local rec = {Id = HttpService:GenerateGUID(false), L = level, G = gi, R = r, Name = g.Name, Rarity = info.Name, Color = info.Color, Income = income, InstallTime = installTime, Progress = progress or 0}
+	local rec = {Id = HttpService:GenerateGUID(false), L = level, G = gi, R = r, Name = g.Name, Rarity = info.Name, Color = info.Color, Income = C.gameIncome(level, r), InstallTime = installTime, Progress = progress or 0}
 	rec.Installed = rec.Progress >= rec.InstallTime
 	return rec
 end
@@ -291,15 +291,13 @@ end
 local function newGame(level, gi, forcedRarity)
 	local L = C.LEVELS[level]
 	local r = forcedRarity or rollRarity(level)
-	-- income comes from the level's band and the rarity only (C.gameIncome), so deeper always means richer
-	local income = C.gameIncome(level, r)
 	local chanceFactor = (40 / L.Games[gi].Chance) ^ 0.3
 	local installTime = math.max(5, math.floor(L.InstallBase * chanceFactor * C.RARITY_INSTALL_MULT ^ (r - 1) + 0.5))
-	return makeRecord(level, gi, income, installTime, 0, r)
+	return makeRecord(level, gi, installTime, 0, r)
 end
 
 -- A save from before the expansion (no V) stored games as (old level 1-50, game 1-4): look the game up by name
--- and give it its new (level, game). Its income, rarity and install progress are kept as they were.
+-- and give it its new (level, game). Its rarity and install progress are kept; income always comes from C.gameIncome.
 local function migrateGame(g)
 	local names = C.LEGACY[tonumber(g.L)]
 	local name = names and names[tonumber(g.G)]
@@ -337,7 +335,9 @@ end
 -- Sparkles and auras that get flashier the rarer the area
 local function emitter(parent, props)
 	local pe = Instance.new("ParticleEmitter")
-	pe.LightEmission = 1
+	-- mostly solid colour: purely additive light vanishes against the bright walls and floors behind the cases
+	pe.LightEmission = 0.35
+	pe.LightInfluence = 0
 	pe.LockedToPart = false
 	for k, v in pairs(props) do
 		pe[k] = v
@@ -353,6 +353,11 @@ local function addAura(item, rec)
 		-- kept soft: the case's white posts and glass sit right next to it and blow out under bloom
 		light.Range = 7 + zi * 0.6
 		light.Brightness = 0.45 + zi * 0.07
+	end
+	-- Epic and up also get their own signature effect, drawn by each player's client while they're near it (RarityFx)
+	if zi >= 4 then
+		item:SetAttribute("FxRarity", zi)
+		item:AddTag("RarityFx")
 	end
 	if zi < 3 then return end
 	local colors
@@ -1697,6 +1702,11 @@ local function applyTrail(player)
 		local t = C.TRAILS[idx]
 		player:SetAttribute("TrailName", t and t.Name or nil)
 		player:SetAttribute("TrailHex", t and t.Colors and (t.Colors[2] or t.Colors[1]):ToHex() or nil)
+		local hexes = {}
+		for i, c in ipairs(t and t.Colors or {}) do
+			hexes[i] = c:ToHex()
+		end
+		player:SetAttribute("TrailColors", table.concat(hexes, ","))
 	end
 	local t = C.TRAILS[idx]
 	if not t then return end
@@ -2891,6 +2901,7 @@ do
 end
 
 local function recToSave(rec, slotIndex)
+	-- I is only written for older builds to read: loading recalculates income, so a rebalance reaches every saved copy
 	return {L = rec.L, G = rec.G, R = rec.R, I = rec.Income, T = rec.InstallTime, P = math.floor(rec.Progress), S = slotIndex}
 end
 
@@ -2948,6 +2959,8 @@ end
 
 local function writeSave(player, data)
 	if not saveStore then return false end
+	-- Studio tests can switch saving off (set this attribute on the Server) so they never touch the real save
+	if RunService:IsStudio() and ServerStorage:GetAttribute("DevNoSave") then return true end
 	local key = "Player_" .. player.UserId
 	for attempt = 1, 3 do
 		local ok, err = pcall(function()
@@ -3140,7 +3153,7 @@ end
 local function restoreGames(player, plot, games)
 	local leftovers = {}
 	for _, g in ipairs(games) do
-		local rec = makeRecord(tonumber(g.L), tonumber(g.G), tonumber(g.I) or 1, tonumber(g.T) or 30, tonumber(g.P) or 0, tonumber(g.R) or 1)
+		local rec = makeRecord(tonumber(g.L), tonumber(g.G), tonumber(g.T) or 30, tonumber(g.P) or 0, tonumber(g.R) or 1)
 		if rec then
 			local slot = g.S and plot.Slots[tonumber(g.S)]
 			if slot and not slot.Item then
@@ -3427,9 +3440,10 @@ local function onPlayerAdded(player)
 						finished += 1
 					end
 				end
-				if g.S and tonumber(g.L) then
+				if g.S and C.LEVELS[tonumber(g.L)] then
 					local earning = p >= t and away or math.max(0, away - (t - p) / C.OFFLINE_INSTALL_RATE)
-					offline += (tonumber(g.I) or 0) * levelFactor(player, {L = tonumber(g.L)}) * earning
+					local r = math.clamp(math.floor(tonumber(g.R) or 1), 1, #C.RARITIES)
+					offline += C.gameIncome(tonumber(g.L), r) * levelFactor(player, {L = tonumber(g.L)}) * earning
 				end
 			end
 			offline = math.floor(offline * offlineCashRate(player))
@@ -3789,9 +3803,20 @@ task.spawn(function()
 
 				table.sort(installing, function(a, b) return (a.InstallTime - a.Progress) < (b.InstallTime - b.Progress) end)
 				table.sort(installed, function(a, b) return a.Income > b.Income end)
-				libraryEvent:FireClient(owner, {Installing = installing, Installed = installed, IncomePerSecond = income})
+				-- only when something changed, plus every few seconds for a client script that was still loading
+				local library = {Installing = installing, Installed = installed, IncomePerSecond = income}
+				local libraryKey = owner.UserId .. HttpService:JSONEncode(library)
+				if libraryKey ~= plot.LibraryKey or now >= (plot.LibraryAt or 0) then
+					plot.LibraryKey, plot.LibraryAt = libraryKey, now + 5
+					libraryEvent:FireClient(owner, library)
+				end
 			end
 
+			-- the belt's speed, for the clients that animate it: faster every treadmill level (6 to 16 studs/s), kept under the
+			-- speed where the slats seem to strobe. Here, so a machine rebuilt by an upgrade picks it up.
+			if plot.TreadModel then
+				plot.TreadModel:SetAttribute("BeltSpeed", plot.Runner and 6 + 0.25 * (plot.Runner:GetAttribute("TreadLevel") or 0) or 0)
+			end
 			-- Lock timer (see refreshLock): settled every second, which also picks up chases starting and ending
 			refreshLock(plot)
 			if plot.LockLeft > 0 then
@@ -3838,23 +3863,9 @@ task.spawn(function()
 	end
 end)
 
--- Every frame: treadmill belts. Every 0.1s: training, deliveries, locks.
+-- Every 0.1s: training, deliveries, locks.
 local checkTimer = 0
 RunService.Heartbeat:Connect(function(dt)
-	for _, plot in ipairs(plots) do
-		local runner = plot.Runner
-		if runner and #plot.Slats > 0 then
-			-- faster every treadmill level (6 to 16 studs/s); kept under the speed where the slats seem to strobe
-			local beltSpeed = 6 + 0.25 * (runner:GetAttribute("TreadLevel") or 0)
-			local span = Base.SLAT_COUNT * Base.SLAT_GAP
-			plot.SlatOffset = (plot.SlatOffset + beltSpeed * dt) % span
-			for i, slat in ipairs(plot.Slats) do
-				local z = Base.BELT_START + ((i - 1) * Base.SLAT_GAP + plot.SlatOffset) % span
-				slat.CFrame = plot.BeltCF * CFrame.new(0, 0, z)
-			end
-		end
-	end
-
 	checkTimer += dt
 	if checkTimer < 0.1 then return end
 	local step = checkTimer

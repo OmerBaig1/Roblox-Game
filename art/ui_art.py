@@ -467,20 +467,6 @@ def hud_plus(c):
     c.paint(d, WHITE, (255, 240, 200), ink=s * .05, shade=0)
 
 
-def hud_trail(c):
-    # a ribbon of light streaming off to the right: white, so the game tints it with the equipped trail's colour
-    W, H = c.w, c.h
-    t = np.clip(c.x / W, 0, 1)
-    fade = np.clip((1 - t) * 1.25, 0, 1) ** 1.2
-    for off, freq, amp, width, alpha in ((0, 1.5, 12, 27, 1.0), (-40, 1.9, 9, 11, .8), (42, 1.2, 10, 13, .8)):
-        mid = H / 2 + off * (.45 + .55 * t) + np.sin(t * freq * np.pi * 2 + off) * amp * t
-        w = width * (1 - t * .75)
-        d = np.abs(c.y - mid) - w
-        c._over(np.array(WHITE, np.float32), c._cov(d) * fade * alpha)
-    for x, y, r in ((.34, .16, 8), (.52, .84, 7), (.68, .2, 6), (.82, .72, 5)):
-        c._over(np.array(WHITE, np.float32), c._cov(c.circ(W * x, H * y, r)) * fade)
-
-
 def hud_fuse(c):
     # three game cases feeding one glowing core
     for i in range(12):
@@ -560,7 +546,7 @@ ALL = {
     "speedS": item_speedS, "speedM": item_speedM, "speedL": item_speedL, "speedXL": item_speedXL, "speedXXL": item_speedXXL,
     "cash5": item_cash5, "cashS": item_cashS, "cashL": item_cashL, "cashXL": item_cashXL, "cashXXL": item_cashXXL,
     "hud_shop": hud_shop, "hud_index": hud_index, "hud_fuse": hud_fuse, "mystery": item_mystery,
-    "hud_plus": (hud_plus, 128, 128), "hud_trail": (hud_trail, 512, 128),
+    "hud_plus": (hud_plus, 128, 128),
     "tortoise_body": tortoise_body, "tortoise_head": (tortoise_head, 288, 288),
 }
 

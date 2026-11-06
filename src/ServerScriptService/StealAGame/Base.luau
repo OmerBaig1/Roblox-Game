@@ -343,7 +343,7 @@ function Base.new(index, cf, parent)
 	local plot = {
 		Index = index, CF = cf, Model = model, Accent = accent, Owner = nil,
 		Slots = {}, Floors = 1, Cases = 0, FloorModels = {}, Bank = 0, LockedUntil = 0,
-		Runner = nil, SlatOffset = 0, Slats = {},
+		Runner = nil, Slats = {},
 		-- the treadmill sits in the front yard, a little to the right of the entrance and well clear
 		-- of it, with its console facing out toward the lobby
 		TreadCF = cf * CFrame.new(C.TREAD_OFFSET_X, 0, FRONT - C.TREAD_OFFSET_Z),
@@ -526,7 +526,7 @@ local function buildCase(plot, slotIndex, callbacks)
 
 	local ped = part(model, {Name = "Pedestal", Size = Vector3.new(5.5, 2, 5.5), CFrame = cf, Color = L.Pedestal, Material = M.Marble})
 	part(model, {Name = "CaseBase", Size = Vector3.new(5.9, 0.3, 5.9), CFrame = cf * CFrame.new(0, 1.15, 0), Color = accent:Lerp(Color3.new(0, 0, 0), 0.15), Material = M.SmoothPlastic})
-	part(model, {Name = "CaseGlass", Size = Vector3.new(5.3, 6.4, 5.3), CFrame = cf * CFrame.new(0, 4.5, 0), Color = rgb(220, 240, 255), Material = M.SmoothPlastic, Transparency = 0.9, Reflectance = 0.1, CanCollide = false})
+	-- no glass pane: any see-through part in front of them hides a case's particles, beams and trails
 	for _, cx in ipairs({-2.7, 2.7}) do
 		for _, cz in ipairs({-2.7, 2.7}) do
 			part(model, {Name = "CasePost", Size = Vector3.new(0.3, 6.4, 0.3), CFrame = cf * CFrame.new(cx, 4.5, cz), Color = L.Trim, Material = M.Metal})
@@ -691,6 +691,14 @@ function Base.rebuildTreadmill(plot, level, labelText)
 	local model = Instance.new("Model")
 	model.Name = "Treadmill"
 	plot.Slats = TreadModels.build(level, model, plot.TreadCF)
+	-- the client runs the belt from these (StealAGameClient), so the server sends nothing per frame
+	for i, slat in ipairs(plot.Slats) do
+		slat:SetAttribute("SlatIndex", i)
+		slat:AddTag("BeltSlat")
+	end
+	model:SetAttribute("BeltCF", plot.BeltCF)
+	model:SetAttribute("BeltSpeed", 0)
+	model:AddTag("TreadBelt")
 	model.Parent = plot.Model
 	plot.TreadModel = model
 	plot.TreadLabel.Text = labelText

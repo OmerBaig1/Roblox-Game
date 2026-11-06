@@ -1,0 +1,609 @@
+--[[
+	FuseUI: the Fusing Machine's screen, and its animation in the world.
+	The list comes from the same Library message as My Games, so it can't disagree with your cases. You pick exactly
+	which three copies go in; the server checks everything again and does the swap the moment you press FUSE, before any
+	of the show below plays.
+]]
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local UI = require(ReplicatedStorage:WaitForChild("UIKit"))
+local K = require(ReplicatedStorage:WaitForChild("MenuKit"))
+local CP = require(ReplicatedStorage:WaitForChild("CasePackaging"))
+local GameViewer = require(ReplicatedStorage:WaitForChild("GameViewer"))
+local RewardFx = require(ReplicatedStorage:WaitForChild("RewardFx"))
+local GameArt = require(ReplicatedStorage:WaitForChild("GameArt"))
+local remotes = ReplicatedStorage:WaitForChild("StealAGameRemotes")
+local fuseFunction = remotes:WaitForChild("FuseGames")
+local player = Players.LocalPlayer
+local new, C, RGB = UI.new, K.C, Color3.fromRGB
+local WHITE, BLACK = Color3.new(1, 1, 1), Color3.new(0, 0, 0)
+local CYAN, PINK = RGB(70, 240, 255), RGB(255, 80, 190)
+local COPIES = 3
+
+local function tween(obj, t, props, style, dir)
+	local tw = TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+	tw:Play()
+	return tw
+end
+
+local gui = new("ScreenGui", {Name = "FuseUI", ResetOnSpawn = false, DisplayOrder = 8, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = player:WaitForChild("PlayerGui")})
+local win = K.window(gui, {Name = "Fuse", W = 1080, H = 640, Title = "Fusing Machine", IconImage = GameArt.HudFuse, Accent = RGB(70, 170, 240), Accent2 = RGB(170, 70, 240), Motion = "pop"})
+local body = win.Body -- 1080 x 572
+
+------------------------------------------------------------------
+-- THE LIST: every game and rarity you own, ready ones first
+------------------------------------------------------------------
+local LW = 336
+K.text({Text = "Your games", FontFace = K.TITLE, TextSize = 22, Position = UDim2.fromOffset(22, 10), Size = UDim2.fromOffset(LW, 28), ZIndex = 3, Parent = body})
+local listFrame = new("ScrollingFrame", {Position = UDim2.fromOffset(14, 42), Size = UDim2.fromOffset(LW, 516), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 6, ScrollBarImageColor3 = WHITE, ScrollBarImageTransparency = 0.45,
+	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, ZIndex = 3, Parent = body},
+	{new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}), new("UIPadding", {PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 8)})})
+local emptyNote = K.text({Text = "Steal some games from the Vault first!", TextSize = 17, TextColor3 = C.Text2, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(30, 160), Size = UDim2.fromOffset(LW - 40, 60), Visible = false, ZIndex = 4, Parent = body})
+
+------------------------------------------------------------------
+-- THE BENCH: three slots, then the game they make
+------------------------------------------------------------------
+local BX = LW + 34
+local bench = new("Frame", {Position = UDim2.fromOffset(BX, 14), Size = UDim2.fromOffset(1080 - BX - 20, 306), BackgroundColor3 = WHITE, ZIndex = 3, Parent = body}, {K.corner(20), K.stroke(CYAN, 2, 0.55)})
+new("UIGradient", {Rotation = 90, Color = ColorSequence.new(C.Surface2:Lerp(RGB(40, 120, 200), 0.2), C.Surface), Parent = bench})
+local SW, SH = 126, 172
+local slots = {}
+for i = 1, COPIES do
+	local x = 18 + (i - 1) * (SW + 14)
+	local f = new("Frame", {Position = UDim2.fromOffset(x, 18), Size = UDim2.fromOffset(SW, SH), BackgroundColor3 = C.PanelLow, ClipsDescendants = true, ZIndex = 4, Parent = bench}, {K.corner(10)})
+	new("UIStroke", {Color = CYAN, Thickness = 2, Transparency = 0.45, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = f})
+	local plus = K.text({Text = tostring(i), FontFace = K.TITLE, TextSize = 46, TextColor3 = CYAN, TextTransparency = 0.5, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 5, Parent = f})
+	local where = K.text({Text = "", TextSize = 13, TextColor3 = C.Text2, TextXAlignment = Enum.TextXAlignment.Center, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(x - 4, 194), Size = UDim2.fromOffset(SW + 8, 18), ZIndex = 4, Parent = bench})
+	slots[i] = {Frame = f, Plus = plus, Where = where, Id = nil}
+end
+local RX = 18 + COPIES * (SW + 14) + 44
+K.icon(bench, "right", 30, CYAN, 5).Position = UDim2.fromOffset(RX - 24, 104)
+local resultW, resultH = 130, 176
+local resultSlot = new("Frame", {Position = UDim2.fromOffset(RX, 16), Size = UDim2.fromOffset(resultW, resultH), BackgroundColor3 = C.PanelLow, ClipsDescendants = true, ZIndex = 4, Parent = bench}, {K.corner(10)})
+local resultStroke = new("UIStroke", {Color = RGB(255, 205, 70), Thickness = 3, Transparency = 0.2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = resultSlot})
+local resultQ = K.text({Text = "?", FontFace = K.TITLE, TextSize = 60, TextColor3 = RGB(255, 205, 70), TextTransparency = 0.4, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 5, Parent = resultSlot})
+local resultRarity = K.text({Text = "", FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(RX - 6, 194), Size = UDim2.fromOffset(resultW + 12, 18), ZIndex = 4, Parent = bench})
+
+local nameLabel = K.text({Text = "Pick a game", FontFace = K.TITLE, TextSize = 24, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(20, 218), Size = UDim2.new(1, -260, 0, 30), ZIndex = 4, Parent = bench})
+local earnLabel = K.text({Text = "", RichText = true, TextSize = 16, TextColor3 = C.Text2, Position = UDim2.fromOffset(20, 248), Size = UDim2.new(1, -260, 0, 22), ZIndex = 4, Parent = bench})
+local noteLabel = K.text({Text = "", RichText = true, TextSize = 14, TextColor3 = C.Muted, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, Position = UDim2.fromOffset(20, 270), Size = UDim2.new(1, -260, 0, 34), ZIndex = 4, Parent = bench})
+local fuseButton = K.button({Text = "FUSE", Kind = "primary", TextSize = 24, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -18, 1, -16), Size = UDim2.fromOffset(214, 66), ZIndex = 5, Parent = bench})
+
+-- the copies of the chosen game: tap one to put it in or take it out
+K.text({Text = "Choose which copies go in", FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 16, TextColor3 = C.Text2, Position = UDim2.fromOffset(BX + 4, 330), Size = UDim2.fromOffset(500, 22), ZIndex = 3, Parent = body})
+local copyList = new("ScrollingFrame", {Position = UDim2.fromOffset(BX, 354), Size = UDim2.fromOffset(1080 - BX - 20, 204), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 6, ScrollBarImageColor3 = WHITE, ScrollBarImageTransparency = 0.45,
+	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, ZIndex = 3, Parent = body},
+	{new("UIGridLayout", {CellSize = UDim2.fromOffset(322, 56), CellPadding = UDim2.fromOffset(10, 8), SortOrder = Enum.SortOrder.LayoutOrder}), new("UIPadding", {PaddingLeft = UDim.new(0, 3), PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 6)})})
+
+------------------------------------------------------------------
+-- STATE
+------------------------------------------------------------------
+local groups, groupOrder, listKey = {}, {}, ""
+local selected -- a group key
+local picked = {} -- ids, in slot order
+local busy = false
+local armedUntil = 0 -- the second tap needed when copies that are earning would be used
+local rows = {}
+
+local function copySort(a, b)
+	-- suggested first: copies not earning anything yet, then the ones earning least
+	local ae, be = a.Income or -1, b.Income or -1
+	if ae ~= be then
+		return ae < be
+	end
+	return a.Id < b.Id
+end
+
+local function getCopy(id)
+	local g = selected and groups[selected]
+	if g then
+		for _, c in ipairs(g.Copies) do
+			if c.Id == id then
+				return c
+			end
+		end
+	end
+end
+
+local function earningPicked()
+	local n, total = 0, 0
+	for _, id in ipairs(picked) do
+		local c = getCopy(id)
+		if c and c.Income then
+			n += 1
+			total += c.Income
+		end
+	end
+	return n, total
+end
+
+local function paintBench()
+	local g = selected and groups[selected]
+	for i, slot in ipairs(slots) do
+		local id = picked[i]
+		if slot.Id ~= id or (id == nil and slot.Frame:FindFirstChild("Cover")) then
+			slot.Id = id
+			local old = slot.Frame:FindFirstChild("Cover")
+			if old then
+				old:Destroy()
+			end
+			if id and g then
+				local cover = CP.Cover({Name = g.Name, Rarity = g.Rarity, Color = g.Color})
+				cover.Parent = slot.Frame
+				local sc = new("UIScale", {Scale = 0.8, Parent = cover})
+				tween(sc, 0.22, {Scale = 1}, Enum.EasingStyle.Back)
+			end
+		end
+		slot.Plus.Visible = id == nil
+		local c = id and getCopy(id)
+		slot.Where.Text = c and (c.Where .. (c.Income and "" or "  \u{2022}  not earning")) or ""
+	end
+	-- the result
+	local key = g and g.Fuse and g.Name .. g.Fuse.Rarity or ""
+	if resultSlot:GetAttribute("Key") ~= key then
+		resultSlot:SetAttribute("Key", key)
+		local old = resultSlot:FindFirstChild("Cover")
+		if old then
+			old:Destroy()
+		end
+		if g and g.Fuse then
+			local color = Color3.fromHex(g.Fuse.Color)
+			CP.Cover({Name = g.Name, Rarity = g.Fuse.Rarity, Color = color}).Parent = resultSlot
+			resultStroke.Color = color:Lerp(WHITE, 0.2)
+		else
+			resultStroke.Color = RGB(255, 205, 70)
+		end
+	end
+	resultQ.Visible = not (g and g.Fuse)
+	if not g then
+		nameLabel.Text = #groupOrder > 0 and "Pick a game from your list" or "No games yet"
+		earnLabel.Text = ""
+		noteLabel.Text = "Three copies of one game at the same rarity fuse into one copy at the next rarity."
+		resultRarity.Text = ""
+		fuseButton.setText("FUSE")
+		fuseButton.setEnabled(false)
+		return
+	end
+	nameLabel.Text = g.Name
+	local have, needed = #g.Copies, COPIES
+	if not g.Fuse then
+		resultRarity.Text = "TOP RARITY"
+		resultRarity.TextColor3 = C.Muted
+		earnLabel.Text = string.format("%s is as rare as this game gets in its area.", g.Rarity)
+		noteLabel.Text = ""
+		fuseButton.setText("Top rarity")
+		fuseButton.setEnabled(false)
+		return
+	end
+	local nextColor = Color3.fromHex(g.Fuse.Color)
+	resultRarity.Text = string.upper(g.Fuse.Rarity)
+	resultRarity.TextColor3 = nextColor:Lerp(WHITE, 0.3)
+	earnLabel.Text = string.format('Earns <font color="#78ff96">$%s/s</font> instead of $%s/s per copy', UI.fmt(g.Fuse.Earn), UI.fmt(g.Fuse.Now))
+	local earning, lost = earningPicked()
+	if have < needed then
+		noteLabel.Text = string.format('<font color="#ffbe46">You have %d of %d copies.</font> Find %d more in the Vault.', have, needed, needed - have)
+	elseif #picked < COPIES then
+		noteLabel.Text = string.format("Pick %d more below.", COPIES - #picked)
+	elseif earning > 0 then
+		noteLabel.Text = string.format('<font color="#ffbe46">%d of these %s earning $%s/s now.</font> You keep $%s/s and %d case%s free up.', earning, earning == 1 and "is" or "are", UI.fmt(lost), UI.fmt(g.Fuse.Earn), COPIES - 1, COPIES - 1 == 1 and "" or "s")
+	else
+		noteLabel.Text = "None of these are earning yet, so nothing is lost."
+	end
+	local ready = #picked == COPIES and not busy
+	if os.clock() < armedUntil and ready then
+		fuseButton.setText("Tap to confirm")
+	else
+		fuseButton.setText(busy and "Fusing..." or "FUSE")
+	end
+	fuseButton.setEnabled(ready)
+end
+
+local function paintCopies()
+	local g = selected and groups[selected]
+	for _, ch in ipairs(copyList:GetChildren()) do
+		if ch:IsA("GuiObject") then
+			ch:Destroy()
+		end
+	end
+	if not g then
+		return
+	end
+	for order, c in ipairs(g.Copies) do
+		local on = table.find(picked, c.Id) ~= nil
+		local b = new("TextButton", {LayoutOrder = order, BackgroundColor3 = on and RGB(40, 120, 150) or C.Surface, AutoButtonColor = false, Text = "", ZIndex = 4, Parent = copyList}, {K.corner(12), K.stroke(on and CYAN or WHITE, on and 2.5 or 1.5, on and 0.05 or 0.86)})
+		K.text({Text = on and "\u{2713}" or "", FontFace = K.TITLE, TextSize = 24, TextColor3 = CYAN, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(8, 0), Size = UDim2.fromOffset(28, 56), ZIndex = 5, Parent = b})
+		K.text({Text = c.Where, FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 17, Position = UDim2.fromOffset(40, 7), Size = UDim2.new(1, -50, 0, 22), ZIndex = 5, Parent = b})
+		local line = c.Income and ("Earning $" .. UI.fmt(c.Income) .. "/s") or (c.Carrying and "In your hands, not earning" or string.format("Installing %d%%", math.floor(c.Progress / math.max(c.InstallTime, 1) * 100)))
+		K.text({Text = line, TextSize = 14, TextColor3 = c.Income and RGB(255, 190, 70) or RGB(140, 255, 160), Position = UDim2.fromOffset(40, 30), Size = UDim2.new(1, -50, 0, 18), ZIndex = 5, Parent = b})
+		b.Activated:Connect(function()
+			if busy then
+				return
+			end
+			local at = table.find(picked, c.Id)
+			if at then
+				table.remove(picked, at)
+			elseif #picked < COPIES then
+				table.insert(picked, c.Id)
+			else
+				UI.sfx("deny")
+				return
+			end
+			armedUntil = 0
+			UI.sfx("tap")
+			paintCopies()
+			paintBench()
+		end)
+	end
+end
+
+local function select(key)
+	selected = key
+	picked = {}
+	armedUntil = 0
+	local g = key and groups[key]
+	if g and g.Fuse then
+		for i = 1, math.min(COPIES, #g.Copies) do
+			picked[i] = g.Copies[i].Id
+		end
+	end
+	for k, row in pairs(rows) do
+		local on = k == key
+		row.Stroke.Transparency = on and 0.05 or 0.86
+		row.Stroke.Color = on and CYAN or WHITE
+		row.Stroke.Thickness = on and 2.5 or 1.5
+	end
+	paintCopies()
+	paintBench()
+end
+
+local function rebuildList()
+	for _, row in pairs(rows) do
+		row.Frame:Destroy()
+	end
+	rows = {}
+	for order, key in ipairs(groupOrder) do
+		local g = groups[key]
+		local canFuse = g.Fuse ~= nil and #g.Copies >= COPIES
+		local b = new("TextButton", {Name = "Group", LayoutOrder = order, Size = UDim2.new(1, 0, 0, 66), BackgroundColor3 = WHITE, AutoButtonColor = false, Text = "", ZIndex = 4, Parent = listFrame}, {K.corner(14)})
+		local stroke = K.stroke(WHITE, 1.5, 0.86)
+		stroke.Parent = b
+		new("UIGradient", {Rotation = 90, Color = ColorSequence.new((canFuse and C.Surface2:Lerp(g.Color, 0.35) or C.Surface2), C.Surface), Parent = b})
+		new("Frame", {Position = UDim2.fromOffset(0, 10), Size = UDim2.new(0, 5, 1, -20), BackgroundColor3 = g.Color, BorderSizePixel = 0, ZIndex = 5, Parent = b}, {K.corner()})
+		K.text({Text = g.Name, FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 17, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(16, 8), Size = UDim2.new(1, -24, 0, 22), ZIndex = 5, Parent = b})
+		K.text({Text = string.upper(g.Rarity), FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 13, TextColor3 = g.Color:Lerp(WHITE, 0.35), Position = UDim2.fromOffset(16, 34), Size = UDim2.fromOffset(150, 18), ZIndex = 5, Parent = b})
+		-- one pip per copy needed: filled as you own them; a tick when it's ready
+		local pips = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 34), Size = UDim2.fromOffset(120, 20), BackgroundTransparency = 1, ZIndex = 5, Parent = b},
+			{new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder})})
+		if not g.Fuse then
+			K.text({Text = "Top rarity", TextSize = 13, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Right, Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = pips})
+		else
+			for i = 1, COPIES do
+				local have = i <= #g.Copies
+				new("Frame", {LayoutOrder = i, Size = UDim2.fromOffset(14, 14), BackgroundColor3 = have and CYAN or C.PanelLow, ZIndex = 6, Parent = pips}, {K.corner(), K.stroke(have and WHITE or CYAN, 1.5, have and 0.4 or 0.55)})
+			end
+			if #g.Copies > COPIES then
+				K.text({Text = "\u{00D7}" .. #g.Copies, LayoutOrder = 9, FontFace = K.font(Enum.FontWeight.Heavy), TextSize = 14, TextColor3 = CYAN, Size = UDim2.fromOffset(30, 20), TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 6, Parent = pips})
+			end
+		end
+		b.Activated:Connect(function()
+			if not busy then
+				UI.sfx("tap")
+				select(key)
+			end
+		end)
+		rows[key] = {Frame = b, Stroke = stroke}
+	end
+	emptyNote.Visible = #groupOrder == 0
+end
+
+-- the same list My Games shows, grouped. Only rebuilt when your copies really change.
+local function onLibrary(info)
+	local fresh, order, sig = {}, {}, {}
+	for _, list in ipairs({info.Installing or {}, info.Installed or {}}) do
+		for _, e in ipairs(list) do
+			if e.R then
+				local key = e.Name .. "|" .. e.R
+				local g = fresh[key]
+				if not g then
+					g = {Key = key, Name = e.Name, Rarity = e.Rarity, R = e.R, Color = Color3.fromHex(e.Color), Fuse = e.Fuse, Copies = {}}
+					fresh[key] = g
+					table.insert(order, key)
+				end
+				table.insert(g.Copies, e)
+				table.insert(sig, e.Id .. (e.Income and "i" or ""))
+			end
+		end
+	end
+	for _, g in pairs(fresh) do
+		table.sort(g.Copies, copySort)
+	end
+	table.sort(order, function(a, b)
+		local ga, gb = fresh[a], fresh[b]
+		local ra, rb = (ga.Fuse and #ga.Copies >= COPIES) and 1 or 0, (gb.Fuse and #gb.Copies >= COPIES) and 1 or 0
+		if ra ~= rb then
+			return ra > rb
+		end
+		if #ga.Copies ~= #gb.Copies then
+			return #ga.Copies > #gb.Copies
+		end
+		if ga.R ~= gb.R then
+			return ga.R > gb.R
+		end
+		return ga.Name < gb.Name
+	end)
+	table.sort(sig)
+	local key = table.concat(sig, ",")
+	groups, groupOrder = fresh, order
+	if key ~= listKey then
+		listKey = key
+		if busy then
+			return -- the fusion's own ending refreshes the screen
+		end
+		rebuildList()
+		if selected and not groups[selected] then
+			selected = nil
+			picked = {}
+		end
+		-- a copy you'd picked that's gone (sold, stolen) leaves its slot
+		for i = #picked, 1, -1 do
+			if not getCopy(picked[i]) then
+				table.remove(picked, i)
+			end
+		end
+		if selected and rows[selected] then
+			rows[selected].Stroke.Transparency = 0.05
+			rows[selected].Stroke.Color = CYAN
+			rows[selected].Stroke.Thickness = 2.5
+		end
+		paintCopies()
+		paintBench()
+	end
+end
+remotes:WaitForChild("Library").OnClientEvent:Connect(onLibrary)
+
+------------------------------------------------------------------
+-- THE FUSION, on screen
+------------------------------------------------------------------
+local stage = new("Frame", {Name = "FuseStage", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, ZIndex = 40, Parent = bench})
+local function playFusion(g, info)
+	local color = Color3.fromHex(info.Color)
+	stage.Visible = true
+	local mid = UDim2.fromOffset(18 + COPIES * (SW + 14) / 2 - 7, 18 + SH / 2)
+	-- 1. the three games leave their slots and slide into the chamber
+	local flying = {}
+	for i, slot in ipairs(slots) do
+		local cover = slot.Frame:FindFirstChild("Cover")
+		if cover then
+			local x = slot.Frame.Position.X.Offset + SW / 2
+			local holder = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(x, 18 + SH / 2), Size = UDim2.fromOffset(SW, SH), BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 44, Parent = stage})
+			cover.Parent = holder
+			flying[i] = holder
+		end
+		slot.Plus.Visible = false
+		slot.Where.Text = ""
+	end
+	-- 2. the chamber charges: rings tighten round the middle
+	local rings = {}
+	for k = 1, 3 do
+		local r = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid, Size = UDim2.fromOffset(300 - k * 40, 300 - k * 40), BackgroundTransparency = 1, ZIndex = 42, Parent = stage}, {K.corner()})
+		local st = new("UIStroke", {Color = k % 2 == 0 and PINK or CYAN, Thickness = 5, Transparency = 0.15, Parent = r})
+		rings[k] = {Frame = r, Stroke = st}
+		tween(r, 1.5, {Size = UDim2.fromOffset(70, 70)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	end
+	-- energy streaking in from all round
+	local streaks = {}
+	for k = 1, 14 do
+		local a = k / 14 * math.pi * 2
+		local dot = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid + UDim2.fromOffset(math.cos(a) * 190, math.sin(a) * 130), Size = UDim2.fromOffset(9, 9), BackgroundColor3 = k % 2 == 0 and PINK or CYAN, BorderSizePixel = 0, ZIndex = 43, Parent = stage}, {K.corner()})
+		streaks[k] = dot
+		task.delay(k * 0.07, function()
+			tween(dot, 0.5, {Position = mid, Size = UDim2.fromOffset(3, 3)}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		end)
+	end
+	UI.sfx("page", 0.7)
+	for _, holder in pairs(flying) do
+		tween(holder, 0.9, {Position = mid, Size = UDim2.fromOffset(SW * 0.55, SH * 0.55)}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+	end
+	task.wait(0.9)
+	UI.sfx("unlock", 0.85)
+	task.wait(0.55)
+	-- 3. they combine: a flash, and the new game
+	for _, holder in pairs(flying) do
+		holder:Destroy()
+	end
+	for _, r in ipairs(rings) do
+		r.Frame:Destroy()
+	end
+	for _, dot in ipairs(streaks) do
+		dot:Destroy()
+	end
+	UI.sfx(g.R >= 4 and "hatchlegend" or "hatchrare")
+	local flash = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid, Size = UDim2.fromOffset(40, 40), BackgroundColor3 = color:Lerp(WHITE, 0.7), ZIndex = 45, Parent = stage}, {K.corner()})
+	tween(flash, 0.45, {Size = UDim2.fromOffset(620, 620), BackgroundTransparency = 1})
+	task.delay(0.5, flash.Destroy, flash)
+	for k = 1, 3 do
+		local shock = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid, Size = UDim2.fromOffset(30, 30), BackgroundTransparency = 1, ZIndex = 44, Parent = stage}, {K.corner()})
+		local st = new("UIStroke", {Color = color:Lerp(WHITE, k * 0.25), Thickness = 7, Parent = shock})
+		task.delay(k * 0.09, function()
+			tween(shock, 0.55, {Size = UDim2.fromOffset(460, 460)})
+			tween(st, 0.55, {Transparency = 1, Thickness = 1})
+		end)
+		task.delay(0.8, shock.Destroy, shock)
+	end
+	-- 4. the upgraded game comes out on rays of its colour
+	local rays = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid, Size = UDim2.fromOffset(420, 420), BackgroundTransparency = 1, ZIndex = 45, Parent = stage})
+	for i = 0, 7 do
+		local ray = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 26, 1, 0), Rotation = i * 22.5, BackgroundColor3 = color:Lerp(WHITE, 0.45), BorderSizePixel = 0, ZIndex = 45, Parent = rays})
+		new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.25), NumberSequenceKeypoint.new(1, 1)}), Parent = ray})
+	end
+	local turning = RunService.RenderStepped:Connect(function(dt)
+		rays.Rotation += dt * 40
+	end)
+	local rec = {Name = info.Name, Rarity = info.Rarity, Color = color}
+	local reveal = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = mid, Size = UDim2.fromOffset(SW * 1.05, SH * 1.05), BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 46, Parent = stage})
+	CP.Cover(rec).Parent = reveal
+	local sc = new("UIScale", {Scale = 0.2, Parent = reveal})
+	tween(sc, 0.5, {Scale = 1.05}, Enum.EasingStyle.Back)
+	RewardFx.confetti(reveal.AbsolutePosition + reveal.AbsoluteSize / 2, {Count = 30, Colors = {color, color:Lerp(WHITE, 0.6), RGB(255, 225, 110)}, Reach = 300})
+	nameLabel.Text = string.upper(info.Rarity) .. " " .. info.Name .. "!"
+	nameLabel.TextColor3 = color:Lerp(WHITE, 0.45)
+	earnLabel.Text = string.format('Earns <font color="#78ff96">$%s/s</font> once installed  \u{2022}  %s', UI.fmt(info.Income), info.Where)
+	noteLabel.Text = ""
+	task.wait(2)
+	tween(sc, 0.22, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+	task.wait(0.24)
+	turning:Disconnect()
+	rays:Destroy()
+	reveal:Destroy()
+	stage.Visible = false
+	nameLabel.TextColor3 = WHITE
+	if not win.Frame.Visible then
+		-- you closed the window mid-way: you still get to see what you made
+		RewardFx.reward({Title = string.upper(info.Rarity) .. " GAME!", Sub = info.Name, Color = color, Kind = "game", Rarity = info.Rarity, Poster = CP.Cover(rec), Badge = "FUSED"})
+	end
+end
+
+fuseButton.Activated:Connect(function()
+	if busy or #picked ~= COPIES then
+		return
+	end
+	local g = selected and groups[selected]
+	if not g then
+		return
+	end
+	-- copies that are earning right now take a second tap: nothing you're using goes in by accident
+	local earning = earningPicked()
+	if earning > 0 and os.clock() >= armedUntil then
+		armedUntil = os.clock() + 4
+		UI.sfx("deny", 1.2)
+		fuseButton.shake()
+		paintBench()
+		task.delay(4.05, paintBench)
+		return
+	end
+	armedUntil = 0
+	busy = true
+	paintBench()
+	local ok, info = fuseFunction:InvokeServer(picked)
+	if not ok then
+		busy = false
+		noteLabel.Text = '<font color="#ff8a8a">' .. tostring(info) .. "</font>"
+		fuseButton.setText("FUSE")
+		fuseButton.setEnabled(#picked == COPIES)
+		return
+	end
+	playFusion(g, info)
+	busy = false
+	picked = {}
+	selected = nil
+	listKey = "" -- the next Library message rebuilds the list with the new game in it
+	paintCopies()
+	paintBench()
+end)
+
+remotes:WaitForChild("OpenFuse").OnClientEvent:Connect(function()
+	if not win.Frame.Visible then
+		GameViewer.close()
+		win.Open()
+		UI.sfx("menuopen")
+	end
+end)
+
+------------------------------------------------------------------
+-- THE MACHINE IN THE WORLD: only animated while you're near it
+------------------------------------------------------------------
+local map = workspace:WaitForChild("StealAGameMap")
+local NEAR = 260
+local model
+local rig
+local function buildRig(m)
+	local frame = m:GetAttribute("Frame")
+	local cy = m:GetAttribute("CenterY")
+	local r = {Frame = frame, CY = cy, Core = m:WaitForChild("FuseCore"), Beacon = m:WaitForChild("FuseBeacon"), Result = m:WaitForChild("FuseResult"), Flash = m:WaitForChild("FuseFlash"), Rings = {}, Cases = {}}
+	r.Light = r.Core:WaitForChild("CoreLight")
+	r.Sparks = r.Core:WaitForChild("CoreSparks")
+	for i, name in ipairs({"RingA", "RingB"}) do
+		local folder = m:WaitForChild(name)
+		r.Rings[i] = {Y = folder:GetAttribute("Y"), Segs = folder:GetChildren(), Dir = i == 1 and 1 or -1}
+	end
+	for i = 1, 3 do
+		local case = m:WaitForChild("FuseCase" .. i)
+		r.Cases[i] = {Part = case, Art = case:FindFirstChildWhichIsA("BasePart"), Home = Vector3.new(case:GetAttribute("HomeX"), case:GetAttribute("HomeY"), case:GetAttribute("HomeZ")), Deg = case:GetAttribute("Deg"), Phase = i * 2.1}
+	end
+	return r
+end
+task.spawn(function()
+	model = map:WaitForChild("Lobby"):WaitForChild("FusingMachine", 60)
+	if model then
+		rig = buildRig(model)
+	end
+end)
+local FUSE_LEN = 3.8
+local spin = 0
+RunService.RenderStepped:Connect(function(dt)
+	if not rig then
+		return
+	end
+	local cam = workspace.CurrentCamera
+	if not cam or (cam.CFrame.Position - rig.Frame.Position).Magnitude > NEAR then
+		return
+	end
+	local t = os.clock()
+	local age = workspace:GetServerTimeNow() - (model:GetAttribute("FusedAt") or -100)
+	local active = age >= 0 and age < FUSE_LEN
+	local charge = active and math.clamp(age / 1.6, 0, 1) or 0 -- 0 idle .. 1 about to flash
+	spin += dt * (0.7 + charge * charge * 11)
+	for _, ring in ipairs(rig.Rings) do
+		for _, seg in ipairs(ring.Segs) do
+			local a = seg:GetAttribute("Angle") + spin * ring.Dir
+			local r = seg:GetAttribute("Radius") * (1 - charge * 0.28)
+			local y = ring.Y + math.sin(t * 1.3 + ring.Dir) * 0.35 + (ring.Y - rig.CY) * -charge * 0.5
+			seg.CFrame = rig.Frame * CFrame.new(math.cos(a) * r, y, math.sin(a) * r) * CFrame.Angles(0, -a, 0)
+		end
+	end
+	-- the core breathes when idle, swells as it charges, and the beacon pulses
+	local pulse = (math.sin(t * 2.2) + 1) / 2
+	rig.Core.Size = Vector3.one * (3.9 + pulse * 0.7 + charge * 3)
+	rig.Light.Brightness = 2 + pulse + charge * 7
+	rig.Beacon.Size = Vector3.one * (2.7 + pulse * 0.6)
+	rig.Sparks.Rate = 10 + charge * 70
+	-- the three cases hover at their pods; in a fusion they fly into the chamber one after the other
+	for i, c in ipairs(rig.Cases) do
+		local home = c.Home + Vector3.new(0, math.sin(t * 1.5 + c.Phase) * 0.4, 0)
+		local rot = CFrame.Angles(0, math.rad(c.Deg + 180) + math.sin(t * 0.7 + c.Phase) * 0.35, 0)
+		local k = active and math.clamp((age - (i - 1) * 0.12) / 0.95, 0, 1) or 0
+		k = k * k * (3 - 2 * k)
+		local into = Vector3.new(0, rig.CY, 0)
+		local pos = home:Lerp(into, k) + Vector3.new(0, math.sin(k * math.pi) * 3, 0)
+		local gone = active and age > 1.1
+		local cf = rig.Frame * CFrame.new(pos) * rot * CFrame.Angles(0, k * 8, 0)
+		c.Part.CFrame = gone and (rig.Frame * CFrame.new(0, -30, 0)) or cf
+		if c.Art then
+			c.Art.CFrame = gone and c.Part.CFrame or cf * CFrame.new(0, -0.25, 0)
+		end
+	end
+	-- the flash, and the new game rising out of the chamber in its rarity's colour
+	local flashK = active and (age - 1.6) / 0.45 or -1
+	if flashK >= 0 and flashK <= 1 then
+		rig.Flash.Color = Color3.fromHex(model:GetAttribute("FuseColor") or "ffffff"):Lerp(WHITE, 0.6)
+		rig.Flash.Size = Vector3.one * (6 + flashK * 42)
+		rig.Flash.Transparency = 0.1 + flashK * 0.9
+		rig.Flash.CFrame = rig.Frame * CFrame.new(0, rig.CY, 0)
+	elseif rig.Flash.Transparency ~= 1 then
+		rig.Flash.Transparency = 1
+		rig.Flash.CFrame = rig.Frame * CFrame.new(0, -30, 0)
+	end
+	if active and age > 1.65 then
+		local up = math.clamp((age - 1.65) / 0.6, 0, 1)
+		local fade = math.clamp((FUSE_LEN - age) / 0.4, 0, 1)
+		rig.Result.Color = Color3.fromHex(model:GetAttribute("FuseColor") or "ffcd46")
+		rig.Result.Transparency = 1 - fade
+		rig.Result.CFrame = rig.Frame * CFrame.new(0, rig.CY + up * 1.5, 0) * CFrame.Angles(0, t * 3, 0)
+	elseif rig.Result.Transparency ~= 1 then
+		rig.Result.Transparency = 1
+		rig.Result.CFrame = rig.Frame * CFrame.new(0, -30, 0)
+	end
+end)
