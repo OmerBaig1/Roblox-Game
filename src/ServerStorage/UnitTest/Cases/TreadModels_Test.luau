@@ -20,6 +20,15 @@ return function(t)
 	local function bounds(p)
 		local cf = TM.ORIGIN:ToObjectSpace(p.CFrame)
 		local s = p.Size / 2
+		-- a wedge only fills half its box: measure its six real corners
+		if p:IsA("WedgePart") then
+			local lo, hi = Vector3.one * math.huge, -Vector3.one * math.huge
+			for _, c in ipairs({{-1, -1, -1}, {1, -1, -1}, {-1, -1, 1}, {1, -1, 1}, {-1, 1, 1}, {1, 1, 1}}) do
+				local v = cf:PointToWorldSpace(Vector3.new(c[1] * s.X, c[2] * s.Y, c[3] * s.Z))
+				lo, hi = lo:Min(v), hi:Max(v)
+			end
+			return lo, hi
+		end
 		local ext = s
 		if not (p:IsA("Part") and p.Shape == Enum.PartType.Ball) then
 			local X, Y, Z = cf.XVector, cf.YVector, cf.ZVector
@@ -35,7 +44,8 @@ return function(t)
 	local function problems(model)
 		local out = {}
 		for _, p in ipairs(model:GetDescendants()) do
-			if p:IsA("BasePart") and p.Name ~= "Slat" then
+			-- (fully invisible parts only carry effects, and can't hide anyone)
+			if p:IsA("BasePart") and p.Name ~= "Slat" and p.Transparency < 1 then
 				local lo, hi = bounds(p)
 				local function bad(why)
 					local c = (lo + hi) / 2
@@ -138,8 +148,81 @@ return function(t)
 		end
 		expect.equal(TM.tier(#TM.MODELS - 1).Name, "MAX")
 		expect.equal(TM.rank(0), 1)
-		expect.equal(TM.rank(7), 8)
-		expect.equal(TM.rank(8), 1)
+		expect.equal(TM.rank(2), 3)
+		expect.equal(TM.rank(3), 1)
+		expect.equal(TM.rank(#TM.MODELS - 1), TM.LEVELS_PER_TIER)
+	end)
+
+	t.test("prices and speed rise at every step, and each step costs more per speed gained", function()
+		expect.equal(#C.TREAD_GAINS, C.TREAD_MAX_LEVEL + 1)
+		expect.equal(#C.TREAD_COSTS, C.TREAD_MAX_LEVEL)
+		local lastRatio = 0
+		for level = 0, C.TREAD_MAX_LEVEL - 1 do
+			expect.truthy(C.treadGain(level + 1) > C.treadGain(level))
+			local ratio = C.treadCost(level) / (C.treadGain(level + 1) - C.treadGain(level))
+			expect.truthy(ratio > lastRatio)
+			lastRatio = ratio
+			if level > 0 then
+				expect.truthy(C.treadCost(level) > C.treadCost(level - 1))
+			end
+		end
+		-- no cheap first purchases: the old first three were $200, $400 and $800
+		expect.truthy(C.treadCost(0) >= 2000)
+	end)
+
+	t.test("an old 0-40 save never trains slower on the new ladder", function()
+		expect.equal(C.treadLevelFromOld(0), 0)
+		expect.equal(C.treadLevelFromOld(40), C.TREAD_MAX_LEVEL)
+		local last = 0
+		for old = 0, 40 do
+			local new = C.treadLevelFromOld(old)
+			expect.truthy(new >= last)
+			last = new
+			expect.truthy(C.treadGain(new) >= 1.4 ^ old)
+		end
+	end)
+
+	t.test("travelling parts follow paths that stay on the pad", function()
+		local report = {}
+		for level, b in pairs(built) do
+			for _, d in ipairs(b.Model:GetDescendants()) do
+				if d:HasTag("TreadAnim") and d:GetAttribute("Fx") == "travel" then
+					local i = 1
+					while d:GetAttribute("P" .. i) do
+						local p = TM.ORIGIN:PointToObjectSpace(d:GetPivot():PointToWorldSpace(d:GetAttribute("P" .. i)))
+						if math.abs(p.X) > E.HalfW + 0.3 or p.Z < E.FrontZ - 0.3 or p.Z > E.BackZ + 0.3 or p.Y > E.MaxY + 0.3 or p.Y < -0.5 then
+							table.insert(report, string.format("L%d %s: %s point %d at (%.1f, %.1f, %.1f)", level, b.Name, d:GetChildren()[1].Name, i, p.X, p.Y, p.Z))
+						end
+						i += 1
+					end
+					expect.truthy(i > 2)
+				end
+			end
+		end
+		if #report > 0 then
+			error(table.concat(report, "\n"))
+		end
+	end)
+
+	t.test("everything that moves is marked with a kind the client knows", function()
+		local kinds = {spin = true, swing = true, slide = true, orbit = true, travel = true, gauge = true, pulse = true, flicker = true, bolt = true}
+		for level, b in pairs(built) do
+			local n = 0
+			for _, d in ipairs(b.Model:GetDescendants()) do
+				if d:HasTag("TreadAnim") then
+					n += 1
+					expect.truthy(kinds[d:GetAttribute("Fx")])
+					expect.truthy(#d:GetChildren() > 0)
+				end
+			end
+			-- every machine has to be visibly alive, and the belt must stay directly under the machine for the client's belt loop
+			if n < 5 then
+				error(string.format("L%d %s only has %d moving groups", level, b.Name, n))
+			end
+			for _, slat in ipairs(b.Slats) do
+				expect.equal(slat.Parent, b.Model)
+			end
+		end
 	end)
 
 	-- the multiset of part shapes and sizes, so a recolour or a copy with one extra piece gets caught

@@ -163,7 +163,7 @@ C.SKIP_PRODUCTS = {
 C.PRODUCTS = {
 	-- Section decides where it shows in the shop: "featured", "boost", "speed" or "cash"
 	{Key = "Starter", Section = "featured", Id = 0, Name = "Starter Pack", Desc = "$25K, +5,000 speed and an Epic game (once per player)", Price = 99, OneTime = true},
-	{Key = "Treadmill", Section = "boost", Id = 0, Name = "Treadmill Upgrade", Desc = "+1 treadmill level instantly", Price = 49},
+	{Key = "Treadmill", Section = "boost", Id = 0, Name = "Treadmill Upgrade", Desc = "Unlock your next treadmill instantly", Price = 149},
 	-- SPEED PACKS: a fixed amount of speed (same units as the speed counter)
 	{Key = "SpeedS", Section = "speed", Id = 0, Name = "Speed Snack", Amount = 10000, Price = 9},
 	{Key = "SpeedM", Section = "speed", Id = 0, Name = "Speed Boost", Amount = 100000, Price = 29},
@@ -252,41 +252,34 @@ function C.realSpeed(points)
 	return math.min(C.MAX_REAL_SPEED, C.REAL_BASE_SPEED * (points / C.START_SPEED) ^ C.REAL_SPEED_POWER)
 end
 
--- Treadmill: level 0 gives +1 speed point per second, each upgrade multiplies that.
--- Rate grows slower than cost (and slower than the shopkeepers), so every vault level takes real
--- training: roughly L5 ~10 min, L10 ~25 min, L20 ~1.5 h, L30 ~4 h, L50 ~40 h of active play.
-C.TREAD_BASE_RATE = 1
-C.TREAD_RATE_GROWTH = 1.4
-C.TREAD_MAX_LEVEL = 40
--- Upgrade prices follow the economy. The price of level T is a stretch of the income a player training at that
--- level typically has (stealing around vault level T + 3, owning 12 -> 96 cases as they go, with better rarities).
--- The stretch grows from 20 seconds of income for the first upgrade to 6 hours for the last, so each step costs
--- about 1.7x the one before. The early levels keep their old doubling prices (200, 400, 800...) where those are
--- cheaper, so new players level up fast. (The old doubling all the way up asked ~580 hours of income for the last.)
-C.TREAD_COST_BASE = 200
-C.TREAD_COST_GROWTH = 2.0
-C.TREAD_COST_FIRST_MINUTES = 1 / 3
-C.TREAD_COST_LAST_MINUTES = 360
+-- Treadmills: 15 machines, level 0 (free) to level 14. TREAD_GAINS is the speed each gives per second, about 2.6x the one
+-- before, ending near the old 41-level ladder's 700k/s so the time needed to train for each vault level hasn't changed
+-- (4 to 17 minutes per step, measured against C.recommendedSpeed).
+-- TREAD_COSTS[n] buys level n. Measured against the income model the old prices used, they ask for about 2 minutes of early
+-- income (a starter's 4 cases at $20/s) and rise to about 10 hours for the last. The first four are roughly 2x what the
+-- same speed cost on the old ladder ($200/$400/$800 took seconds to earn); the later ones match it, about $7T in total.
+C.TREAD_GAINS = {1, 3, 8, 20, 50, 130, 350, 900, 2500, 6500, 17000, 45000, 120000, 320000, 800000}
+C.TREAD_COSTS = {2500, 25000, 150000, 750000, 4e6, 2e7, 1e8, 5e8, 2.5e9, 1.2e10, 5e10, 2.5e11, 1.2e12, 6e12}
+C.TREAD_MAX_LEVEL = #C.TREAD_COSTS
+C.TREAD_SAVE_VERSION = 2 -- saves without this hold a level on the old 0-40 ladder
 
-function C.treadRate(level)
-	return C.TREAD_BASE_RATE * C.TREAD_RATE_GROWTH ^ level
-end
+-- the price of going from `level` to the next one
 function C.treadCost(level)
-	local early = C.TREAD_COST_BASE * C.TREAD_COST_GROWTH ^ level
-	-- d is how deep (on the original 50-level scale) a player training at this level steals from
-	local d = math.clamp(level + 3, 1, 50)
-	local V = C.levelAtDepth(d)
-	local income = C.LEVELS[V].IncomeBase * (12 * 8 ^ ((d - 1) / 49)) * (1.1 + 0.8 * (d - 1) / 49)
-	local minutes = C.TREAD_COST_FIRST_MINUTES * (C.TREAD_COST_LAST_MINUTES / C.TREAD_COST_FIRST_MINUTES) ^ (level / (C.TREAD_MAX_LEVEL - 1))
-	local cost = math.min(early, income * 60 * minutes)
-	-- two significant figures, so prices read cleanly
-	local e = 10 ^ (math.floor(math.log10(cost)) - 1)
-	return math.floor(cost / e + 0.5) * e
+	return C.TREAD_COSTS[level + 1]
 end
--- The exact amount the treadmill gives every second (rounded so the label and the pop-ups always match)
+-- The exact amount the treadmill gives every second
 function C.treadGain(level)
-	local r = C.treadRate(level)
-	return r < 10 and math.floor(r * 10 + 0.5) / 10 or math.floor(r)
+	return C.TREAD_GAINS[math.clamp(level, 0, C.TREAD_MAX_LEVEL) + 1]
+end
+-- An old 0-40 level becomes the first new treadmill that's at least as fast, so nobody trains slower after the change
+function C.treadLevelFromOld(old)
+	local rate = 1.4 ^ old
+	for level = 0, C.TREAD_MAX_LEVEL do
+		if C.TREAD_GAINS[level + 1] >= rate then
+			return level
+		end
+	end
+	return C.TREAD_MAX_LEVEL
 end
 
 -- Shopkeepers (speed points, same scale as players)
@@ -380,6 +373,7 @@ C.SLAP_RANGE = 8
 C.PLOT_W = 64
 C.PLOT_D = 84
 C.FLOOR_H = 20
+C.GROUND_H = 28                 -- the ground floor is taller, so it stays roomy once a second floor sits on it
 C.CASES_PER_FLOOR = 8           -- on the Starter base (4 on each side); bigger bases have more
 C.START_CASES = 4
 C.MAX_FLOORS = 4                -- the biggest base type has 4 floors

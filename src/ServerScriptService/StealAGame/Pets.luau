@@ -273,18 +273,21 @@ local function buildHatchery(lobby, cf)
 		e:SetAttribute("Base", e:GetPivot())
 		e.Parent = model
 	end
-	-- big arch sign over the entrance
+	-- a low wooden sign on the ground in front of the stage: part of the garden, not an advert
+	local wood, dark = rgb(150, 104, 62), rgb(86, 56, 34)
+	local SX, SZ = 0, -19.6
 	for _, sx in ipairs({-1, 1}) do
-		Kit.cylinder(model, 20, 1.4, at(sx * 9, 11, -15), {Name = "ArchPost", Color = rgb(255, 255, 255), Material = M.Marble})
-		part(model, {Name = "ArchTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2.6, 2.6, 2.6), CFrame = at(sx * 9, 21.5, -15), Color = rgb(255, 120, 200), Material = M.Neon, CanCollide = false})
+		part(model, {Name = "SignPost", Size = Vector3.new(0.7, 4.6, 0.7), CFrame = at(SX + sx * 4.2, 2.3, SZ), Color = dark, Material = M.Wood, CanCollide = false})
+		part(model, {Name = "SignPostCap", Shape = Enum.PartType.Ball, Size = Vector3.new(1, 1, 1), CFrame = at(SX + sx * 4.2, 4.7, SZ), Color = rgb(255, 150, 210), Material = M.SmoothPlastic, CanCollide = false})
 	end
-	-- dark board with bright lettering (white on pink washed out in the sun)
-	local sign = part(model, {Name = "Sign", Size = Vector3.new(19, 4.6, 0.6), CFrame = at(0, 19, -15), Color = rgb(60, 25, 70)})
-	Kit.surfaceText(sign, Enum.NormalId.Front, "PET HATCHERY", rgb(255, 160, 220), 30)
-	Kit.surfaceText(sign, Enum.NormalId.Back, "PET HATCHERY", rgb(255, 160, 220), 30)
-	part(model, {Name = "SignFrame", Size = Vector3.new(20, 5.6, 0.4), CFrame = at(0, 19, -14.7), Color = rgb(255, 220, 100), Material = M.Neon})
+	part(model, {Name = "SignBack", Size = Vector3.new(9.4, 3, 0.3), CFrame = at(SX, 2.9, SZ + 0.1), Color = wood, Material = M.WoodPlanks, CanCollide = false})
+	local sign = part(model, {Name = "HatcherySign", Size = Vector3.new(8.6, 2.3, 0.2), CFrame = at(SX, 2.9, SZ - 0.1), Color = rgb(60, 28, 66), Material = M.SmoothPlastic, CanCollide = false})
+	Kit.surfaceText(sign, Enum.NormalId.Front, "PET HATCHERY", rgb(255, 190, 230), 40)
+	-- flowers at the sign's foot
+	for i, c in ipairs({rgb(255, 120, 190), rgb(255, 220, 90), rgb(170, 130, 255), rgb(255, 120, 190)}) do
+		part(model, {Name = "SignFlower", Shape = Enum.PartType.Ball, Size = Vector3.new(0.8, 0.8, 0.8), CFrame = at(SX - 3 + (i - 1) * 2, 0.45, SZ - 0.5), Color = c, Material = M.SmoothPlastic, CanCollide = false})
+	end
 	local anchor = part(model, {Name = "HatchAnchor", Size = Vector3.new(1, 1, 1), CFrame = at(0, 4, -9), Transparency = 1, CanCollide = false})
-	Kit.billboard(anchor, 320, 64, 15, '<font color="#ff9be0">PET HATCHERY</font>\nPets make your games install faster!', 200)
 	local prompt = Kit.prompt(anchor, "Hatch Eggs", "Pet Hatchery", 0, 16)
 	prompt.Triggered:Connect(function(player)
 		deps.OpenEvent:FireClient(player)

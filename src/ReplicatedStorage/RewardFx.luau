@@ -51,8 +51,12 @@ local function showToast()
 	if toasting or #toastQueue == 0 then
 		return
 	end
-	toasting = true
 	local o = table.remove(toastQueue, 1)
+	-- a toast can wait behind others: Prepare fills it in when it's really about to show, or drops it if it's no longer true
+	if o.Prepare and not o.Prepare(o) then
+		return showToast()
+	end
+	toasting = true
 	local accent = o.Accent or K.C.Green
 	local W, H = 392, 74
 	local top = math.max(6, (GuiService:GetGuiInset().Y - H * screenScale()) / 2)
@@ -69,7 +73,9 @@ local function showToast()
 	local ring = new("Frame", {AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 14, 0.5, 0), Size = UDim2.fromOffset(54, 54), BackgroundColor3 = WHITE, ZIndex = 6, Parent = card}, {K.corner()})
 	new("UIGradient", {Rotation = 120, Color = ColorSequence.new(accent:Lerp(WHITE, 0.4), accent:Lerp(Color3.new(), 0.25)), Parent = ring})
 	local face = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, -6, 1, -6), BackgroundColor3 = K.C.Surface2, ZIndex = 7, Parent = ring}, {K.corner()})
-	if o.UserId then
+	if o.Draw then
+		o.Draw(face) -- the caller draws its own little icon
+	elseif o.UserId then
 		local img = new("ImageLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 8, Parent = face}, {K.corner()})
 		task.spawn(function()
 			local ok, url = pcall(Players.GetUserThumbnailAsync, Players, o.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)

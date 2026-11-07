@@ -10,6 +10,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CasePackaging = require(ReplicatedStorage:WaitForChild("CasePackaging"))
 local TreadModels = require(script.Parent.TreadModels)
+local Debris = game:GetService("Debris")
 
 local Base = {}
 local Environment = require(script.Parent.Environment)
@@ -23,6 +24,9 @@ local PLOT_COLORS = {
 
 local CASE_X = 24
 local ROW_GAP = 14
+-- the outside stairs: how wide, and how far out from the wall their centre is
+local STAIR_W, STAIR_OUT = 9.5, 5.75
+local LANDING_OUT = 10.8 -- how far the landing reaches past the wall
 local GAP_Z1, GAP_Z2, LOW_GAP_Z1, LOW_GAP_Z2, STAIR_Z0, STAIR_Z1
 
 function Base.init(config, kit)
@@ -34,7 +38,19 @@ function Base.init(config, kit)
 end
 
 local function floorY(f)
-	return (f - 1) * C.FLOOR_H
+	return f <= 1 and 0 or C.GROUND_H + (f - 2) * C.FLOOR_H
+end
+-- height from this floor to the next
+local function floorHeight(f)
+	return f <= 1 and C.GROUND_H or C.FLOOR_H
+end
+-- how tall the walls stand, floor level to the top of the wall (the cornice sits on it)
+local function wallHeight(f)
+	return f <= 1 and C.GROUND_H - 3 or 14
+end
+-- the very top of a base with `floors` floors
+local function baseTop(floors)
+	return floorY(floors) + floorHeight(floors)
 end
 Base.floorY = floorY
 
@@ -63,18 +79,18 @@ end
 
 function Base.insidePlot(plot, position)
 	local lp = plot.CF:PointToObjectSpace(position)
-	return math.abs(lp.X) <= C.PLOT_W / 2 + 10 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < (plot.Look and plot.Look.Floors or 2) * C.FLOOR_H + 10
+	return math.abs(lp.X) <= C.PLOT_W / 2 + 12 and lp.Z >= FRONT and lp.Z <= backZ(plot) and lp.Y > -5 and lp.Y < baseTop(plot.Look and plot.Look.Floors or 2) + 10
 end
 
 -- The area insidePlot counts as the base, sideways and front to back: the HUD measures how far away it is
 function Base.bounds(plot)
-	return C.PLOT_W / 2 + 10, FRONT, backZ(plot)
+	return C.PLOT_W / 2 + 12, FRONT, backZ(plot)
 end
 
 -- Strictly inside the walls (not on the stairs or the treadmill outside)
 function Base.insideCore(plot, position)
 	local lp = plot.CF:PointToObjectSpace(position)
-	return math.abs(lp.X) < C.PLOT_W / 2 - 1 and lp.Z > FRONT + 1 and lp.Z < backZ(plot) - 1 and lp.Y > -5 and lp.Y < (plot.Look and plot.Look.Floors or 2) * C.FLOOR_H + 10
+	return math.abs(lp.X) < C.PLOT_W / 2 - 1 and lp.Z > FRONT + 1 and lp.Z < backZ(plot) - 1 and lp.Y > -5 and lp.Y < baseTop(plot.Look and plot.Look.Floors or 2) + 10
 end
 
 -- Every lock wall of a base: the front, and the doorway at the top of each staircase
@@ -101,7 +117,7 @@ local function wallRun(parent, plot, f, cf, len, inward)
 	local rgb, M, part = Kit.rgb, Kit.M, Kit.part
 	local L = plot.Look
 	local y0 = floorY(f)
-	local H = 14
+	local H = wallHeight(f)
 	local at = function(x, y, z) return cf * CFrame.new(x, y0 + y, z) end
 	part(parent, {Name = "Wall", Size = Vector3.new(len, H, 1), CFrame = at(0, 1 + H / 2, 0), Color = L.Wall, Material = L.WallMat})
 	-- lower panelling and chair rail (inside face)
@@ -109,7 +125,11 @@ local function wallRun(parent, plot, f, cf, len, inward)
 	part(parent, {Name = "ChairRail", Size = Vector3.new(len, 0.45, 0.5), CFrame = at(0, 5.8, inward * 0.7), Color = L.Trim, Material = L.TrimMat})
 	part(parent, {Name = "Baseboard", Size = Vector3.new(len, 0.8, 0.45), CFrame = at(0, 1.4, inward * 0.72), Color = L.Trim, Material = L.TrimMat})
 	-- accent stripe in the plot's colour
-	part(parent, {Name = "Stripe", Size = Vector3.new(len, 0.7, 0.2), CFrame = at(0, 11.6, inward * 0.6), Color = plot.Accent, Material = M.SmoothPlastic, CanCollide = false})
+	part(parent, {Name = "Stripe", Size = Vector3.new(len, 0.7, 0.2), CFrame = at(0, H - 2.4, inward * 0.6), Color = plot.Accent, Material = M.SmoothPlastic, CanCollide = false})
+	if f == 1 then
+		-- the taller ground floor gets a picture rail, so the extra height reads as designed rather than just empty wall
+		part(parent, {Name = "PictureRail", Size = Vector3.new(len, 0.4, 0.45), CFrame = at(0, 14, inward * 0.7), Color = L.Trim, Material = L.TrimMat})
+	end
 	-- cornice on top
 	part(parent, {Name = "Cornice", Size = Vector3.new(len + 0.4, 0.9, 1.8), CFrame = at(0, 1 + H + 0.45, 0), Color = L.Trim, Material = L.TrimMat})
 	if L.Glow then
@@ -121,9 +141,10 @@ local function addPilaster(parent, plot, f, cf, inward, lamp)
 	local M, part = Kit.M, Kit.part
 	local L = plot.Look
 	local y0 = floorY(f)
-	part(parent, {Name = "Pilaster", Size = Vector3.new(1.6, 14, 0.8), CFrame = cf * CFrame.new(0, y0 + 8, inward * 0.85), Color = L.Trim, Material = L.TrimMat})
+	local wallH = wallHeight(f)
+	part(parent, {Name = "Pilaster", Size = Vector3.new(1.6, wallH, 0.8), CFrame = cf * CFrame.new(0, y0 + 1 + wallH / 2, inward * 0.85), Color = L.Trim, Material = L.TrimMat})
 	if lamp then
-		local sconce = part(parent, {Name = "Sconce", Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = cf * CFrame.new(0, y0 + 9.5, inward * 1.6), Color = Color3.fromRGB(255, 240, 200), Material = M.Neon, CanCollide = false})
+		local sconce = part(parent, {Name = "Sconce", Shape = Enum.PartType.Ball, Size = Vector3.new(1.3, 1.3, 1.3), CFrame = cf * CFrame.new(0, y0 + (f == 1 and 14 or 9.5), inward * 1.6), Color = Color3.fromRGB(255, 240, 200), Material = M.Neon, CanCollide = false})
 		local glow = Instance.new("PointLight")
 		glow.Color = Color3.fromRGB(255, 235, 200)
 		glow.Range = 12
@@ -202,9 +223,9 @@ local function buildWalls(parent, plot, f)
 	-- Corner pillars
 	for _, sx in ipairs({-1, 1}) do
 		for _, z in ipairs({FRONT, BACK}) do
-			Kit.cylinder(parent, C.FLOOR_H, 3, plot.CF * CFrame.new(sx * W / 2, floorY(f) + C.FLOOR_H / 2, z), {Name = "Pillar", Color = L.Pillar, Material = L.PillarMat})
+			Kit.cylinder(parent, floorHeight(f), 3, plot.CF * CFrame.new(sx * W / 2, floorY(f) + floorHeight(f) / 2, z), {Name = "Pillar", Color = L.Pillar, Material = L.PillarMat})
 			if L.Glow then
-				part(parent, {Name = "PillarTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2.6, 2.6, 2.6), CFrame = plot.CF * CFrame.new(sx * W / 2, floorY(f) + C.FLOOR_H + 1, z), Color = plot.Accent, Material = M.Neon, CanCollide = false})
+				part(parent, {Name = "PillarTop", Shape = Enum.PartType.Ball, Size = Vector3.new(2.6, 2.6, 2.6), CFrame = plot.CF * CFrame.new(sx * W / 2, floorY(f) + floorHeight(f) + 1, z), Color = plot.Accent, Material = M.Neon, CanCollide = false})
 			end
 		end
 	end
@@ -245,18 +266,19 @@ local function buildShell(plot)
 	buildWalls(model, plot, 1)
 
 	-- Archway over the open front, with the base tier's name
-	part(model, {Name = "Arch", Size = Vector3.new(W, 2.6, 1.6), CFrame = at(0, 16.3, FRONT), Color = L.Trim, Material = L.TrimMat})
-	part(model, {Name = "ArchStripe", Size = Vector3.new(W - 2, 0.6, 1.7), CFrame = at(0, 15.2, FRONT), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
-	local tierSign = part(model, {Name = "TierSign", Size = Vector3.new(20, 2.4, 0.4), CFrame = at(0, 16.3, FRONT - 0.95), Color = L.Wall})
+	local archY = wallHeight(1) - 0.7
+	part(model, {Name = "Arch", Size = Vector3.new(W, 2.6, 1.6), CFrame = at(0, archY, FRONT), Color = L.Trim, Material = L.TrimMat})
+	part(model, {Name = "ArchStripe", Size = Vector3.new(W - 2, 0.6, 1.7), CFrame = at(0, archY - 1.1, FRONT), Color = accent, Material = M.SmoothPlastic, CanCollide = false})
+	local tierSign = part(model, {Name = "TierSign", Size = Vector3.new(20, 2.4, 0.4), CFrame = at(0, archY, FRONT - 0.95), Color = L.Wall})
 	local t = Kit.surfaceText(tierSign, Enum.NormalId.Front, string.upper(L.Name), accent:Lerp(Color3.new(0, 0, 0), 0.25), 30)
 	t.TextStrokeTransparency = 1
 
 	-- Nicer bases get extra decorations at the entrance
 	if L.Banners then
 		for _, sx in ipairs({-1, 1}) do
-			local banner = part(model, {Name = "Banner", Size = Vector3.new(4, 8, 0.3), CFrame = at(sx * (W / 2 - 4), 11, FRONT - 0.95), Color = accent, Material = M.Fabric, CanCollide = false})
-			Kit.wedge(model, {Name = "BannerTail", Size = Vector3.new(0.3, 1.6, 2), CFrame = at(sx * (W / 2 - 4) - 1, 6.2, FRONT - 0.95) * CFrame.Angles(0, math.pi / 2, math.pi), Color = accent, CanCollide = false})
-			Kit.wedge(model, {Name = "BannerTail", Size = Vector3.new(0.3, 1.6, 2), CFrame = at(sx * (W / 2 - 4) + 1, 6.2, FRONT - 0.95) * CFrame.Angles(0, -math.pi / 2, math.pi), Color = accent, CanCollide = false})
+			local banner = part(model, {Name = "Banner", Size = Vector3.new(4, 8, 0.3), CFrame = at(sx * (W / 2 - 4), 17, FRONT - 0.95), Color = accent, Material = M.Fabric, CanCollide = false})
+			Kit.wedge(model, {Name = "BannerTail", Size = Vector3.new(0.3, 1.6, 2), CFrame = at(sx * (W / 2 - 4) - 1, 12.2, FRONT - 0.95) * CFrame.Angles(0, math.pi / 2, math.pi), Color = accent, CanCollide = false})
+			Kit.wedge(model, {Name = "BannerTail", Size = Vector3.new(0.3, 1.6, 2), CFrame = at(sx * (W / 2 - 4) + 1, 12.2, FRONT - 0.95) * CFrame.Angles(0, -math.pi / 2, math.pi), Color = accent, CanCollide = false})
 			local star = Kit.surfaceText(banner, Enum.NormalId.Front, "\u{2605}", L.Trim, 30)
 			star.TextStrokeTransparency = 1
 		end
@@ -362,8 +384,8 @@ function Base.new(index, cf, parent)
 		Podium = {},
 	}
 
-	plot.Barrier = part(model, {Name = "LaserBarrier", Size = Vector3.new(W, 14, 0.4), CFrame = at(0, 8, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
-	local signPart = part(model, {Name = "Sign", Size = Vector3.new(1, 1, 1), CFrame = at(0, 20, FRONT), Transparency = 1, CanCollide = false})
+	plot.Barrier = part(model, {Name = "LaserBarrier", Size = Vector3.new(W, wallHeight(1) - 1, 0.4), CFrame = at(0, wallHeight(1) / 2, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
+	local signPart = part(model, {Name = "Sign", Size = Vector3.new(1, 1, 1), CFrame = at(0, baseTop(1) + 2, FRONT), Transparency = 1, CanCollide = false})
 	plot.SignPart = signPart
 	plot.SignLabel = Kit.billboard(signPart, 620, 110, 3, "Empty Base", 400)
 	-- the treadmill stands on its own platform in the front yard
@@ -429,7 +451,7 @@ function Base.new(index, cf, parent)
 	-- what the panel shows comes from these (the main script keeps Running, Cost and Maxed up to date)
 	plot.RunPrompt:SetAttribute("Kind", "run")
 	plot.TreadUpgradePrompt:SetAttribute("Kind", "upgrade")
-	local treadLabelPart = part(model, {Name = "TreadmillLabel", Size = Vector3.new(1, 1, 1), CFrame = plot.TreadCF * CFrame.new(0, 10.4, -16), Transparency = 1, CanCollide = false})
+	local treadLabelPart = part(model, {Name = "TreadmillLabel", Size = Vector3.new(1, 1, 1), CFrame = plot.TreadCF * CFrame.new(0, 14.2, -16), Transparency = 1, CanCollide = false})
 	plot.TreadLabel = Kit.billboard(treadLabelPart, 260, 64, 1, "TREADMILL", 90)
 
 	Base.setTier(plot, 1)
@@ -472,49 +494,65 @@ local function buildFloor(plot, f)
 		local s = stairSide(f)
 		part(model, {Name = "DoorBarrier", Size = Vector3.new(0.6, 14, GAP_Z2 - GAP_Z1), CFrame = at(s * (W / 2 - 0.5), y0 + 8, (GAP_Z1 + GAP_Z2) / 2), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
 		-- ...and across this floor's open front, floor to ceiling: only a low railing stands there otherwise
-		part(model, {Name = "DoorBarrier", Size = Vector3.new(W, C.FLOOR_H - 1, 0.6), CFrame = at(0, y0 + C.FLOOR_H / 2, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
+		part(model, {Name = "DoorBarrier", Size = Vector3.new(W, floorHeight(f) - 1, 0.6), CFrame = at(0, y0 + floorHeight(f) / 2, FRONT), Color = rgb(255, 40, 40), Material = M.Neon, Transparency = 1, CanCollide = false})
 	end
 	local floorSign = part(model, {Name = "FloorSign", Size = Vector3.new(12, 2.4, 0.3), CFrame = at(0, y0 + 18.2, BACK - 1.2), Color = rgb(25, 25, 32)})
 	Kit.surfaceText(floorSign, Enum.NormalId.Front, "FLOOR " .. f, accent, 30)
 
 	buildWalls(model, plot, f)
 
-	-- The floor below has 14-stud walls but floors are FLOOR_H apart: close that strip up to this slab
+	-- The floor below's walls stop short of this slab: close that strip up to it
 	-- (outer half of the wall only, so signs on the inside face stay visible), or thieves can climb
 	-- these stairs and slip over the wall into the locked floor below
 	do
-		local fillH = C.FLOOR_H - 15
-		local fy = floorY(f - 1) + 15 + fillH / 2
+		local wallTop = floorY(f - 1) + 1 + wallHeight(f - 1)
+		local fillH = y0 - wallTop
+		local fy = wallTop + fillH / 2
 		part(model, {Name = "WallFill", Size = Vector3.new(W, fillH, 0.5), CFrame = at(0, fy, BACK - 0.25), Color = L.Wall, Material = L.WallMat})
 		for _, side in ipairs({-1, 1}) do
 			part(model, {Name = "WallFill", Size = Vector3.new(0.5, fillH, D), CFrame = at(side * (W / 2 - 0.25), fy, MID), Color = L.Wall, Material = L.WallMat})
 		end
 		if f == 2 then
 			-- above the entrance arch
-			part(model, {Name = "WallFill", Size = Vector3.new(W, C.FLOOR_H - 17.6, 0.5), CFrame = at(0, (17.6 + C.FLOOR_H) / 2, FRONT), Color = L.Trim, Material = L.TrimMat})
+			local archTop = wallHeight(1) + 0.6
+			part(model, {Name = "WallFill", Size = Vector3.new(W, C.GROUND_H - archTop, 0.5), CFrame = at(0, (archTop + C.GROUND_H) / 2, FRONT), Color = L.Trim, Material = L.TrimMat})
 		end
 	end
 
 	-- Stairs from floor f-1 up to floor f, on the outside of one side wall
 	local s = stairSide(f)
-	local sx = s * (W / 2 + 4.5)
+	local sx = s * (W / 2 + STAIR_OUT)
 	local yb = floorY(f - 1) + 1
-	local rise = C.FLOOR_H
+	local rise = y0 - floorY(f - 1)
 	local run = STAIR_Z1 - STAIR_Z0
-	local steps = 20
+	local steps = math.ceil(rise)
 	for i = 1, steps do
 		local z = STAIR_Z0 + (i - 0.5) * run / steps
-		part(model, {Name = "Step", Size = Vector3.new(7, 0.8, run / steps + 0.1), CFrame = at(sx, yb + i * rise / steps - 0.4, z), Color = i % 2 == 0 and L.Trim or L.Wainscot, Material = M.SmoothPlastic, CanCollide = false})
+		part(model, {Name = "Step", Size = Vector3.new(STAIR_W, 0.8, run / steps + 0.1), CFrame = at(sx, yb + i * rise / steps - 0.4, z), Color = i % 2 == 0 and L.Trim or L.Wainscot, Material = M.SmoothPlastic, CanCollide = false})
 	end
-	Kit.wedge(model, {Name = "StairRamp", Size = Vector3.new(7, rise, run), CFrame = at(sx, yb + rise / 2, (STAIR_Z0 + STAIR_Z1) / 2), Transparency = 1})
+	Kit.wedge(model, {Name = "StairRamp", Size = Vector3.new(STAIR_W, rise, run), CFrame = at(sx, yb + rise / 2, (STAIR_Z0 + STAIR_Z1) / 2), Transparency = 1})
 	local angle = math.atan2(rise, run)
 	local railLen = math.sqrt(rise ^ 2 + run ^ 2)
-	part(model, {Name = "StairRail", Size = Vector3.new(0.4, 0.4, railLen), CFrame = at(sx + s * 3.6, yb + rise / 2 + 3, (STAIR_Z0 + STAIR_Z1) / 2) * CFrame.Angles(-angle, 0, 0), Color = L.Trim, Material = L.TrimMat})
-	part(model, {Name = "StairSide", Size = Vector3.new(0.6, 1.2, railLen), CFrame = at(sx + s * 3.6, yb + rise / 2 - 0.4, (STAIR_Z0 + STAIR_Z1) / 2) * CFrame.Angles(-angle, 0, 0), Color = accent, Material = M.SmoothPlastic})
-	part(model, {Name = "Landing", Size = Vector3.new(9.5, 1, GAP_Z2 - STAIR_Z1 + 1), CFrame = at(s * (W / 2 + 4.25), y0 + 0.5, (STAIR_Z1 + GAP_Z2) / 2), Color = L.Wainscot, Material = M.SmoothPlastic})
-	part(model, {Name = "LandingRail", Size = Vector3.new(0.4, 3.5, GAP_Z2 - STAIR_Z1 + 1), CFrame = at(s * (W / 2 + 8.8), y0 + 2.75, (STAIR_Z1 + GAP_Z2) / 2), Color = rgb(200, 230, 255), Material = M.Glass, Transparency = 0.6})
+	part(model, {Name = "StairRail", Size = Vector3.new(0.4, 0.4, railLen), CFrame = at(sx + s * (STAIR_W / 2 + 0.1), yb + rise / 2 + 3, (STAIR_Z0 + STAIR_Z1) / 2) * CFrame.Angles(-angle, 0, 0), Color = L.Trim, Material = L.TrimMat})
+	part(model, {Name = "StairSide", Size = Vector3.new(0.6, 1.2, railLen), CFrame = at(sx + s * (STAIR_W / 2 + 0.1), yb + rise / 2 - 0.4, (STAIR_Z0 + STAIR_Z1) / 2) * CFrame.Angles(-angle, 0, 0), Color = accent, Material = M.SmoothPlastic})
+	-- the landing at the top of the stairs: a glass rail down its outer side and across its far end, so nobody walks off either edge
+	local landW = LANDING_OUT + 0.5 -- it starts half a stud inside the wall
+	local landX = s * (W / 2 + (LANDING_OUT - 0.5) / 2)
+	local landLen = GAP_Z2 - STAIR_Z1 + 1
+	local landZ = (STAIR_Z1 + GAP_Z2) / 2
+	part(model, {Name = "Landing", Size = Vector3.new(landW, 1, landLen), CFrame = at(landX, y0 + 0.5, landZ), Color = L.Wainscot, Material = M.SmoothPlastic})
+	local glass = rgb(200, 230, 255)
+	part(model, {Name = "LandingRail", Size = Vector3.new(0.4, 3.5, landLen), CFrame = at(s * (W / 2 + LANDING_OUT - 0.2), y0 + 2.75, landZ), Color = glass, Material = M.Glass, Transparency = 0.6})
+	part(model, {Name = "LandingRailTop", Size = Vector3.new(0.6, 0.4, landLen), CFrame = at(s * (W / 2 + LANDING_OUT - 0.2), y0 + 4.6, landZ), Color = L.Trim, Material = L.TrimMat})
+	local endZ = GAP_Z2 + 0.3
+	part(model, {Name = "LandingRail", Size = Vector3.new(landW, 3.5, 0.4), CFrame = at(landX, y0 + 2.75, endZ), Color = glass, Material = M.Glass, Transparency = 0.6})
+	part(model, {Name = "LandingRailTop", Size = Vector3.new(landW, 0.4, 0.6), CFrame = at(landX, y0 + 4.6, endZ), Color = L.Trim, Material = L.TrimMat})
+	-- thick invisible backstops just outside both rails: a runner hitting a thin rail at full speed (240+ studs/s) bounces up over it
+	local GUARD_T, GUARD_H = 5, 34
+	part(model, {Name = "LandingGuard", Size = Vector3.new(GUARD_T, GUARD_H, landLen + GUARD_T), CFrame = at(s * (W / 2 + LANDING_OUT + GUARD_T / 2), y0 + 1 + GUARD_H / 2, landZ + GUARD_T / 2), Transparency = 1, CanQuery = false, CanTouch = false, CastShadow = false})
+	part(model, {Name = "LandingGuard", Size = Vector3.new(landW, GUARD_H, GUARD_T), CFrame = at(landX, y0 + 1 + GUARD_H / 2, GAP_Z2 + 0.5 + GUARD_T / 2), Transparency = 1, CanQuery = false, CanTouch = false, CastShadow = false})
 	if f >= 3 then
-		part(model, {Name = "LowerLanding", Size = Vector3.new(10, 1, 14), CFrame = at(s * (W / 2 + 4.5), yb - 0.5, FRONT), Color = L.Wainscot, Material = M.SmoothPlastic})
+		part(model, {Name = "LowerLanding", Size = Vector3.new(STAIR_W + 3, 1, 14), CFrame = at(s * (W / 2 + STAIR_OUT), yb - 0.5, FRONT), Color = L.Wainscot, Material = M.SmoothPlastic})
 	end
 
 	plot.FloorModels[f] = model
@@ -539,11 +577,38 @@ local function buildCase(plot, slotIndex, callbacks)
 
 	local ped = part(model, {Name = "Pedestal", Size = Vector3.new(5.5, 2, 5.5), CFrame = cf, Color = L.Pedestal, Material = M.Marble})
 	part(model, {Name = "CaseBase", Size = Vector3.new(5.9, 0.3, 5.9), CFrame = cf * CFrame.new(0, 1.15, 0), Color = accent:Lerp(Color3.new(0, 0, 0), 0.15), Material = M.SmoothPlastic})
-	-- no glass pane: any see-through part in front of them hides a case's particles, beams and trails
+	-- the case: a brass-edged frame round real panes. Plastic rather than the Glass material, which hides a game's particles
+	-- behind it: these stay see-through to effects. Each pane catches the light (reflectance), carries a couple of soft
+	-- diagonal glints and has a bright bevel down its edges, which is what makes a clear surface read as glass.
+	local PANE_H, PANE_Y = 6.4, 4.5
+	local bevel = rgb(235, 248, 255)
+	local function pane(cfPane, w)
+		part(model, {Name = "CasePane", Size = Vector3.new(w, PANE_H, 0.06), CFrame = cfPane, Color = rgb(206, 232, 244), Material = M.SmoothPlastic, Transparency = 0.86, Reflectance = 0.32, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false})
+		for _, g in ipairs({{-1.1, 0.8, 0.5}, {-0.35, 1.0, 0.24}}) do
+			part(model, {Name = "CaseGlint", Size = Vector3.new(g[3], 3.6, 0.02), CFrame = cfPane * CFrame.new(g[1], g[2], -0.05) * CFrame.Angles(0, 0, math.rad(-32)), Color = Color3.new(1, 1, 1), Material = M.SmoothPlastic, Transparency = 0.74, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false})
+		end
+		for _, s in ipairs({-1, 1}) do
+			part(model, {Name = "CaseBevel", Size = Vector3.new(0.09, PANE_H - 0.1, 0.08), CFrame = cfPane * CFrame.new(s * (w / 2 - 0.08), 0, 0), Color = bevel, Material = M.SmoothPlastic, Transparency = 0.45, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false})
+		end
+		part(model, {Name = "CaseBevel", Size = Vector3.new(w - 0.1, 0.09, 0.08), CFrame = cfPane * CFrame.new(0, PANE_H / 2 - 0.1, 0), Color = bevel, Material = M.SmoothPlastic, Transparency = 0.45, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false})
+	end
+	local INSET = 2.62
+	-- faces out from the middle of the case: each pane's local -Z looks outward
+	pane(cf * CFrame.new(-sx * INSET, PANE_Y, 0) * CFrame.Angles(0, sx * math.pi / 2, 0), 5.1)
+	pane(cf * CFrame.new(sx * INSET, PANE_Y, 0) * CFrame.Angles(0, -sx * math.pi / 2, 0), 5.1)
+	pane(cf * CFrame.new(0, PANE_Y, -INSET), 5.1)
+	pane(cf * CFrame.new(0, PANE_Y, INSET) * CFrame.Angles(0, math.pi, 0), 5.1)
+	-- the frame: corner posts on brass feet, a lower rail the panes stand in
 	for _, cx in ipairs({-2.7, 2.7}) do
 		for _, cz in ipairs({-2.7, 2.7}) do
-			part(model, {Name = "CasePost", Size = Vector3.new(0.3, 6.4, 0.3), CFrame = cf * CFrame.new(cx, 4.5, cz), Color = L.Trim, Material = M.Metal})
+			part(model, {Name = "CasePost", Size = Vector3.new(0.34, 6.4, 0.34), CFrame = cf * CFrame.new(cx, 4.5, cz), Color = L.Trim, Material = M.Metal})
+			part(model, {Name = "CaseFoot", Size = Vector3.new(0.6, 0.34, 0.6), CFrame = cf * CFrame.new(cx, 1.44, cz), Color = rgb(196, 152, 72), Material = M.Metal, CanCollide = false})
+			part(model, {Name = "CaseFoot", Size = Vector3.new(0.6, 0.3, 0.6), CFrame = cf * CFrame.new(cx, 7.55, cz), Color = rgb(196, 152, 72), Material = M.Metal, CanCollide = false})
 		end
+	end
+	for _, s in ipairs({-1, 1}) do
+		part(model, {Name = "CaseRail", Size = Vector3.new(5.2, 0.26, 0.2), CFrame = cf * CFrame.new(0, 1.42, s * 2.7), Color = rgb(196, 152, 72), Material = M.Metal, CanCollide = false})
+		part(model, {Name = "CaseRail", Size = Vector3.new(0.2, 0.26, 5.2), CFrame = cf * CFrame.new(s * 2.7, 1.42, 0), Color = rgb(196, 152, 72), Material = M.Metal, CanCollide = false})
 	end
 	local lid = part(model, {Name = "CaseLid", Size = Vector3.new(5.8, 0.3, 5.8), CFrame = cf * CFrame.new(0, 7.85, 0), Color = L.Trim, Material = M.Metal})
 	local light = Instance.new("PointLight")
@@ -617,9 +682,10 @@ function Base.setLayout(plot, floors, cases, callbacks)
 		end
 	end
 	plot.Floors, plot.Cases = floors, cases
+	Environment.quiet(plot.Model, {LaserBarrier = true, DoorBarrier = true})
 	-- keep the owner's name above the top floor so the railing never hides it
 	if plot.SignPart then
-		plot.SignPart.CFrame = plot.CF * CFrame.new(0, 20 + (floors - 1) * C.FLOOR_H + 2, FRONT)
+		plot.SignPart.CFrame = plot.CF * CFrame.new(0, baseTop(floors) + 2, FRONT)
 	end
 end
 
@@ -670,10 +736,10 @@ function Base.setPlaceholders(plot, nextKind, costText, onBuy)
 	if nextKind == "floor" then
 		local f = plot.Floors + 1
 		local s = stairSide(f)
-		local sx = s * (C.PLOT_W / 2 + 4.5)
+		local sx = s * (C.PLOT_W / 2 + STAIR_OUT)
 		local yb = floorY(f - 1) + 1
-		Kit.wedge(model, {Name = "GhostStairs", Size = Vector3.new(7, C.FLOOR_H, STAIR_Z1 - STAIR_Z0), CFrame = plot.CF * CFrame.new(sx, yb + C.FLOOR_H / 2, (STAIR_Z0 + STAIR_Z1) / 2), Color = Kit.GOLD, Material = M.ForceField, Transparency = 0.3, CanCollide = false, CanQuery = false})
-		local sign = part(model, {Name = "FloorSpot", Size = Vector3.new(7, 0.2, 6), CFrame = plot.CF * CFrame.new(sx, yb + 0.1, STAIR_Z0 - 4), Color = Kit.GOLD, Material = M.Neon, Transparency = 0.2, CanCollide = false})
+		Kit.wedge(model, {Name = "GhostStairs", Size = Vector3.new(STAIR_W, floorHeight(f - 1), STAIR_Z1 - STAIR_Z0), CFrame = plot.CF * CFrame.new(sx, yb + floorHeight(f - 1) / 2, (STAIR_Z0 + STAIR_Z1) / 2), Color = Kit.GOLD, Material = M.ForceField, Transparency = 0.3, CanCollide = false, CanQuery = false})
+		local sign = part(model, {Name = "FloorSpot", Size = Vector3.new(STAIR_W, 0.2, 6), CFrame = plot.CF * CFrame.new(sx, yb + 0.1, STAIR_Z0 - 4), Color = Kit.GOLD, Material = M.Neon, Transparency = 0.2, CanCollide = false})
 		Kit.billboard(sign, 280, 80, 6, string.format('<font color="#ffd23c">BUILD FLOOR %d</font>\n%s', f, costText), 200)
 		buyPrompt(sign, "Build floor " .. f .. " (" .. costText .. ")", "Floor " .. f, 12)
 	elseif nextKind == "tier" then
@@ -697,12 +763,32 @@ Base.SLAT_COUNT, Base.SLAT_GAP = TreadModels.SLAT_COUNT, TreadModels.SLAT_GAP
 Base.BELT_START = TreadModels.BELT_START
 Base.BELT_TOP = TreadModels.ORIGIN.Y + TreadModels.BELT_TOP -- the belt's height above the ground
 
-function Base.rebuildTreadmill(plot, level, labelText)
-	if plot.TreadModel then
-		plot.TreadModel:Destroy()
+function Base.rebuildTreadmill(plot, level, labelText, reveal)
+	local old = plot.TreadModel
+	if old and reveal then
+		-- the bought-over machine stays a moment so clients can break it apart (TreadFx)
+		old.Name = "OldTreadmill"
+		old:RemoveTag("TreadBelt")
+		for _, d in ipairs(old:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.CanCollide = false
+				d:RemoveTag("BeltSlat")
+			elseif d:IsA("Sound") then
+				d:Destroy()
+			end
+		end
+		old:AddTag("TreadOld")
+		Debris:AddItem(old, 1)
+	elseif old then
+		old:Destroy()
 	end
 	local model = Instance.new("Model")
 	model.Name = "Treadmill"
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic -- the client animates it, so it must arrive whole
+	model:SetAttribute("MachineName", TreadModels.get(level).Name)
+	if reveal then
+		model:SetAttribute("RevealAt", workspace:GetServerTimeNow())
+	end
 	plot.Slats = TreadModels.build(level, model, plot.TreadCF)
 	-- the client runs the belt from these (StealAGameClient), so the server sends nothing per frame
 	for i, slat in ipairs(plot.Slats) do
@@ -711,6 +797,7 @@ function Base.rebuildTreadmill(plot, level, labelText)
 	end
 	model:SetAttribute("BeltCF", plot.BeltCF)
 	model:SetAttribute("BeltSpeed", 0)
+	model:SetAttribute("Vacant", plot.Owner == nil) -- nobody's base: its machine stands still (TreadFx)
 	model:AddTag("TreadBelt")
 	model.Parent = plot.Model
 	plot.TreadModel = model

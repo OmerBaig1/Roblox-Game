@@ -15,7 +15,22 @@ local assets = ServerStorage:WaitForChild("EnvironmentAssets")
 ------------------------------------------------------------------
 local TREES = {{"TreeLush", 40}, {"TreePine", 30}, {"TreeBirch", 20}, {"TreeBlossom", 10}}
 local TREE_TOTAL = 100
-function Environment.tree(parent, pos, rng, frontRow)
+-- Parts nothing can touch or hit don't need to be in the physics engine's touch and query data at all, and shadows from anything
+-- tiny can't be seen. Named parts in `keep` are left alone (barriers that go solid later, touch triggers).
+function Environment.quiet(root, keep)
+	for _, p in ipairs(root:GetDescendants()) do
+		if p:IsA("BasePart") and not p.CanCollide and not (keep and keep[p.Name]) then
+			p.CanTouch = false
+			p.CanQuery = false
+			if p.CastShadow and math.max(p.Size.X, p.Size.Y, p.Size.Z) < 1.5 then
+				p.CastShadow = false
+			end
+		end
+	end
+end
+
+-- which tree comes next, by the mix above
+function Environment.pickTree(rng)
 	local roll, name = rng:NextNumber(0, TREE_TOTAL), TREES[1][1]
 	for _, t in ipairs(TREES) do
 		roll -= t[2]
@@ -24,8 +39,16 @@ function Environment.tree(parent, pos, rng, frontRow)
 			break
 		end
 	end
+	return name
+end
+-- how far a tree of this height reaches from its trunk, for keeping canopies apart
+function Environment.treeReach(name, height)
+	local s = assets[name].Size
+	return math.max(s.X, s.Z) / 2 * height / s.Y
+end
+function Environment.tree(parent, pos, rng, frontRow, name, height)
 	local tree = assets[name]:Clone()
-	tree.Size = tree.Size * (rng:NextNumber(115, 175) / tree.Size.Y)
+	tree.Size = tree.Size * (height / tree.Size.Y)
 	tree.CFrame = CFrame.new(pos + Vector3.new(0, tree.Size.Y / 2 - 1, 0)) * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
 	tree.CastShadow = frontRow -- the rows behind are mostly hidden by the first
 	tree.Parent = parent
@@ -270,7 +293,9 @@ function Environment.baseFootprint(cf, width, front, back, maxBack)
 	local function rect(a, b, material)
 		if b - a > 2 then
 			local middle = cf * Vector3.new(0, 0, (a + b) / 2)
-			lay(middle.X, middle.Z, width - 2, b - a - 2, cf.Rotation, material)
+			-- bare soil reaches past the walls: terrain cells are 4 studs, and blades from a neighbouring cell come up through the floor
+			local reach = material == M.Ground and 8 or -2
+			lay(middle.X, middle.Z, width + reach, b - a + reach, cf.Rotation, material)
 		end
 	end
 	rect(back, maxBack, M.Grass)
@@ -322,6 +347,24 @@ function Environment.ground(C, entrance, roots, rng, plots)
 				soil(d)
 			end
 		end
+	end
+	-- the vault's red carpet: bare soil well past its edge, under its stone kerb, so no blade can come up through it
+	for _, root in ipairs(roots) do
+		for _, d in ipairs(root:GetDescendants()) do
+			if d:IsA("BasePart") and d.Name == "Stage" then
+				-- the Hatchery's round stage: a disc of soil right out to its rim (the square laid above stops well short of it)
+				disc(d.Position.X, d.Position.Z, d.Size.Z / 2 + 1, M.Ground)
+			end
+		end
+	end
+	-- the vault's red carpet: bare soil out under its stone kerb, so no blade can come up through it or lean over it. The vault
+	-- isn't one of the roots (nothing else of it stands on the lawn), so it's looked up here.
+	local carpet = roots[1].Parent:FindFirstChild("Carpet", true)
+	if carpet then
+		local look = carpet.CFrame.LookVector
+		lay(carpet.Position.X, carpet.Position.Z, carpet.Size.X + 14, carpet.Size.Z + 14, CFrame.Angles(0, math.atan2(-look.X, -look.Z), 0), M.Ground)
+	else
+		warn("[Environment] no carpet found")
 	end
 	-- wildflowers, only where nothing solid or paved stands
 	local flowers = Instance.new("Folder")

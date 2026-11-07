@@ -1017,7 +1017,8 @@ local function setTreadSound(plot, on)
 	end
 end
 
-local function rebuildTreadmill(plot)
+-- reveal: the machine was just bought, so clients play the swap and the new one's name (TreadFx)
+local function rebuildTreadmill(plot, reveal)
 	local owner = plot.Owner
 	local level = owner and (owner:GetAttribute("TreadLevel") or 0) or 0
 	local name = TreadModels.get(level).Name
@@ -1027,7 +1028,8 @@ local function rebuildTreadmill(plot)
 	-- for the panel's upgrade row (display only: the Triggered handler below checks cash and level itself)
 	plot.TreadUpgradePrompt:SetAttribute("Maxed", level >= C.TREAD_MAX_LEVEL)
 	plot.TreadUpgradePrompt:SetAttribute("Cost", level < C.TREAD_MAX_LEVEL and C.treadCost(level) or 0)
-	Base.rebuildTreadmill(plot, level, string.format("%s TIER \u{00B7} %s  Lv %d\n+%s \u{1F45F}/s", string.upper(TreadModels.tier(level).Name), string.upper(name), level, rateText(C.treadGain(level))))
+	plot.TreadUpgradePrompt:SetAttribute("NextName", level < C.TREAD_MAX_LEVEL and TreadModels.get(level + 1).Name or "")
+	Base.rebuildTreadmill(plot, level, string.format("%s\n%s TIER \u{00B7} +%s \u{1F45F}/s", string.upper(name), string.upper(TreadModels.tier(level).Name), rateText(C.treadGain(level))), reveal)
 	if plot.Runner then
 		setTreadSound(plot, true)
 	end
@@ -1134,7 +1136,7 @@ for i, cf in ipairs(world.PlotCFrames) do
 		end
 		cash.Value -= cost
 		player:SetAttribute("TreadLevel", level + 1)
-		rebuildTreadmill(plot)
+		rebuildTreadmill(plot, true)
 		notify(player, "Unlocked the " .. TreadModels.get(level + 1).Name .. " treadmill! Now +" .. rateText(C.treadGain(level + 1)) .. " speed every second", BLUE)
 	end)
 
@@ -1205,15 +1207,23 @@ local function guardCard(g, adornee, offsetY)
 	local accent = C.LEVELS[g.Level].Accent
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "GuardCard"
-	bb.Size = UDim2.fromScale(s * 6.2, s * 2.1)
-	bb.StudsOffset = Vector3.new(0, offsetY + s * 1.05, 0)
+	-- studs from the guard's size (capped so a giant's card still fits the hall), plus a fixed part in pixels so it stays
+	-- readable from a distance and on small screens
+	local cardS = math.min(s, 5)
+	bb.Size = UDim2.new(cardS * 6, 150, cardS * 2.6, 68)
+	-- its bottom edge sits just over the head, whatever size it's drawn at: part of the size is in pixels, so it can't be centred
+	bb.StudsOffset = Vector3.new(0, offsetY + 0.5, 0)
+	bb.SizeOffset = Vector2.new(0, 0.5)
 	bb.LightInfluence = 0
-	bb.MaxDistance = 260
+	-- drawn on top, so a wall beside the guard or its own weapon can't cut it off; a level is about 245 studs long, so this
+	-- range also keeps the cards of the levels further down the hall from piling up on it
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 220
 	bb.Adornee = adornee
 	local back = Instance.new("Frame")
 	back.AnchorPoint = Vector2.new(0.5, 0)
 	back.Position = UDim2.fromScale(0.5, 0)
-	back.Size = UDim2.fromScale(1, 0.74)
+	back.Size = UDim2.fromScale(1, 0.68)
 	back.BackgroundColor3 = Color3.fromRGB(16, 14, 24)
 	back.BackgroundTransparency = 0.25
 	back.Parent = bb
@@ -1239,20 +1249,20 @@ local function guardCard(g, adornee, offsetY)
 		t.Parent = parent
 		return t
 	end
-	local name = text(back, UDim2.fromScale(0.5, 0.36), UDim2.fromScale(0.92, 0.5), string.upper(g.Name), accent:Lerp(Color3.new(1, 1, 1), 0.35))
-	text(back, UDim2.fromScale(0.5, 0.78), UDim2.fromScale(0.86, 0.3), string.upper(g.Title), Color3.fromRGB(225, 225, 235))
+	local name = text(back, UDim2.fromScale(0.5, 0.37), UDim2.fromScale(0.94, 0.54), string.upper(g.Name), accent:Lerp(Color3.new(1, 1, 1), 0.35))
+	text(back, UDim2.fromScale(0.5, 0.8), UDim2.fromScale(0.9, 0.3), string.upper(g.Title), Color3.fromRGB(225, 225, 235))
 	-- the speed chip hangs under the card
 	local chip = Instance.new("Frame")
 	chip.AnchorPoint = Vector2.new(0.5, 0)
-	chip.Position = UDim2.fromScale(0.5, 0.78)
-	chip.Size = UDim2.fromScale(0.62, 0.22)
+	chip.Position = UDim2.fromScale(0.5, 0.7)
+	chip.Size = UDim2.fromScale(1, 0.3)
 	chip.BackgroundColor3 = Color3.fromRGB(16, 14, 24)
 	chip.BackgroundTransparency = 0.25
 	chip.Parent = bb
 	local cc = corner:Clone()
 	cc.CornerRadius = UDim.new(0.5, 0)
 	cc.Parent = chip
-	text(chip, UDim2.fromScale(0.5, 0.5), UDim2.fromScale(0.9, 0.8), 'RECOMMENDED SPEED  <font color="#78ff8c">\u{1F45F} ' .. Kit.fmt(g.MustBeat) .. "</font>", Color3.fromRGB(200, 200, 220))
+	text(chip, UDim2.fromScale(0.5, 0.5), UDim2.fromScale(0.94, 0.84), 'RECOMMENDED SPEED  <font color="#78ff8c">\u{1F45F} ' .. Kit.fmt(g.MustBeat) .. "</font>", Color3.fromRGB(225, 225, 240))
 	bb.Parent = adornee
 	return name
 end
@@ -1287,7 +1297,8 @@ for level = 1, C.NUM_LEVELS do
 		if head then
 			for _, p in ipairs(model:GetDescendants()) do
 				local d = p:IsA("BasePart") and p.Position - head.Position
-				if d and Vector3.new(d.X, 0, d.Z).Magnitude < head.Size.X then
+				-- (a war banner on the back is scenery, not a hat: the card would end up far over his head)
+				if d and not p.Name:find("^Gear_Banner") and Vector3.new(d.X, 0, d.Z).Magnitude < head.Size.X then
 					-- largest side, since hats like the shako are cylinders turned upright
 					top = math.max(top, d.Y + math.max(p.Size.X, p.Size.Y, p.Size.Z) / 2)
 				end
@@ -2253,7 +2264,7 @@ local function grantProduct(player, key)
 		if level < C.TREAD_MAX_LEVEL then
 			player:SetAttribute("TreadLevel", level + 1)
 			if plot then
-				rebuildTreadmill(plot)
+				rebuildTreadmill(plot, true)
 			end
 		end
 		notify(player, "Unlocked the " .. TreadModels.get(player:GetAttribute("TreadLevel") or 0).Name .. " treadmill!", GOLD)
@@ -2759,6 +2770,11 @@ local fuseModel, fusePrompt = FuseMachine.build(Kit, workspace.StealAGameMap:Fin
 do
 	local map = workspace.StealAGameMap
 	require(script.Environment).ground(C, Vector3.new(0, 0, C.HALL_START_Z), {map.Lobby, world.BasesFolder}, Random.new(4242), plots)
+	-- last of all, once the flowers have checked what stands where: decoration leaves the physics engine's touch and query data
+	local quiet = require(script.Environment).quiet
+	quiet(map.Lobby, {InviteTouch = true})
+	quiet(map.Vault)
+	quiet(world.BasesFolder, {LaserBarrier = true, DoorBarrier = true})
 end
 local fuseFunction = Kit.func("FuseGames")
 local openFuseEvent = Kit.event("OpenFuse")
@@ -2980,6 +2996,7 @@ local function collectSave(player)
 		Cash = player.leaderstats.Cash.Value,
 		SpeedPoints = player:GetAttribute("SpeedPoints") or C.START_SPEED,
 		TreadLevel = player:GetAttribute("TreadLevel") or 0,
+		TreadVersion = C.TREAD_SAVE_VERSION,
 		Upgrades = data.Upgrades or 0,
 		Bank = plot and plot.Bank or 0,
 		Games = games,
@@ -3437,7 +3454,11 @@ local function onPlayerAdded(player)
 		if type(saved) == "table" then
 			cash.Value = tonumber(saved.Cash) or C.START_CASH
 			player:SetAttribute("SpeedPoints", math.max(C.START_SPEED, tonumber(saved.SpeedPoints) or C.START_SPEED))
-			player:SetAttribute("TreadLevel", math.clamp(math.floor(tonumber(saved.TreadLevel) or 0), 0, C.TREAD_MAX_LEVEL))
+			local treadLevel = math.floor(tonumber(saved.TreadLevel) or 0)
+			if saved.TreadVersion ~= C.TREAD_SAVE_VERSION then
+				treadLevel = C.treadLevelFromOld(math.clamp(treadLevel, 0, 40))
+			end
+			player:SetAttribute("TreadLevel", math.clamp(treadLevel, 0, C.TREAD_MAX_LEVEL))
 			playerData[player].Upgrades = math.clamp(math.floor(tonumber(saved.Upgrades) or 0), 0, C.MAX_UPGRADES)
 			if type(saved.Trails) == "table" then
 				player:SetAttribute("TrailsOwned", HttpService:JSONEncode(saved.Trails))
@@ -3891,7 +3912,7 @@ task.spawn(function()
 			-- the belt's speed, for the clients that animate it: faster every treadmill level (6 to 16 studs/s), kept under the
 			-- speed where the slats seem to strobe. Here, so a machine rebuilt by an upgrade picks it up.
 			if plot.TreadModel then
-				plot.TreadModel:SetAttribute("BeltSpeed", plot.Runner and 6 + 0.25 * (plot.Runner:GetAttribute("TreadLevel") or 0) or 0)
+				plot.TreadModel:SetAttribute("BeltSpeed", plot.Runner and 6 + 10 * (plot.Runner:GetAttribute("TreadLevel") or 0) / C.TREAD_MAX_LEVEL or 0)
 			end
 			-- Lock timer (see refreshLock): settled every second, which also picks up chases starting and ending
 			refreshLock(plot)

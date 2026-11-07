@@ -932,31 +932,30 @@ local function drawBack(root, name)
 	label(sheet, {Position = UDim2.fromScale(0.64, 0.94), Size = UDim2.fromScale(0.31, 0.02), Text = plat.Code .. "-" .. string.format("%05d", h % 100000), Font = F.RobotoMono, TextColor3 = plat.Muted})
 end
 
-function CP.dress(item, rec, hidden)
+-- The server only marks a case with what's printed on it (replicating every cover's hundreds of UI objects to every player was
+-- about a quarter of the world). StarterPlayerScripts.CaseArt draws the printing for the cases near each player's camera:
+-- dressFront from a distance, dressNear (back cover, spines) up close.
+local IS_SERVER = game:GetService("RunService"):IsServer()
+function CP.clearArt(item, near)
 	for _, child in ipairs(item:GetChildren()) do
-		if child:IsA("SurfaceGui") and child.Name == "Poster" then
+		if child:IsA("SurfaceGui") and child.Name == "Poster" and (not near or child.Face ~= Enum.NormalId.Front) then
 			child:Destroy()
 		end
 	end
+end
+function CP.dressFront(item, rec, hidden)
+	drawFront(surface(item, Enum.NormalId.Front, 50), rec, {hidden = hidden})
+end
+function CP.dressNear(item, rec)
 	local name = rec.Name
 	local g = CP.info(name)
 	local plat = PLATFORMS[g.Platform]
-	drawFront(surface(item, Enum.NormalId.Front, 50), rec, {hidden = hidden})
-
-	local back = surface(item, Enum.NormalId.Back, 100)
-	pcall(function()
-		back.MaxDistance = 70 -- small print: nobody can read it from further away anyway
-	end)
-	drawBack(back, name)
-
+	drawBack(surface(item, Enum.NormalId.Back, 100), name)
 	-- SPINES: a printed strip with the console band, the title up the side and the rating at the foot
 	local size = item.Size
 	local ink = luminance(plat.Paper) > 0.6 and rgb(30, 30, 40) or W
 	for _, face in ipairs({Enum.NormalId.Left, Enum.NormalId.Right}) do
 		local spine = surface(item, face, 50)
-		pcall(function()
-			spine.MaxDistance = 90
-		end)
 		frame(spine, {Size = UDim2.fromScale(1, 1), BackgroundColor3 = plat.Plastic})
 		frame(spine, {Position = UDim2.fromScale(0.1, 0.02), Size = UDim2.fromScale(0.8, 0.11), BackgroundColor3 = plat.Band})
 		local strip = frame(spine, {Position = UDim2.fromScale(0.1, 0.14), Size = UDim2.fromScale(0.8, 0.84), BackgroundColor3 = plat.Paper})
@@ -964,6 +963,20 @@ function CP.dress(item, rec, hidden)
 			Text = name, Font = F.GothamBlack, TextColor3 = ink})
 		label(strip, {AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 0.98), Size = UDim2.fromScale(0.9, 0.08), Text = g.Rating, Font = F.GothamBlack, TextColor3 = plat.Accent})
 	end
+end
+function CP.dress(item, rec, hidden)
+	if IS_SERVER then
+		item:SetAttribute("ArtName", rec.Name)
+		item:SetAttribute("ArtRarity", rec.Rarity)
+		item:SetAttribute("ArtColor", rec.Color)
+		item:SetAttribute("ArtHidden", hidden == true)
+		item:SetAttribute("ArtRev", (item:GetAttribute("ArtRev") or 0) + 1) -- a client draws it again if it's already showing
+		item:AddTag("CaseArt")
+		return
+	end
+	CP.clearArt(item)
+	CP.dressFront(item, rec, hidden)
+	CP.dressNear(item, rec)
 end
 
 ------------------------------------------------------------------

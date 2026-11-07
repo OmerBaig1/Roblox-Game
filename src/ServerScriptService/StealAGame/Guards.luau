@@ -99,10 +99,10 @@ Guards.ROSTER = {
 		Concept = "A silent assassin who draws the katana from his back and runs you down with it",
 		Silhouette = "tall, lean, low run, one katana sheathed across the back",
 		Face = "masked, only fierce eyes showing", Palette = "dark navy wraps, red sash"},
-	{Key = "oni", Name = "Taiho", Title = "Oni Samurai", Size = 1.40, Step = 0.28, Laugh = laugh(9125650858, 0.7, 3.2),
-		Concept = "A horned red demon in samurai armour who stomps the ground flat",
-		Silhouette = "massive, horned, armoured shoulders, spiked club",
-		Face = "red skin, fangs, wild white mane, two horns", Palette = "red skin, black lacquered armour"},
+	{Key = "oni", Name = "Taiho", Title = "Oni Samurai", Size = 1.38, Step = 0.28, Laugh = laugh(9125650858, 0.7, 3.2),
+		Concept = "A towering red demon general in samurai armour, war banner on his back, who stomps the ground flat",
+		Silhouette = "huge, horned kabuto, layered shoulder plates, tall war banner, iron-studded kanabo gripped in his right fist",
+		Face = "furious red oni face, burning yellow eyes, fangs, gold-crested helmet", Palette = "red skin, black and iron armour, gold trim, crimson banner"},
 	-- 8 ROBOT FACTORY
 	{Key = "sb9000", Name = "SB-9000", Title = "Security Mech", Size = 1.19, Step = 0, Laugh = laugh(100272190583394, 1), -- user upload
 		Concept = "An industrial security mech that moves in exact, ticking steps",

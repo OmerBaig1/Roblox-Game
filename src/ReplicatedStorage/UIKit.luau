@@ -868,10 +868,14 @@ function UI.tileButton(props)
 		end)
 		paint()
 	end)
+	local lastDraw = 0
 	RunService.RenderStepped:Connect(function()
 		if not UI.shown(btn) then return end
 		local t = os.clock()
 		local hot = st.Hover or st.Active
+		-- each move redraws the tile's little 3D scene: 30 times a second is plenty unless you're pointing at it
+		if not hot and t - lastDraw < 1 / 30 then return end
+		lastDraw = t
 		orbit.Rotation = (t * (hot and 110 or 45)) % 360
 		local spin = style.Animate(t, hot, model)
 		for p, cf in pairs(parts) do

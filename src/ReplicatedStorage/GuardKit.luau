@@ -804,9 +804,9 @@ Gait = function(p, ph, s)
 
 -- 14 Taiho, the Oni Samurai: an armoured giant at full charge. Every stride carries weight: the planted leg takes it
 -- and the whole body drops and rolls over that foot, then drives forward off it; armoured shoulders swing against the
--- hips, the free arm pumps hard, the club stays high in his right fist, the head low and thrust forward. At rest: a
--- wide planted stance, club held ready, huge slow breaths. The grab is an overhead club slam; he laughs with the club raised.
-M.oni = {Stride = 6.6, Stomp = {Rings = {Color3.fromRGB(150, 110, 90)}, RingSize = 5},
+-- hips, the free arm pumps hard, the kanabo stays cocked over his shoulder in his right fist, the head low and thrust forward. At
+-- rest: a wide planted stance, kanabo held ready across his body, huge slow breaths. The grab is an overhead club slam; he laughs with the club raised.
+M.oni = {Stride = 7.6, Stomp = {Rings = {Color3.fromRGB(150, 110, 90)}, RingSize = 5},
 	-- when a chase starts he roars: the club goes up, the head goes back
 	Taunt = function(p, a)
 		local k = ease(a / 0.2) * (1 - ease((a - 0.72) / 0.18))
@@ -818,29 +818,26 @@ M.oni = {Stride = 6.6, Stomp = {Rings = {Color3.fromRGB(150, 110, 90)}, RingSize
 		p.LH, p.RH = V(0.1 * k, 0, -0.18), V(-0.1 * k, 0, 0.18)
 	end,
 Gait = function(p, ph, s)
-		-- the war march: nothing like a run. Enormous, wide, stiff-legged strides with the whole armoured body heaving from
-		-- side to side over each planted foot, shoulders swinging, head thrust low and locked on you and never moving with
-		-- the rest of him. The kanabo is held high overhead, rocking with every stomp, the free arm clawing at the air ahead
+		-- a heavy armoured run: real knee drive and a planted foot under a low, forward-leaning body that barely rolls. The free arm pumps, the
+		-- kanabo is carried across his body in a bent arm with its head up over his shoulder and bounces with each stride
 		local r = s.Run
 		local a = sin(ph)
-		p.LH = V(0.62 * a * r, 0, -0.2)
-		p.RH = V(-0.62 * a * r, 0, 0.2)
-		p.Root = V(-0.36 * r, 0.24 * a * r, 0.2 * a * r)
-		p.Neck = V(0.32 * r, -0.24 * a * r, -0.2 * a * r)
-		p.RS = V(2.55 + 0.16 * a * r, 0, 0.24)
-		p.RE = 0.35
-		p.LS = V(0.95 - 0.5 * a * r, 0, -0.32)
-		p.LE = 0.35 - 0.2 * a * r
-		-- planted hard on each foot, heaved up between them
-		p.Off = V(0, 0.2 * r * cos(ph) ^ 2, 0)
+		run(p, ph, r, {Hip = 0.62, Knee = 1.15, KneeBase = 0.26, Arm = 0.55, ArmBase = 0.28, Out = 0.3, Elbow = 1.05, ElbowSwing = 0.25, Lean = 0.26, Twist = 0.09, Roll = 0.035, Bounce = 0.1, Spread = 0.09, Head = 0.2})
+		p.RS = V(0.42 + 0.07 * a * r, 0, 0.14)
+		p.RE = 1.15 + 0.05 * a * r
 	end,
 Idle = function(p, t)
-		p.LH, p.RH = V(0, 0, -0.18), V(0, 0, 0.18)
-		p.RS = V(0.05 + 0.02 * sin(t * 0.9), 0, 0.02)
-		p.LS = V(0.15, 0, -0.18)
-		p.Root = V(-0.08, 0, 0)
+		-- planted wide, chest out, the kanabo held ready across his body with its head high; the free fist hangs clenched.
+		-- Slow heavy breathing, and the head low, glaring out from under the helmet as it sweeps the hall.
+		local b = sin(t * 0.9)
+		p.LH, p.RH = V(0.05, 0, -0.24), V(-0.05, 0, 0.24)
+		p.RS = V(0.62 + 0.03 * b, 0, -0.1)
+		p.RE = 0.95 + 0.03 * b
+		p.LS = V(0.16 + 0.02 * b, 0, -0.3)
+		p.LE = 0.32
+		p.Root = V(-0.06, 0, 0)
 		breathe(p, t, 2.2, 0.8)
-		p.Neck += V(0.12, 0, 0)
+		p.Neck += V(0.16, 0, 0)
 		scan(p, t, 0.35, 14)
 	end,
 	Grab = function(p, a)
